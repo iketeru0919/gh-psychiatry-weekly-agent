@@ -77,6 +77,22 @@
     .no-facilities { color: #aaa; font-size: 0.9rem; font-style: italic; }
 
     .hint { font-size: 0.8rem; color: #999; margin-top: 6px; }
+
+    .list-panels { display: flex; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
+    .list-panel { flex: 1; min-width: 200px; border-radius: 8px; border: 1px solid #e0e0e0; overflow: hidden; }
+    .list-panel-header { display: flex; justify-content: space-between; align-items: center;
+                         padding: 8px 12px; font-size: 0.85rem; font-weight: 600; }
+    .panel-ok .list-panel-header { background: #e8f7ee; color: #27ae60; }
+    .panel-ng .list-panel-header { background: #fdecea; color: #e74c3c; }
+    .list-body { padding: 10px 14px; font-size: 0.88rem; line-height: 1.8;
+                 background: #fff; white-space: pre-wrap; min-height: 40px; color: #333; }
+    .btn-copy { background: none; border: 1px solid currentColor; border-radius: 4px;
+                cursor: pointer; font-size: 0.75rem; padding: 2px 8px; opacity: 0.8; }
+    .btn-copy:hover { opacity: 1; }
+    .copy-toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+                  background: #333; color: #fff; padding: 8px 20px; border-radius: 20px;
+                  font-size: 0.85rem; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
+    .copy-toast.show { opacity: 1; }
   </style>
 </head>
 <body>
@@ -132,6 +148,25 @@
         <div class="label">報告なし（未報告）</div>
       </div>
     </div>
+
+    <!-- 報告あり／未報告リスト -->
+    <div class="list-panels">
+      <div class="list-panel panel-ok">
+        <div class="list-panel-header">
+          <span>✓ 報告あり施設</span>
+          <button class="btn-copy" onclick="copyList('ok')" title="コピー">📋 コピー</button>
+        </div>
+        <div class="list-body" id="okList">—</div>
+      </div>
+      <div class="list-panel panel-ng">
+        <div class="list-panel-header">
+          <span>✗ 未報告施設</span>
+          <button class="btn-copy" onclick="copyList('ng')" title="コピー">📋 コピー</button>
+        </div>
+        <div class="list-body" id="ngList">—</div>
+      </div>
+    </div>
+
     <table>
       <thead>
         <tr>
@@ -144,6 +179,7 @@
     </table>
   </section>
 </div>
+<div class="copy-toast" id="copyToast">コピーしました</div>
 
 <script>
   const STORAGE_KEY = 'rachiel_facilities';
@@ -251,6 +287,12 @@
     document.getElementById('okCount').textContent = okList.length;
     document.getElementById('ngCount').textContent = ngList.length;
 
+    // リストパネル更新
+    document.getElementById('okList').textContent =
+      okList.length > 0 ? okList.map(r => r.name).join('\n') : '（なし）';
+    document.getElementById('ngList').textContent =
+      ngList.length > 0 ? ngList.map(r => r.name).join('\n') : '（なし）';
+
     const tbody = document.getElementById('resultBody');
     tbody.innerHTML = '';
 
@@ -280,6 +322,18 @@
   function clearText() {
     document.getElementById('chatText').value = '';
     document.getElementById('results').style.display = 'none';
+    document.getElementById('okList').textContent = '—';
+    document.getElementById('ngList').textContent = '—';
+  }
+
+  function copyList(type) {
+    const el = document.getElementById(type === 'ok' ? 'okList' : 'ngList');
+    const text = el.textContent;
+    navigator.clipboard.writeText(text).then(() => {
+      const toast = document.getElementById('copyToast');
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 1800);
+    });
   }
 
   function escHtml(s) {
