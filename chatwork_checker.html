@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ラシエル チャット報告チェッカー</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Helvetica Neue', Arial, sans-serif; background: #f5f7fa; color: #333; }
+
+    .container { max-width: 900px; margin: 0 auto; padding: 24px 16px; }
+
+    h1 { font-size: 1.4rem; font-weight: 700; color: #2c3e50; margin-bottom: 24px; }
+
+    section { background: #fff; border-radius: 8px; padding: 20px; margin-bottom: 20px;
+              box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+
+    section h2 { font-size: 0.95rem; font-weight: 600; color: #555; margin-bottom: 12px;
+                 padding-bottom: 8px; border-bottom: 1px solid #eee; }
+
+    .facility-list { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+
+    .facility-tag { display: flex; align-items: center; gap: 6px; background: #eef3ff;
+                    border: 1px solid #c3d0f5; border-radius: 20px; padding: 4px 10px 4px 14px;
+                    font-size: 0.85rem; }
+
+    .facility-tag button { background: none; border: none; cursor: pointer; color: #888;
+                           font-size: 1rem; line-height: 1; padding: 0; }
+    .facility-tag button:hover { color: #e74c3c; }
+
+    .add-facility { display: flex; gap: 8px; }
+    .add-facility input { flex: 1; padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px;
+                          font-size: 0.9rem; }
+    .add-facility input:focus { outline: none; border-color: #5b7cfa; }
+
+    button.btn { padding: 8px 18px; background: #5b7cfa; color: #fff; border: none;
+                 border-radius: 6px; cursor: pointer; font-size: 0.9rem; font-weight: 600; }
+    button.btn:hover { background: #4a6cf0; }
+    button.btn-secondary { background: #eee; color: #555; }
+    button.btn-secondary:hover { background: #ddd; }
+
+    textarea { width: 100%; height: 220px; padding: 12px; border: 1px solid #ddd;
+               border-radius: 6px; font-size: 0.85rem; line-height: 1.6; resize: vertical;
+               font-family: monospace; }
+    textarea:focus { outline: none; border-color: #5b7cfa; }
+
+    .actions { display: flex; gap: 10px; margin-top: 12px; }
+
+    #results { display: none; }
+
+    .summary { display: flex; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
+    .summary-card { flex: 1; min-width: 120px; border-radius: 8px; padding: 14px 18px;
+                    text-align: center; }
+    .summary-card .num { font-size: 2rem; font-weight: 700; line-height: 1; }
+    .summary-card .label { font-size: 0.78rem; margin-top: 4px; opacity: 0.85; }
+    .card-ok { background: #e8f7ee; color: #27ae60; }
+    .card-ng { background: #fdecea; color: #e74c3c; }
+    .card-total { background: #eef3ff; color: #5b7cfa; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    th { text-align: left; padding: 10px 12px; background: #f7f9fc; color: #666;
+         font-weight: 600; border-bottom: 2px solid #e8e8e8; }
+    td { padding: 10px 12px; border-bottom: 1px solid #f0f0f0; vertical-align: top; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #fafbff; }
+
+    .status-ok { display: inline-block; background: #e8f7ee; color: #27ae60;
+                 border-radius: 12px; padding: 2px 10px; font-size: 0.8rem; font-weight: 600; }
+    .status-ng { display: inline-block; background: #fdecea; color: #e74c3c;
+                 border-radius: 12px; padding: 2px 10px; font-size: 0.8rem; font-weight: 600; }
+
+    .mentions { font-size: 0.82rem; color: #666; max-width: 400px; }
+    .mention-item { background: #f7f9fc; border-left: 3px solid #c3d0f5;
+                    padding: 4px 8px; margin-top: 4px; border-radius: 0 4px 4px 0;
+                    white-space: pre-wrap; word-break: break-all; }
+
+    .no-facilities { color: #aaa; font-size: 0.9rem; font-style: italic; }
+
+    .hint { font-size: 0.8rem; color: #999; margin-top: 6px; }
+
+    .list-panels { display: flex; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
+    .list-panel { flex: 1; min-width: 200px; border-radius: 8px; border: 1px solid #e0e0e0; overflow: hidden; }
+    .list-panel-header { display: flex; justify-content: space-between; align-items: center;
+                         padding: 8px 12px; font-size: 0.85rem; font-weight: 600; }
+    .panel-ok .list-panel-header { background: #e8f7ee; color: #27ae60; }
+    .panel-ng .list-panel-header { background: #fdecea; color: #e74c3c; }
+    .list-body { padding: 10px 14px; font-size: 0.88rem; line-height: 1.8;
+                 background: #fff; white-space: pre-wrap; min-height: 40px; color: #333; }
+    .btn-copy { background: none; border: 1px solid currentColor; border-radius: 4px;
+                cursor: pointer; font-size: 0.75rem; padding: 2px 8px; opacity: 0.8; }
+    .btn-copy:hover { opacity: 1; }
+    .copy-toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+                  background: #333; color: #fff; padding: 8px 20px; border-radius: 20px;
+                  font-size: 0.85rem; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
+    .copy-toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>ラシエル チャット報告チェッカー</h1>
+
+  <!-- 施設名設定 -->
+  <section>
+    <h2>チェック対象の施設名</h2>
+    <div class="facility-list" id="facilityList">
+      <span class="no-facilities" id="emptyMsg">施設名がまだ登録されていません</span>
+    </div>
+    <div class="add-facility">
+      <input type="text" id="facilityInput" placeholder="例：ラシエル渋谷" />
+      <button class="btn" onclick="addFacility()">追加</button>
+    </div>
+    <p class="hint">登録した施設名はブラウザに保存されます。</p>
+  </section>
+
+  <!-- テキスト入力 -->
+  <section>
+    <h2>チャットワーク テキストを貼り付け</h2>
+    <textarea id="chatText" placeholder="チャットワークからコピーしたテキストをここに貼り付けてください。
+
+例：
+2024/01/05 09:00
+田中太郎
+ラシエル渋谷の週次報告です。今週は...
+
+2024/01/05 09:15
+山田花子
+ラシエル新宿より報告します。今週は..."></textarea>
+    <div class="actions">
+      <button class="btn" onclick="checkReports()">チェック実行</button>
+      <button class="btn btn-secondary" onclick="clearText()">クリア</button>
+    </div>
+  </section>
+
+  <!-- 結果 -->
+  <section id="results">
+    <h2>チェック結果</h2>
+    <div class="summary">
+      <div class="summary-card card-total">
+        <div class="num" id="totalCount">0</div>
+        <div class="label">チェック対象施設数</div>
+      </div>
+      <div class="summary-card card-ok">
+        <div class="num" id="okCount">0</div>
+        <div class="label">報告あり</div>
+      </div>
+      <div class="summary-card card-ng">
+        <div class="num" id="ngCount">0</div>
+        <div class="label">報告なし（未報告）</div>
+      </div>
+    </div>
+
+    <!-- 報告あり／未報告リスト -->
+    <div class="list-panels">
+      <div class="list-panel panel-ok">
+        <div class="list-panel-header">
+          <span>✓ 報告あり施設</span>
+          <button class="btn-copy" onclick="copyList('ok')" title="コピー">📋 コピー</button>
+        </div>
+        <div class="list-body" id="okList">—</div>
+      </div>
+      <div class="list-panel panel-ng">
+        <div class="list-panel-header">
+          <span>✗ 未報告施設</span>
+          <button class="btn-copy" onclick="copyList('ng')" title="コピー">📋 コピー</button>
+        </div>
+        <div class="list-body" id="ngList">—</div>
+      </div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>施設名</th>
+          <th>報告状況</th>
+          <th>該当メッセージ</th>
+        </tr>
+      </thead>
+      <tbody id="resultBody"></tbody>
+    </table>
+  </section>
+</div>
+<div class="copy-toast" id="copyToast">コピーしました</div>
+
+<script>
+  const STORAGE_KEY = 'rachiel_facilities';
+
+  // --- 施設名管理 ---
+  function loadFacilities() {
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; }
+    catch { return []; }
+  }
+
+  function saveFacilities(list) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+  }
+
+  function renderFacilities() {
+    const list = loadFacilities();
+    const container = document.getElementById('facilityList');
+    const emptyMsg = document.getElementById('emptyMsg');
+
+    // タグ要素を再構築
+    Array.from(container.querySelectorAll('.facility-tag')).forEach(el => el.remove());
+
+    if (list.length === 0) {
+      emptyMsg.style.display = '';
+    } else {
+      emptyMsg.style.display = 'none';
+      list.forEach((name, i) => {
+        const tag = document.createElement('div');
+        tag.className = 'facility-tag';
+        tag.innerHTML = `<span>${escHtml(name)}</span><button title="削除" onclick="removeFacility(${i})">×</button>`;
+        container.appendChild(tag);
+      });
+    }
+  }
+
+  function addFacility() {
+    const input = document.getElementById('facilityInput');
+    const name = input.value.trim();
+    if (!name) return;
+    const list = loadFacilities();
+    if (list.includes(name)) { input.value = ''; return; }
+    list.push(name);
+    saveFacilities(list);
+    renderFacilities();
+    input.value = '';
+  }
+
+  function removeFacility(index) {
+    const list = loadFacilities();
+    list.splice(index, 1);
+    saveFacilities(list);
+    renderFacilities();
+  }
+
+  document.getElementById('facilityInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') addFacility();
+  });
+
+  // --- 施設名が含まれる行の前後コンテキストを抽出 ---
+  function extractSnippets(text, facilityName) {
+    const lines = text.split('\n');
+    const snippets = [];
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].includes(facilityName)) {
+        // 前2行〜後2行を含むスニペット
+        const start = Math.max(0, i - 2);
+        const end = Math.min(lines.length - 1, i + 2);
+        const snippet = lines.slice(start, end + 1).join('\n').trim();
+        // 重複スニペット排除（前のスニペットと重なる場合はスキップ）
+        if (snippets.length === 0 || !snippets[snippets.length - 1].includes(lines[i])) {
+          snippets.push(snippet);
+        }
+        if (snippets.length >= 3) break; // 最大3件表示
+      }
+    }
+    return snippets;
+  }
+
+  // --- チェック実行 ---
+  function checkReports() {
+    const facilities = loadFacilities();
+    if (facilities.length === 0) {
+      alert('施設名を先に登録してください。');
+      return;
+    }
+
+    const text = document.getElementById('chatText').value;
+    if (!text.trim()) {
+      alert('チャットワークのテキストを貼り付けてください。');
+      return;
+    }
+
+    // 施設ごとにテキスト全体を検索
+    const result = facilities.map(name => {
+      const found = text.includes(name);
+      const snippets = found ? extractSnippets(text, name) : [];
+      return { name, found, snippets };
+    });
+
+    // 表示
+    const okList = result.filter(r => r.found);
+    const ngList = result.filter(r => !r.found);
+
+    document.getElementById('totalCount').textContent = facilities.length;
+    document.getElementById('okCount').textContent = okList.length;
+    document.getElementById('ngCount').textContent = ngList.length;
+
+    // リストパネル更新
+    document.getElementById('okList').textContent =
+      okList.length > 0 ? okList.map(r => r.name).join('\n') : '（なし）';
+    document.getElementById('ngList').textContent =
+      ngList.length > 0 ? ngList.map(r => r.name).join('\n') : '（なし）';
+
+    const tbody = document.getElementById('resultBody');
+    tbody.innerHTML = '';
+
+    // 未報告を上に表示
+    [...ngList, ...okList].forEach(r => {
+      const tr = document.createElement('tr');
+      const statusHtml = r.found
+        ? '<span class="status-ok">✓ 報告あり</span>'
+        : '<span class="status-ng">✗ 未報告</span>';
+
+      let mentionsHtml = '—';
+      if (r.found && r.snippets.length > 0) {
+        const items = r.snippets.map(s =>
+          `<div class="mention-item">${escHtml(s)}</div>`
+        ).join('');
+        mentionsHtml = `<div class="mentions">${items}</div>`;
+      }
+
+      tr.innerHTML = `<td><strong>${escHtml(r.name)}</strong></td><td>${statusHtml}</td><td>${mentionsHtml}</td>`;
+      tbody.appendChild(tr);
+    });
+
+    document.getElementById('results').style.display = 'block';
+    document.getElementById('results').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function clearText() {
+    document.getElementById('chatText').value = '';
+    document.getElementById('results').style.display = 'none';
+    document.getElementById('okList').textContent = '—';
+    document.getElementById('ngList').textContent = '—';
+  }
+
+  function copyList(type) {
+    const el = document.getElementById(type === 'ok' ? 'okList' : 'ngList');
+    const text = el.textContent;
+    navigator.clipboard.writeText(text).then(() => {
+      const toast = document.getElementById('copyToast');
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 1800);
+    });
+  }
+
+  function escHtml(s) {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function truncate(s, n) {
+    return s.length > n ? s.slice(0, n) + '…' : s;
+  }
+
+  // デフォルト施設リスト（初回起動時のみ登録）
+  const DEFAULT_FACILITIES = [
+    '石巻','岩沼','名取','南館','上溝','宮下','福田','南中丸','春日部','沼津',
+    '谷田','おきつ','上西郷','高丘','萩丘','西浅田','八幡','石清水','南彦根',
+    '南志賀','舞多聞','加茂','白浜町','仁豊野','下手野','御所','和歌山','阪南',
+    '平井','柳井','高知','南部町','昇町','宇城','西宮今津','美田園','三蔵子',
+    '宇都宮','清新','川花','気賀'
+  ];
+
+  if (loadFacilities().length === 0) {
+    saveFacilities(DEFAULT_FACILITIES);
+  }
+
+  // 初期化
+  renderFacilities();
+</script>
+</body>
+</html>
