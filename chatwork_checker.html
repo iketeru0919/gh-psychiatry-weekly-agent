@@ -202,43 +202,24 @@
     if (e.key === 'Enter') addFacility();
   });
 
-  // --- チャットワーク パース ---
-  // 形式: 日時行 → 発言者行 → 本文（複数行）
-  function parseChatwork(text) {
-    const messages = [];
-    // 日時パターン: YYYY/MM/DD HH:MM または YYYY-MM-DD HH:MM
-    const datePattern = /^\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2}\s+\d{1,2}:\d{2}/;
-
+  // --- 施設名が含まれる行の前後コンテキストを抽出 ---
+  function extractSnippets(text, facilityName) {
     const lines = text.split('\n');
-    let i = 0;
-
-    while (i < lines.length) {
-      const line = lines[i].trim();
-
-      if (!line) { i++; continue; }
-
-      if (datePattern.test(line)) {
-        const datetime = line;
-        i++;
-        // 発言者
-        const speaker = (lines[i] || '').trim();
-        i++;
-        // 本文（次の日時行まで）
-        const bodyLines = [];
-        while (i < lines.length && !datePattern.test(lines[i].trim())) {
-          bodyLines.push(lines[i]);
-          i++;
+    const snippets = [];
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].includes(facilityName)) {
+        // 前2行〜後2行を含むスニペット
+        const start = Math.max(0, i - 2);
+        const end = Math.min(lines.length - 1, i + 2);
+        const snippet = lines.slice(start, end + 1).join('\n').trim();
+        // 重複スニペット排除（前のスニペットと重なる場合はスキップ）
+        if (snippets.length === 0 || !snippets[snippets.length - 1].includes(lines[i])) {
+          snippets.push(snippet);
         }
-        const body = bodyLines.join('\n').trim();
-        if (body) {
-          messages.push({ datetime, speaker, body });
-        }
-      } else {
-        i++;
+        if (snippets.length >= 3) break; // 最大3件表示
       }
     }
-
-    return messages;
+    return snippets;
   }
 
   // --- チェック実行 ---
@@ -255,17 +236,16 @@
       return;
     }
 
-    const messages = parseChatwork(text);
-
-    // 施設ごとに該当メッセージを収集
+    // 施設ごとにテキスト全体を検索
     const result = facilities.map(name => {
-      const matched = messages.filter(m => m.body.includes(name) || m.speaker.includes(name));
-      return { name, matched };
+      const found = text.includes(name);
+      const snippets = found ? extractSnippets(text, name) : [];
+      return { name, found, snippets };
     });
 
     // 表示
-    const okList = result.filter(r => r.matched.length > 0);
-    const ngList = result.filter(r => r.matched.length === 0);
+    const okList = result.filter(r => r.found);
+    const ngList = result.filter(r => !r.found);
 
     document.getElementById('totalCount').textContent = facilities.length;
     document.getElementById('okCount').textContent = okList.length;
@@ -277,14 +257,14 @@
     // 未報告を上に表示
     [...ngList, ...okList].forEach(r => {
       const tr = document.createElement('tr');
-      const statusHtml = r.matched.length > 0
+      const statusHtml = r.found
         ? '<span class="status-ok">✓ 報告あり</span>'
         : '<span class="status-ng">✗ 未報告</span>';
 
       let mentionsHtml = '—';
-      if (r.matched.length > 0) {
-        const items = r.matched.map(m =>
-          `<div class="mention-item">${escHtml(m.datetime)} ${escHtml(m.speaker)}\n${escHtml(truncate(m.body, 80))}</div>`
+      if (r.found && r.snippets.length > 0) {
+        const items = r.snippets.map(s =>
+          `<div class="mention-item">${escHtml(s)}</div>`
         ).join('');
         mentionsHtml = `<div class="mentions">${items}</div>`;
       }
