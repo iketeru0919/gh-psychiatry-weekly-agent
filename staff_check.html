@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>職員配置・利用者区分チェックツール</title>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Meiryo', 'Yu Gothic', sans-serif; background: #f5f7fa; color: #333; }
+  header { background: #2c5f8a; color: white; padding: 16px 24px; }
+  header h1 { font-size: 20px; font-weight: bold; }
+  header p { font-size: 12px; margin-top: 4px; opacity: 0.8; }
+  .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+
+  .upload-area {
+    border: 2px dashed #2c5f8a;
+    border-radius: 10px;
+    background: white;
+    padding: 40px;
+    text-align: center;
+    cursor: pointer;
+    transition: background 0.2s;
+    margin-bottom: 24px;
+  }
+  .upload-area:hover, .upload-area.dragover { background: #eaf3fb; }
+  .upload-area .icon { font-size: 48px; margin-bottom: 12px; }
+  .upload-area p { color: #555; font-size: 14px; margin-bottom: 8px; }
+  .upload-area input[type=file] { display: none; }
+  .btn {
+    display: inline-block;
+    background: #2c5f8a;
+    color: white;
+    padding: 10px 24px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    border: none;
+  }
+  .btn:hover { background: #1e4a6e; }
+
+  .section {
+    background: white;
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 20px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+  }
+  .section h2 {
+    font-size: 16px;
+    font-weight: bold;
+    border-left: 4px solid #2c5f8a;
+    padding-left: 10px;
+    margin-bottom: 16px;
+    color: #2c5f8a;
+  }
+  .section h3 {
+    font-size: 14px;
+    font-weight: bold;
+    margin: 16px 0 8px;
+    color: #444;
+    border-bottom: 1px solid #e0e0e0;
+    padding-bottom: 4px;
+  }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 12px; }
+  th { background: #2c5f8a; color: white; padding: 8px 10px; text-align: center; }
+  td { padding: 7px 10px; border-bottom: 1px solid #e8e8e8; text-align: center; }
+  tr:nth-child(even) td { background: #f8f9fc; }
+  tr:hover td { background: #eaf3fb; }
+  .td-left { text-align: left; }
+  .names { color: #2c5f8a; font-size: 12px; }
+  .total-row td { font-weight: bold; background: #e8f0f8 !important; }
+  .warn { color: #c0392b; font-weight: bold; }
+
+  .reason-tag {
+    display: inline-block;
+    background: #fdecea;
+    color: #c0392b;
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 11px;
+    margin: 1px;
+  }
+  .tag-senjo {
+    display: inline-block;
+    background: #e8f5e9;
+    color: #2e7d32;
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 11px;
+  }
+  .tag-kenmu {
+    display: inline-block;
+    background: #fff3e0;
+    color: #e65100;
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 11px;
+  }
+
+  #results { display: none; }
+  .error-msg { color: #c0392b; background: #fdecea; padding: 12px; border-radius: 6px; margin-bottom: 12px; }
+  .info-msg { color: #1565c0; background: #e3f2fd; padding: 10px; border-radius: 6px; margin-bottom: 12px; font-size: 13px; }
+
+  .scroll-x { overflow-x: auto; }
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .summary-card {
+    background: #f0f6fb;
+    border-radius: 8px;
+    padding: 14px;
+    text-align: center;
+    border: 1px solid #d0e4f5;
+  }
+  .summary-card .num { font-size: 28px; font-weight: bold; color: #2c5f8a; }
+  .summary-card .label { font-size: 12px; color: #666; margin-top: 4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>職員配置・利用者区分チェックツール</h1>
+  <p>管理用シート・人員配置【入力用】シートを自動集計します（ブラウザ内処理・外部送信なし）</p>
+</header>
+<div class="container">
+  <div class="upload-area" id="uploadArea">
+    <div class="icon">📊</div>
+    <p>勤務表Excelファイルをドラッグ＆ドロップ、または</p>
+    <label class="btn" for="fileInput">ファイルを選択</label>
+    <input type="file" id="fileInput" accept=".xlsx,.xls">
+    <p style="margin-top:10px; font-size:12px; color:#888;">.xlsx / .xls 対応</p>
+  </div>
+  <div id="errorBox"></div>
+  <div id="results">
+    <!-- 職員配置セクション -->
+    <div class="section" id="sec-staff">
+      <h2>② 職員配置チェック（管理用シート）</h2>
+      <div id="staffContent"></div>
+    </div>
+    <!-- 利用者区分セクション -->
+    <div class="section" id="sec-users">
+      <h2>③ 利用者区分チェック（人員配置【入力用】）</h2>
+      <div id="userContent"></div>
+    </div>
+    <!-- 職員別判定一覧 -->
+    <div class="section" id="sec-detail">
+      <h2>④ 職員別判定一覧</h2>
+      <div id="detailContent"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+//  ユーティリティ
+// ============================================================
+function normalizeName(name) {
+  if (!name) return '';
+  return String(name)
+    .replace(/[\s　]+/g, '')             // 全角・半角スペース除去
+    .replace(/[（(][^）)]*[）)]/g, '')   // （A）(A)（派遣）等除去
+    .trim();
+}
+
+function normalizeKubun(raw) {
+  if (raw === null || raw === undefined || String(raw).trim() === '') return null;
+  const s = String(raw).trim();
+  const m = s.match(/(\d)/);
+  if (m) return '区分' + m[1];
+  if (/区分/.test(s)) return s.replace(/\s/g,'');
+  return s;
+}
+
+function cellVal(sheet, row, col) {
+  const addr = XLSX.utils.encode_cell({r: row, c: col});
+  const cell = sheet[addr];
+  if (!cell) return '';
+  return cell.v !== undefined ? cell.v : '';
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;');
+}
+
+// ============================================================
+//  ファイル読み込み
+// ============================================================
+const uploadArea = document.getElementById('uploadArea');
+const fileInput  = document.getElementById('fileInput');
+
+uploadArea.addEventListener('dragover', e => { e.preventDefault(); uploadArea.classList.add('dragover'); });
+uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('dragover'));
+uploadArea.addEventListener('drop', e => {
+  e.preventDefault();
+  uploadArea.classList.remove('dragover');
+  const f = e.dataTransfer.files[0];
+  if (f) processFile(f);
+});
+fileInput.addEventListener('change', e => {
+  if (e.target.files[0]) processFile(e.target.files[0]);
+});
+
+function showError(msg) {
+  document.getElementById('errorBox').innerHTML = `<div class="error-msg">⚠ ${escapeHtml(msg)}</div>`;
+}
+function clearError() {
+  document.getElementById('errorBox').innerHTML = '';
+}
+
+function processFile(file) {
+  clearError();
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const wb = XLSX.read(e.target.result, { type: 'binary', cellDates: true });
+      analyzeWorkbook(wb);
+    } catch(err) {
+      showError('Excelの読み込みに失敗しました: ' + err.message);
+    }
+  };
+  reader.readAsBinaryString(file);
+}
+
+// ============================================================
+//  Excelデータ解析
+// ============================================================
+function analyzeWorkbook(wb) {
+  // --- シート名特定 ---
+  const sheetNames = wb.SheetNames;
+  const kanriName = sheetNames.find(n => n.includes('管理用')) || null;
+  const inputName = sheetNames.find(n => n.includes('人員配置') && n.includes('入力')) || null;
+
+  let staffHtml = '';
+  let userHtml  = '';
+  let detailHtml = '';
+
+  if (!kanriName) {
+    staffHtml = '<div class="error-msg">「管理用シート」が見つかりませんでした。シート名を確認してください。<br>検出シート: ' +
+      escapeHtml(sheetNames.join('、')) + '</div>';
+  } else {
+    const result = analyzeKanriSheet(wb.Sheets[kanriName]);
+    staffHtml  = result.staffHtml;
+    detailHtml = result.detailHtml;
+  }
+
+  if (!inputName) {
+    userHtml = '<div class="error-msg">「人員配置【入力用】」シートが見つかりませんでした。<br>検出シート: ' +
+      escapeHtml(sheetNames.join('、')) + '</div>';
+  } else {
+    userHtml = analyzeInputSheet(wb.Sheets[inputName]);
+  }
+
+  document.getElementById('staffContent').innerHTML  = staffHtml;
+  document.getElementById('userContent').innerHTML   = userHtml;
+  document.getElementById('detailContent').innerHTML = detailHtml;
+  document.getElementById('results').style.display   = 'block';
+
+  document.getElementById('results').scrollIntoView({ behavior: 'smooth' });
+}
+
+// ============================================================
+//  管理用シート解析
+// ============================================================
+function analyzeKanriSheet(sheet) {
+  const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1:BZ200');
+  const maxRow = range.e.r;
+
+  const TARGET_JOBS = ['生活支援員', '世話人', '夜間支援従事者'];
+  const NIGHT_KEYWORDS = ['夜', '深入', '深明', '深夜'];
+
+  // 列インデックス (0始まり)
+  // B=1, M=12, V=21, AE=30, AI=34
+  const COL_SHOKUSHU = 1;   // B
+  const COL_SHIMEI   = 12;  // M
+  const COL_SHIKAKU  = 21;  // V
+  const COL_KINMU    = 30;  // AE
+  const COL_SHIFT_START = 34; // AI (以降)
+
+  // --- 行データ収集 ---
+  const rows = [];
+  for (let r = 0; r <= maxRow; r++) {
+    const shokushu = String(cellVal(sheet, r, COL_SHOKUSHU)).trim();
+    if (!TARGET_JOBS.includes(shokushu)) continue;
+
+    const rawName = String(cellVal(sheet, r, COL_SHIMEI)).trim();
+    if (!rawName) continue;
+
+    const shikaku = String(cellVal(sheet, r, COL_SHIKAKU)).trim();
+    const kinmu   = String(cellVal(sheet, r, COL_KINMU)).trim();
+
+    // シフト収集
+    let shifts = [];
+    for (let c = COL_SHIFT_START; c <= range.e.c; c++) {
+      const v = String(cellVal(sheet, r, c)).trim();
+      if (v) shifts.push(v);
+    }
+
+    rows.push({ shokushu, rawName, normName: normalizeName(rawName), shikaku, kinmu, shifts, rowIdx: r + 1 });
+  }
+
+  if (rows.length === 0) {
+    return {
+      staffHtml: '<div class="error-msg">対象職種の行が見つかりませんでした。列位置（B列:職種, M列:氏名, AE列:勤務形態）を確認してください。</div>',
+      detailHtml: ''
+    };
+  }
+
+  // --- 職員別にまとめる ---
+  // normName -> { jobs: Set, rows: [] }
+  const staffMap = new Map();
+  for (const row of rows) {
+    if (!staffMap.has(row.normName)) {
+      staffMap.set(row.normName, { normName: row.normName, rawNames: new Set(), jobs: new Set(), rowList: [] });
+    }
+    const entry = staffMap.get(row.normName);
+    entry.rawNames.add(row.rawName);
+    entry.jobs.add(row.shokushu);
+    entry.rowList.push(row);
+  }
+
+  // --- 専従/兼務判定 ---
+  const staffList = [];
+  for (const [, entry] of staffMap) {
+    const reasons = [];
+    let isKenmu = false;
+
+    // 複数職種
+    if (entry.jobs.size > 1) {
+      isKenmu = true;
+      reasons.push('複数職種兼務: ' + [...entry.jobs].join('・'));
+    }
+
+    // 生活支援員で夜勤シフトあり
+    for (const row of entry.rowList) {
+      if (row.shokushu === '生活支援員') {
+        const hasNight = row.shifts.some(s => NIGHT_KEYWORDS.some(kw => s.includes(kw)));
+        if (hasNight) {
+          isKenmu = true;
+          const nightShifts = row.shifts.filter(s => NIGHT_KEYWORDS.some(kw => s.includes(kw)));
+          reasons.push('生活支援員で夜勤シフトあり: ' + nightShifts.slice(0,5).join(' '));
+        }
+      }
+    }
+
+    // 代表行（最初の行）
+    const rep = entry.rowList[0];
+    staffList.push({
+      normName: entry.normName,
+      rawNames: [...entry.rawNames],
+      jobs: [...entry.jobs],
+      shikaku: rep.shikaku,
+      kinmu: rep.kinmu,
+      kinmuNorm: normalizeKinmu(rep.kinmu),
+      senjoKenmu: isKenmu ? '兼務' : '専従',
+      reasons,
+      rowList: entry.rowList
+    });
+  }
+
+  function normalizeKinmu(k) {
+    if (!k) return '';
+    if (/常勤/.test(k)) return '常勤';
+    if (/非常勤|パート|アルバイト/.test(k)) return '非常勤';
+    return k;
+  }
+
+  // --- 日中配置換算 ---
+  // 日中:「日」を含む、夜・明・深入・深明・休・有を含まない
+  const NICHI_INCLUDE = ['日'];
+  const NICHI_EXCLUDE = ['夜', '明', '深入', '深明'];
+
+  function countNichiDays(shifts) {
+    return shifts.filter(s =>
+      NICHI_INCLUDE.some(kw => s.includes(kw)) &&
+      !NICHI_EXCLUDE.some(kw => s.includes(kw))
+    ).length;
+  }
+
+  // 月の総日数を推定（シフト列数から）
+  // 職員のシフト列数の最大値を使う
+  let maxShiftDays = 0;
+  for (const row of rows) {
+    if (row.shifts.length > maxShiftDays) maxShiftDays = row.shifts.length;
+  }
+  const totalDays = maxShiftDays > 0 ? maxShiftDays : 30;
+
+  // --- 集計 ---
+  const CATEGORIES = ['常勤・専従', '常勤・兼務', '非常勤・専従', '非常勤・兼務'];
+
+  function getCategory(s) {
+    return s.kinmuNorm + '・' + s.senjoKenmu;
+  }
+
+  // 職種別集計
+  function makeJobTable() {
+    let html = '<h3>職種別・勤務形態別・専従兼務別 人数</h3><div class="scroll-x">';
+    html += '<table><thead><tr><th>職種</th><th>常勤・専従</th><th>常勤・兼務</th><th>非常勤・専従</th><th>非常勤・兼務</th><th>合計</th></tr></thead><tbody>';
+
+    let totals = {常勤専従:0,常勤兼務:0,非常勤専従:0,非常勤兼務:0,total:0};
+
+    for (const job of TARGET_JOBS) {
+      const jobStaff = staffList.filter(s => s.jobs.includes(job));
+      const cs = jobStaff.filter(s => getCategory(s) === '常勤・専従').length;
+      const ck = jobStaff.filter(s => getCategory(s) === '常勤・兼務').length;
+      const hs = jobStaff.filter(s => getCategory(s) === '非常勤・専従').length;
+      const hk = jobStaff.filter(s => getCategory(s) === '非常勤・兼務').length;
+      const total = jobStaff.length;
+      totals.常勤専従 += cs; totals.常勤兼務 += ck;
+      totals.非常勤専従 += hs; totals.非常勤兼務 += hk; totals.total += total;
+      html += `<tr><td class="td-left">${job}</td><td>${cs}</td><td>${ck}</td><td>${hs}</td><td>${hk}</td><td><b>${total}</b></td></tr>`;
+    }
+    html += `<tr class="total-row"><td class="td-left">合計</td><td>${totals.常勤専従}</td><td>${totals.常勤兼務}</td><td>${totals.非常勤専従}</td><td>${totals.非常勤兼務}</td><td>${totals.total}</td></tr>`;
+    html += '</tbody></table></div>';
+    return html;
+  }
+
+  // 日中配置換算
+  function makeNichiTable() {
+    let html = '<h3>職種別 日中配置換算（人工）</h3>';
+    html += '<div class="info-msg">日中配置換算：「日」を含むシフトを対象。夜・明・深入・深明は除外。人工 = 該当日数 ÷ 月の総稼働日数推計（' + totalDays + '日）</div>';
+    html += '<div class="scroll-x"><table><thead><tr><th>職種</th><th>総日中勤務日数</th><th>日中配置換算（人工）</th></tr></thead><tbody>';
+
+    for (const job of TARGET_JOBS) {
+      const jobStaff = staffList.filter(s => s.jobs.includes(job));
+      let totalNichi = 0;
+      for (const s of jobStaff) {
+        // 代表行のシフト合計
+        for (const row of s.rowList) {
+          if (row.shokushu === job) {
+            totalNichi += countNichiDays(row.shifts);
+          }
+        }
+      }
+      const jinkō = (totalNichi / totalDays).toFixed(2);
+      html += `<tr><td class="td-left">${job}</td><td>${totalNichi}</td><td>${jinkō}</td></tr>`;
+    }
+    html += '</tbody></table></div>';
+    return html;
+  }
+
+  // 資格別集計
+  function makeShikakuTable() {
+    let html = '<h3>資格別・勤務形態別・専従兼務別 人数</h3><div class="scroll-x">';
+    html += '<table><thead><tr><th>資格</th><th>常勤・専従</th><th>常勤・兼務</th><th>非常勤・専従</th><th>非常勤・兼務</th><th>合計</th></tr></thead><tbody>';
+
+    // 資格を展開（複数資格対応）
+    const shikakuMap = new Map();
+    function addShikaku(shikaku, cat) {
+      if (!shikakuMap.has(shikaku)) shikakuMap.set(shikaku, {常勤専従:0,常勤兼務:0,非常勤専従:0,非常勤兼務:0});
+      const m = shikakuMap.get(shikaku);
+      if (cat === '常勤・専従') m.常勤専従++;
+      else if (cat === '常勤・兼務') m.常勤兼務++;
+      else if (cat === '非常勤・専従') m.非常勤専従++;
+      else if (cat === '非常勤・兼務') m.非常勤兼務++;
+    }
+
+    for (const s of staffList) {
+      const cat = getCategory(s);
+      const raw = s.shikaku || '';
+      // 複数資格を「、」「,」「・」「/」「／」で分割
+      const parts = raw.split(/[、,・\/／\n]/).map(p => p.trim()).filter(p => p);
+      if (parts.length === 0) {
+        addShikaku('資格なし・空欄', cat);
+      } else {
+        for (const p of parts) addShikaku(p, cat);
+      }
+    }
+
+    // ソート：資格なし最後
+    const keys = [...shikakuMap.keys()].sort((a,b) => {
+      if (a === '資格なし・空欄') return 1;
+      if (b === '資格なし・空欄') return -1;
+      return a.localeCompare(b, 'ja');
+    });
+
+    for (const k of keys) {
+      const m = shikakuMap.get(k);
+      const total = m.常勤専従 + m.常勤兼務 + m.非常勤専従 + m.非常勤兼務;
+      html += `<tr><td class="td-left">${escapeHtml(k)}</td><td>${m.常勤専従}</td><td>${m.常勤兼務}</td><td>${m.非常勤専従}</td><td>${m.非常勤兼務}</td><td><b>${total}</b></td></tr>`;
+    }
+    html += '</tbody></table></div>';
+    return html;
+  }
+
+  // 職員別判定一覧（詳細）
+  function makeDetailTable() {
+    let html = '<div class="info-msg">氏名正規化（スペース・補足除去）後に同一人物判定しています。兼務理由を必ず確認してください。</div>';
+    html += '<div class="scroll-x"><table><thead><tr><th>正規化氏名</th><th>表記</th><th>担当職種</th><th>勤務形態</th><th>資格</th><th>専従/兼務</th><th>兼務理由</th></tr></thead><tbody>';
+
+    const sorted = [...staffList].sort((a,b) => a.jobs[0].localeCompare(b.jobs[0],'ja'));
+    for (const s of sorted) {
+      const reasonHtml = s.reasons.length > 0
+        ? s.reasons.map(r => `<span class="reason-tag">${escapeHtml(r)}</span>`).join('<br>')
+        : '-';
+      const skTag = s.senjoKenmu === '兼務'
+        ? `<span class="tag-kenmu">兼務</span>`
+        : `<span class="tag-senjo">専従</span>`;
+      html += `<tr>
+        <td class="td-left">${escapeHtml(s.normName)}</td>
+        <td class="td-left" style="font-size:11px">${escapeHtml(s.rawNames.join(' / '))}</td>
+        <td class="td-left">${s.jobs.join('・')}</td>
+        <td>${escapeHtml(s.kinmu)}</td>
+        <td class="td-left" style="font-size:11px">${escapeHtml(s.shikaku || '（なし）')}</td>
+        <td>${skTag}</td>
+        <td class="td-left">${reasonHtml}</td>
+      </tr>`;
+    }
+    html += '</tbody></table></div>';
+    return html;
+  }
+
+  // サマリーカード
+  const totalStaff = staffList.length;
+  const jokin = staffList.filter(s => s.kinmuNorm === '常勤').length;
+  const hijokin = staffList.filter(s => s.kinmuNorm === '非常勤').length;
+  const kenmu = staffList.filter(s => s.senjoKenmu === '兼務').length;
+
+  let summaryHtml = `<div class="summary-grid">
+    <div class="summary-card"><div class="num">${totalStaff}</div><div class="label">対象職員数（名寄せ後）</div></div>
+    <div class="summary-card"><div class="num">${jokin}</div><div class="label">常勤</div></div>
+    <div class="summary-card"><div class="num">${hijokin}</div><div class="label">非常勤</div></div>
+    <div class="summary-card"><div class="num">${kenmu}</div><div class="label">兼務</div></div>
+  </div>`;
+
+  const staffHtml = summaryHtml + makeJobTable() + makeNichiTable() + makeShikakuTable();
+  const detailHtml = makeDetailTable();
+
+  return { staffHtml, detailHtml };
+}
+
+// ============================================================
+//  人員配置【入力用】シート解析
+// ============================================================
+function analyzeInputSheet(sheet) {
+  // C列=2, D列=3 (0始まり)
+  const COL_NAME = 2;
+  const COL_KUBUN = 3;
+
+  // 行インデックス: 13行目=r12, 32行目=r31 (0始まり)
+  const ROW_START    = 12; // C13
+  const ROW_SS_START = 20; // C21
+  const ROW_END      = 31; // C32
+
+  function collectUsers(rowStart, rowEnd, label) {
+    const users = [];
+    for (let r = rowStart; r <= rowEnd; r++) {
+      const name  = String(cellVal(sheet, r, COL_NAME)).trim();
+      const kubun = normalizeKubun(cellVal(sheet, r, COL_KUBUN));
+      if (name) users.push({ name, kubun });
+    }
+    return users;
+  }
+
+  const allUsers  = collectUsers(ROW_START, ROW_END, '全利用者');
+  const nyukyoUsers = collectUsers(ROW_START, ROW_SS_START - 1, '入居者のみ');
+  const ssUsers   = collectUsers(ROW_SS_START, ROW_END, 'ショートステイのみ');
+
+  function buildKubunMap(users) {
+    const map = new Map();
+    const unknown = [];
+    for (const u of users) {
+      if (!u.kubun) { unknown.push(u.name); continue; }
+      if (!map.has(u.kubun)) map.set(u.kubun, []);
+      map.get(u.kubun).push(u.name);
+    }
+    return { map, unknown };
+  }
+
+  function renderKubunTable(users, title) {
+    const { map, unknown } = buildKubunMap(users);
+    const total = users.length;
+
+    let html = `<h3>${escapeHtml(title)}（${total}名）</h3>`;
+    if (total === 0) { html += '<p style="color:#888;font-size:13px">該当する利用者がいません</p>'; return html; }
+
+    html += '<div class="scroll-x"><table><thead><tr><th>区分</th><th>人数</th><th>利用者名</th></tr></thead><tbody>';
+
+    const KUBUN_ORDER = ['区分1','区分2','区分3','区分4','区分5','区分6'];
+    let hasRow = false;
+    for (const k of KUBUN_ORDER) {
+      if (map.has(k)) {
+        hasRow = true;
+        const names = map.get(k);
+        const namesHtml = names.map(n => `《${escapeHtml(n)}》`).join('　');
+        html += `<tr><td>${k}</td><td>${names.length}</td><td class="td-left names">${namesHtml}</td></tr>`;
+      }
+    }
+    // KUBUN_ORDER以外
+    for (const [k, names] of map) {
+      if (!KUBUN_ORDER.includes(k)) {
+        hasRow = true;
+        const namesHtml = names.map(n => `《${escapeHtml(n)}》`).join('　');
+        html += `<tr><td class="warn">${escapeHtml(k)}</td><td>${names.length}</td><td class="td-left names">${namesHtml}</td></tr>`;
+      }
+    }
+
+    // 区分未入力
+    if (unknown.length > 0) {
+      const namesHtml = unknown.map(n => `《${escapeHtml(n)}》`).join('　');
+      html += `<tr><td class="warn">区分未入力</td><td>${unknown.length}</td><td class="td-left names">${namesHtml}</td></tr>`;
+    }
+
+    // 合計
+    html += `<tr class="total-row"><td>合計</td><td>${total}</td><td class="td-left" style="font-size:12px;color:#555">`;
+    const allNames = users.map(u => `《${escapeHtml(u.name)}》`).join('　');
+    html += allNames + '</td></tr>';
+
+    html += '</tbody></table></div>';
+    return html;
+  }
+
+  // サマリーカード
+  let html = `<div class="summary-grid">
+    <div class="summary-card"><div class="num">${allUsers.length}</div><div class="label">全利用者数（C13〜C32）</div></div>
+    <div class="summary-card"><div class="num">${nyukyoUsers.length}</div><div class="label">入居者（C13〜C20）</div></div>
+    <div class="summary-card"><div class="num">${ssUsers.length}</div><div class="label">ショートステイ（C21〜C32）</div></div>
+  </div>`;
+
+  html += renderKubunTable(allUsers,    '全利用者 区分別人数');
+  html += renderKubunTable(nyukyoUsers, '入居者のみ 区分別人数');
+  html += renderKubunTable(ssUsers,     'ショートステイのみ 区分別人数');
+
+  return html;
+}
+</script>
+</body>
+</html>
