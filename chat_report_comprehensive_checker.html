@@ -1,0 +1,1280 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>チャット報告総合チェッカー v1.0</title>
+<style>
+:root{
+  --bg:#f0f4f8;--card:#fff;--line:#d1dbe8;--text:#1e293b;--muted:#64748b;
+  --accent:#2563eb;--accent2:#eff6ff;--danger:#dc2626;--ok:#16a34a;--warn:#d97706;
+  --night:#7c3aed;
+}
+*{box-sizing:border-box}
+body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;margin:0;background:var(--bg);color:var(--text);font-size:14px}
+header{background:linear-gradient(135deg,#1e40af,#0ea5e9);color:#fff;padding:20px 28px}
+header h1{margin:0 0 4px;font-size:22px}
+header p{margin:0;opacity:.9;font-size:13px}
+main{padding:16px 24px;max-width:1440px;margin:auto}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px;box-shadow:0 1px 4px rgba(0,0,0,.05)}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.btn{border:0;border-radius:8px;padding:8px 14px;font-weight:700;cursor:pointer;font-size:13px}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-secondary{background:#475569;color:#fff}
+.btn-ghost{background:#e2e8f0;color:#334155}
+.btn-danger{background:var(--danger);color:#fff}
+.btn-ok{background:var(--ok);color:#fff}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+textarea{width:100%;border:1px solid var(--line);border-radius:10px;padding:12px;font-size:13px;font-family:inherit;resize:vertical;background:#fafcff}
+select,input[type=text],input[type=month],input[type=date]{padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--text);font-size:13px}
+label{font-weight:700;font-size:13px}
+.small{font-size:12px;color:var(--muted)}
+.warn{color:var(--warn);font-weight:700}
+.ok{color:var(--ok);font-weight:700}
+.danger{color:var(--danger);font-weight:700}
+.pill{display:inline-block;border-radius:999px;padding:2px 10px;font-size:11px;font-weight:700}
+.pill-ok{background:#dcfce7;color:#166534}
+.pill-warn{background:#fef3c7;color:#92400e}
+.pill-danger{background:#fee2e2;color:#991b1b}
+.pill-info{background:#e0f2fe;color:#075985}
+.pill-none{background:#f1f5f9;color:#475569}
+
+/* Tabs */
+.tab-bar{display:flex;gap:4px;flex-wrap:wrap;border-bottom:2px solid var(--line);margin-bottom:16px}
+.tab{padding:8px 14px;cursor:pointer;border-radius:8px 8px 0 0;font-weight:700;font-size:13px;color:var(--muted);background:transparent;border:none;transition:all .15s}
+.tab:hover{background:var(--accent2);color:var(--accent)}
+.tab.active{background:var(--accent);color:#fff}
+.tab-badge{background:#dc2626;color:#fff;border-radius:999px;padding:1px 6px;font-size:10px;margin-left:4px}
+.tab-content{display:none}.tab-content.active{display:block}
+
+/* Tables */
+.table-wrap{overflow:auto;max-height:500px;border:1px solid var(--line);border-radius:10px}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th,td{border:1px solid var(--line);padding:6px 8px;white-space:nowrap}
+th{background:#eaf2fb;font-weight:700;position:sticky;top:0;z-index:1;text-align:center}
+td{text-align:center}
+td.left,th.left{text-align:left}
+tr:hover td{background:#f8faff}
+
+/* Metrics grid */
+.metrics-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:16px}
+.metric{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;text-align:center}
+.metric .label{font-size:11px;color:var(--muted);margin-bottom:4px}
+.metric .value{font-size:22px;font-weight:800}
+.metric.danger-bg{border-color:#fca5a5;background:#fff5f5}
+.metric.ok-bg{border-color:#86efac;background:#f0fdf4}
+.metric.warn-bg{border-color:#fcd34d;background:#fffbeb}
+
+/* Calendar coverage */
+.calendar-grid{display:flex;flex-wrap:wrap;gap:2px;margin-top:6px}
+.cal-day{width:22px;height:22px;border-radius:4px;font-size:10px;display:flex;align-items:center;justify-content:center;font-weight:700}
+.cal-ok{background:#86efac;color:#166534}
+.cal-miss{background:#fca5a5;color:#991b1b}
+.cal-none{background:#e2e8f0;color:#94a3b8}
+
+/* Facility master */
+.master-table td input{width:100%;border:1px solid var(--line);border-radius:4px;padding:3px 6px;font-size:12px}
+.section-title{font-size:16px;font-weight:800;margin:0 0 8px}
+details{margin-top:12px}
+details summary{font-weight:800;cursor:pointer;padding:6px 0}
+.hidden{display:none}
+.comparison-row-improved{background:#f0fdf4}
+.comparison-row-new{background:#fff5f5}
+.comparison-row-unsolved{background:#fffbeb}
+
+/* Share textarea */
+#shareText{min-height:300px;background:#1e293b;color:#f1f5f9;font-family:monospace;font-size:13px}
+
+/* Filter bar */
+.filter-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;padding:10px 14px;background:#f8fafc;border:1px solid var(--line);border-radius:10px}
+
+@media(max-width:700px){
+  main{padding:10px 12px}
+  header{padding:14px 16px}
+  .metrics-grid{grid-template-columns:repeat(2,1fr)}
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>チャット報告総合チェッカー <span style="font-size:12px;opacity:.8">v1.0</span></h1>
+  <p>グループホーム運営チャット報告（7種別）を自動分類・集計・比較します</p>
+</header>
+<main>
+
+<!-- Input Card -->
+<section class="card" id="inputCard">
+  <div class="row" style="margin-bottom:10px;justify-content:space-between">
+    <span class="section-title" style="margin:0">チャット文章の入力</span>
+    <div class="row">
+      <label>対象月</label>
+      <input type="month" id="targetMonth"/>
+      <button class="btn btn-primary" id="runBtn">解析する</button>
+      <button class="btn btn-ghost" id="clearBtn">クリア</button>
+    </div>
+  </div>
+  <textarea id="chatInput" rows="10" placeholder="Chatwork等のチャット文章をここに貼り付けてください。複数種別の報告が混在していても自動で分類します。"></textarea>
+  <div id="parseStatus" class="small" style="margin-top:6px"></div>
+</section>
+
+<!-- Main Tabs -->
+<div class="tab-bar" id="mainTabBar">
+  <button class="tab active" data-tab="dashboard">ダッシュボード</button>
+  <button class="tab" data-tab="issue">要確認一覧 <span class="tab-badge" id="issueBadge">0</span></button>
+  <button class="tab" data-tab="sabikan">サビ管日報</button>
+  <button class="tab" data-tab="kenshu">研修</button>
+  <button class="tab" data-tab="nisshi">業務日誌</button>
+  <button class="tab" data-tab="shobo">消防・防災</button>
+  <button class="tab" data-tab="yell">YELL会議</button>
+  <button class="tab" data-tab="jiko">事故報告</button>
+  <button class="tab" data-tab="rec">レクリエーション</button>
+  <button class="tab" data-tab="compare">比較</button>
+  <button class="tab" data-tab="share">共有文</button>
+  <button class="tab" data-tab="master">施設マスタ</button>
+</div>
+
+<!-- DASHBOARD -->
+<div class="tab-content active" id="tab-dashboard">
+  <div class="metrics-grid" id="dashMetrics"></div>
+  <div class="row" style="margin-bottom:10px">
+    <button class="btn btn-secondary" onclick="saveSnapshot()">今回の結果を保存</button>
+    <button class="btn btn-ghost" onclick="exportResultCsv()">結果CSV出力</button>
+    <button class="btn btn-ghost" onclick="exportJson()">JSONバックアップ</button>
+    <label class="btn btn-ghost" for="jsonImport">JSON読込</label>
+    <input type="file" id="jsonImport" accept=".json" class="hidden"/>
+  </div>
+  <div id="dashIssuePreview"></div>
+</div>
+
+<!-- ISSUE LIST -->
+<div class="tab-content" id="tab-issue">
+  <div class="filter-bar">
+    <label>AM</label><select id="filterAM"><option value="">全AM</option></select>
+    <label>施設</label><select id="filterFacility"><option value="">全施設</option></select>
+    <label>種別</label><select id="filterType"><option value="">全種別</option>
+      <option>サビ管日報</option><option>研修</option><option>業務日誌</option>
+      <option>消防・防災</option><option>YELL会議</option><option>事故報告</option><option>レクリエーション</option>
+    </select>
+    <label>状態</label><select id="filterStatus"><option value="">全て</option><option>要確認</option><option>未提出</option></select>
+    <button class="btn btn-ghost" onclick="renderIssueTable()">絞込</button>
+  </div>
+  <div class="table-wrap"><table id="issueTable"></table></div>
+</div>
+
+<!-- SABIKAN -->
+<div class="tab-content" id="tab-sabikan">
+  <div class="row" style="margin-bottom:10px">
+    <button class="btn btn-ghost" onclick="downloadCsv('sabikan')">CSV出力</button>
+  </div>
+  <div class="table-wrap"><table id="sabikanTable"></table></div>
+</div>
+
+<!-- KENSHU -->
+<div class="tab-content" id="tab-kenshu">
+  <div class="row" style="margin-bottom:10px">
+    <button class="btn btn-ghost" onclick="downloadCsv('kenshu')">CSV出力</button>
+  </div>
+  <div class="table-wrap"><table id="kenshuTable"></table></div>
+</div>
+
+<!-- NISSHI -->
+<div class="tab-content" id="tab-nisshi">
+  <div class="row" style="margin-bottom:10px">
+    <button class="btn btn-ghost" onclick="downloadCsv('nisshi')">CSV出力</button>
+  </div>
+  <div id="nisshiCalendar" style="margin-bottom:16px"></div>
+  <div class="table-wrap"><table id="nisshiTable"></table></div>
+</div>
+
+<!-- SHOBO -->
+<div class="tab-content" id="tab-shobo">
+  <div class="row" style="margin-bottom:10px">
+    <button class="btn btn-ghost" onclick="downloadCsv('shobo')">CSV出力</button>
+  </div>
+  <div class="table-wrap"><table id="shoboTable"></table></div>
+</div>
+
+<!-- YELL -->
+<div class="tab-content" id="tab-yell">
+  <div class="row" style="margin-bottom:10px">
+    <button class="btn btn-ghost" onclick="downloadCsv('yell')">CSV出力</button>
+  </div>
+  <div class="table-wrap"><table id="yellTable"></table></div>
+</div>
+
+<!-- JIKO -->
+<div class="tab-content" id="tab-jiko">
+  <div class="row" style="margin-bottom:10px">
+    <button class="btn btn-ghost" onclick="downloadCsv('jiko')">CSV出力</button>
+  </div>
+  <div id="jikoSummary" style="margin-bottom:12px"></div>
+  <div class="table-wrap"><table id="jikoTable"></table></div>
+</div>
+
+<!-- REC -->
+<div class="tab-content" id="tab-rec">
+  <div class="row" style="margin-bottom:10px">
+    <button class="btn btn-ghost" onclick="downloadCsv('rec')">CSV出力</button>
+  </div>
+  <div class="table-wrap"><table id="recTable"></table></div>
+</div>
+
+<!-- COMPARE -->
+<div class="tab-content" id="tab-compare">
+  <div class="card">
+    <div class="section-title">保存済みスナップショット</div>
+    <div class="row" style="margin-bottom:10px">
+      <label>比較元</label><select id="cmpA"></select>
+      <label>比較先</label><select id="cmpB"></select>
+      <button class="btn btn-primary" onclick="runComparison()">比較実行</button>
+      <button class="btn btn-danger" onclick="deleteSnapshot()">選択削除</button>
+    </div>
+    <div id="snapshotList" class="small"></div>
+  </div>
+  <div class="table-wrap" style="margin-top:12px"><table id="compareTable"></table></div>
+</div>
+
+<!-- SHARE -->
+<div class="tab-content" id="tab-share">
+  <div class="row" style="margin-bottom:10px">
+    <button class="btn btn-primary" onclick="generateShareText()">共有文を生成</button>
+    <button class="btn btn-ghost" onclick="copyShareText()">クリップボードにコピー</button>
+  </div>
+  <textarea id="shareText" placeholder="「共有文を生成」ボタンを押してください"></textarea>
+</div>
+
+<!-- MASTER -->
+<div class="tab-content" id="tab-master">
+  <div class="row" style="margin-bottom:12px">
+    <button class="btn btn-primary" onclick="addFacilityRow()">施設追加</button>
+    <button class="btn btn-ghost" onclick="exportMasterCsv()">マスタCSV出力</button>
+    <label class="btn btn-ghost" for="masterCsvImport">マスタCSV取込</label>
+    <input type="file" id="masterCsvImport" accept=".csv" class="hidden"/>
+    <button class="btn btn-ghost" onclick="exportMasterJson()">マスタJSONバックアップ</button>
+    <label class="btn btn-ghost" for="masterJsonImport">マスタJSON読込</label>
+    <input type="file" id="masterJsonImport" accept=".json" class="hidden"/>
+    <button class="btn btn-danger" onclick="resetMaster()">マスタリセット</button>
+  </div>
+  <p class="small">施設名・担当AM・エリア・表記ゆれを管理します。表記ゆれはカンマ区切りで複数登録できます。</p>
+  <div class="table-wrap"><table id="masterTable"></table></div>
+</div>
+
+</main>
+
+<script>
+// ========================
+// STORAGE KEYS
+// ========================
+const MASTER_KEY = 'chat_checker_master_v1';
+const HISTORY_KEY = 'chat_checker_history_v1';
+
+// ========================
+// DEFAULT FACILITY MASTER
+// ========================
+const DEFAULT_MASTER = [
+  {id:1, name:'ラシエル春日部', short:'春日部', am:'高山AM', area:'埼玉', aliases:'RASIEL春日部,春日部,グループホームRASIEL春日部', types:'サビ管日報,研修,業務日誌,消防・防災,YELL会議,事故報告,レクリエーション', active:true},
+  {id:2, name:'ラシエル気賀', short:'気賀', am:'高山AM', area:'静岡西部', aliases:'RASIEL気賀,気賀', types:'サビ管日報,研修,業務日誌,消防・防災,YELL会議,事故報告,レクリエーション', active:true},
+  {id:3, name:'ラシエル高丘', short:'高丘', am:'高山AM', area:'静岡西部', aliases:'RASIEL高丘,高丘', types:'サビ管日報,研修,業務日誌,消防・防災,YELL会議,事故報告,レクリエーション', active:true},
+  {id:4, name:'ラシエル美田園', short:'美田園', am:'佐藤AM', area:'宮城', aliases:'RASIEL美田園,美田園', types:'サビ管日報,研修,業務日誌,消防・防災,YELL会議,事故報告,レクリエーション', active:true},
+  {id:5, name:'ラシエル白浜町', short:'白浜町', am:'吉田AM', area:'和歌山', aliases:'RASIEL白浜町,白浜町', types:'サビ管日報,研修,業務日誌,消防・防災,YELL会議,事故報告,レクリエーション', active:true},
+  {id:6, name:'ラシエル南彦根', short:'南彦根', am:'三澤AM', area:'滋賀', aliases:'RASIEL南彦根,南彦根', types:'サビ管日報,研修,業務日誌,消防・防災,YELL会議,事故報告,レクリエーション', active:true},
+  {id:7, name:'ラシエル萩丘', short:'萩丘', am:'三澤AM', area:'静岡', aliases:'RASIEL萩丘,萩丘,RASIEL萩丘ⅰ,RASIEL萩丘ⅱ', types:'サビ管日報,研修,業務日誌,消防・防災,YELL会議,事故報告,レクリエーション', active:true},
+  {id:8, name:'ラシエル南部町', short:'南部町', am:'三澤AM', area:'山梨', aliases:'RASIEL南部町,南部町', types:'サビ管日報,研修,業務日誌,消防・防災,YELL会議,事故報告,レクリエーション', active:true},
+  {id:9, name:'ラシエル清新', short:'清新', am:'高山AM', area:'東京', aliases:'RASIEL清新,清新', types:'サビ管日報,研修,業務日誌,消防・防災,YELL会議,事故報告,レクリエーション', active:true},
+  {id:10, name:'ラシエル八幡', short:'八幡', am:'高山AM', area:'関西', aliases:'RASIEL八幡,八幡,ラシエル：八幡', types:'サビ管日報,研修,業務日誌,消防・防災,YELL会議,事故報告,レクリエーション', active:true},
+];
+
+// ========================
+// STATE
+// ========================
+const state = {
+  master: [],
+  results: { sabikan:[], kenshu:[], nisshi:[], shobo:[], yell:[], jiko:[], rec:[], unmatched:[] },
+  issues: [],
+  currentMonth: '',
+};
+
+// ========================
+// MASTER HELPERS
+// ========================
+function loadMaster(){
+  try{
+    const raw = localStorage.getItem(MASTER_KEY);
+    const arr = raw ? JSON.parse(raw) : null;
+    state.master = Array.isArray(arr) && arr.length ? arr : JSON.parse(JSON.stringify(DEFAULT_MASTER));
+  }catch(e){ state.master = JSON.parse(JSON.stringify(DEFAULT_MASTER)); }
+}
+function saveMaster(){ localStorage.setItem(MASTER_KEY, JSON.stringify(state.master)); }
+
+function resolveFacility(text){
+  const t = (text||'').trim();
+  if(!t) return null;
+  for(const f of state.master){
+    if(!f.active) continue;
+    if(f.name===t || f.short===t) return f;
+    const aliases = (f.aliases||'').split(',').map(a=>a.trim()).filter(Boolean);
+    if(aliases.includes(t)) return f;
+  }
+  // fuzzy: partial match
+  for(const f of state.master){
+    if(!f.active) continue;
+    const candidates = [f.name, f.short, ...(f.aliases||'').split(',').map(a=>a.trim())].filter(Boolean);
+    for(const c of candidates){
+      if(c.length >= 2 && (t.includes(c) || c.includes(t))) return f;
+    }
+  }
+  return null;
+}
+
+function extractFacilityFromText(text){
+  const candidates = [];
+  for(const f of state.master){
+    if(!f.active) continue;
+    const names = [f.name, f.short, ...(f.aliases||'').split(',').map(a=>a.trim())].filter(Boolean);
+    for(const n of names){
+      if(n.length >= 2 && text.includes(n)){
+        candidates.push({facility:f, matchLen:n.length, matchStr:n});
+      }
+    }
+  }
+  if(!candidates.length) return null;
+  candidates.sort((a,b)=>b.matchLen - a.matchLen);
+  return candidates[0].facility;
+}
+
+// ========================
+// CHAT PARSING
+// ========================
+// Split chat into messages. Handle Chatwork-style: "氏名\n日付\n本文"
+function splitMessages(text){
+  const messages = [];
+  // Try to detect lines that look like timestamps / message boundaries
+  // Common patterns: "2026/04/15 10:32:00" or "[2026/04/15 10:32]"
+  const lines = text.split('\n');
+  let current = [];
+  let currentDate = '';
+  for(const line of lines){
+    const dateMatch = line.match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})[\s　]*(\d{1,2}:\d{2})/);
+    if(dateMatch){
+      if(current.length){
+        messages.push({date:currentDate, text:current.join('\n').trim()});
+        current=[];
+      }
+      currentDate = `${dateMatch[1]}/${String(dateMatch[2]).padStart(2,'0')}/${String(dateMatch[3]).padStart(2,'0')}`;
+    }
+    current.push(line);
+  }
+  if(current.length) messages.push({date:currentDate, text:current.join('\n').trim()});
+  // If no timestamps found, treat whole text as one block and split by empty lines
+  if(messages.length <= 1 && messages[0]?.date === ''){
+    const blocks = text.split(/\n{2,}/);
+    return blocks.filter(b=>b.trim()).map(b=>({date:'', text:b.trim()}));
+  }
+  return messages.filter(m=>m.text);
+}
+
+const REPORT_PATTERNS = {
+  sabikan: /今月モニタリング|個別支援計画|加算対象|サビ管業務日報|サービス管理責任者|①名前|①氏名|②拠点|モニタリング実施/,
+  kenshu:  /年間研修|研修報告|受講報告|理解度チェック|研修実施|研修未提出|研修計画|外部研修|内部研修/,
+  nisshi:  /業務日誌|日誌|入居者|退去|入院|退院|短期入所|外泊|入居報告|日誌提出/,
+  shobo:   /消防訓練|防災訓練|避難訓練|消防・防災|実施計画書|防火訓練|消火訓練|防災計画/,
+  yell:    /YELL|YEEL|議事録|ポストイット会議|yell会議|エール/i,
+  jiko:    /事故報告|転倒|転落|落薬|誤薬|服薬忘れ|離設|無断外出|他害|車両事故|火災報知器|インシデント|アクシデント/,
+  rec:     /レクリエーション|レク稟議|レク計画|レク報告|レク実施|稟議書|イベント計画|お花見|夏祭り|クリスマス会|BBQ|町内清掃/,
+};
+
+function classifyMessage(text){
+  const t = text || '';
+  const scores = {};
+  for(const [type, pattern] of Object.entries(REPORT_PATTERNS)){
+    const matches = t.match(new RegExp(pattern, 'g')) || [];
+    scores[type] = matches.length;
+  }
+  const best = Object.entries(scores).sort((a,b)=>b[1]-a[1])[0];
+  if(!best || best[1] === 0) return null;
+  return best[0];
+}
+
+// ========================
+// MONTH HELPERS
+// ========================
+function getTargetMonth(){
+  const v = document.getElementById('targetMonth').value;
+  if(v) return v;
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+}
+function daysInMonth(ym){
+  if(!ym) return 30;
+  const [y,m] = ym.split('-').map(Number);
+  return new Date(y, m, 0).getDate();
+}
+function parseDate(v){
+  if(!v) return null;
+  const s = String(v).replace(/[年月日]/g,'/').replace(/\./g,'/').replace(/ー|-/g,'/').trim();
+  const m4 = s.match(/(\d{4})\/(\d{1,2})\/(\d{1,2})/);
+  if(m4) return {y:Number(m4[1]),mo:Number(m4[2]),d:Number(m4[3])};
+  const m2 = s.match(/(\d{1,2})\/(\d{1,2})\/(\d{1,2})/);
+  if(m2) return null;
+  const ms = s.match(/(\d{1,2})\/(\d{1,2})/);
+  if(ms){
+    const now = new Date();
+    return {y:now.getFullYear(), mo:Number(ms[1]), d:Number(ms[2])};
+  }
+  return null;
+}
+function extractDateRange(text){
+  // Patterns: 4/1〜4/15, 4/1~15, 4月1日〜4月15日, 4月分
+  const ranges = [];
+  const fullRange = text.match(/(\d{1,2})[\/月](\d{1,2})日?\s*[〜~～]\s*(\d{1,2})[\/月](\d{1,2})日?/);
+  if(fullRange){
+    ranges.push({from:{mo:Number(fullRange[1]),d:Number(fullRange[2])}, to:{mo:Number(fullRange[3]),d:Number(fullRange[4])}});
+  }
+  const shortRange = text.match(/(\d{1,2})\/(\d{1,2})\s*[〜~～]\s*(\d{1,2})/);
+  if(shortRange && !fullRange){
+    ranges.push({from:{mo:Number(shortRange[1]),d:Number(shortRange[2])}, to:{mo:Number(shortRange[1]),d:Number(shortRange[3])}});
+  }
+  // 4月分 → full month
+  const monthAll = text.match(/(\d{1,2})月分/);
+  if(monthAll && !ranges.length){
+    const mo = Number(monthAll[1]);
+    const year = new Date().getFullYear();
+    const days = new Date(year, mo, 0).getDate();
+    ranges.push({from:{mo,d:1}, to:{mo,d:days}, isMonthAll:true});
+  }
+  return ranges;
+}
+
+// ========================
+// PARSE FUNCTIONS PER TYPE
+// ========================
+function parseSabikan(msg, facility){
+  const t = msg.text;
+  const extract = (patterns) => {
+    for(const p of patterns){
+      const m = t.match(new RegExp(p + '[：:　 ]*([^\n]+)'));
+      if(m) return m[1].trim();
+    }
+    return '';
+  };
+  const item = (n) => extract([`[${n}]`, `${n}[.．]`, `${n}）`, `${n}\\)`]);
+
+  const residentCount = t.match(/③[^\n]*?(\d+)\s*名/) ? t.match(/③[^\n]*?(\d+)\s*名/)[1] : extract(['③入居者数','③']);
+  const kintone = extract(['⑧kintone','⑧ご入居者','⑧']);
+  const monitoring9 = extract(['⑨今月モニタリング','⑨モニタリング','⑨']);
+  const monitoring10 = extract(['⑩翌月モニタリング','⑩翌月','⑩']);
+  const plan11 = extract(['⑪当月個別支援計画','⑪個別支援計画','⑪']);
+  const training12 = extract(['⑫年間研修','⑫']);
+  const premium13 = extract(['⑬加算対象','⑬']);
+
+  // ⑨⑪ matching judgment
+  let matchJudge = 'データなし';
+  if(monitoring9 && plan11){
+    const n9 = monitoring9.replace(/[　\s]/g,'').toLowerCase();
+    const n11 = plan11.replace(/[　\s]/g,'').toLowerCase();
+    if(n9 === 'なし' && n11 === 'なし') matchJudge = 'なし一致';
+    else if(n9 === n11) matchJudge = '一致';
+    else {
+      // check for number only
+      const num9 = n9.match(/\d+/), num11 = n11.match(/\d+/);
+      if(num9 && num11 && num9[0]===num11[0]) matchJudge = '一致（件数）';
+      else matchJudge = '不一致';
+    }
+  } else if(!monitoring9 && !plan11) matchJudge = 'なし一致';
+  else matchJudge = '要確認';
+
+  const issues = [];
+  if(matchJudge === '不一致') issues.push('⑨⑪不一致');
+  if(matchJudge === '要確認') issues.push('⑨または⑪が空欄');
+  if(!kintone || kintone==='未' || kintone==='空欄') issues.push('⑧kintone未入力');
+
+  return {
+    施設名: facility ? facility.short||facility.name : '不明',
+    担当AM: facility ? facility.am : '',
+    報告日: msg.date,
+    ③入居者数: residentCount,
+    ⑧kintone: kintone,
+    ⑨今月モニタリング: monitoring9,
+    ⑩翌月モニタリング: monitoring10,
+    ⑪個別支援計画更新: plan11,
+    ⑫年間研修: training12,
+    ⑬加算対象: premium13,
+    '⑨⑪判定': matchJudge,
+    要確認: issues.join(' / '),
+    判定: issues.length ? '要確認' : 'OK',
+  };
+}
+
+function parseKenshu(msg, facility, targetMonth){
+  const t = msg.text;
+  const hasAttachment = /添付|PDF|docx|xlsx|ファイル|画像/.test(t);
+  const hasMissing = /未提出|未回収|残り\d+名|提出されていない/.test(t);
+  const planOnly = /計画書のみ|計画のみ/.test(t);
+  const monthMatch = t.match(/(\d{1,2})月[分の]?研修|研修.*?(\d{1,2})月/);
+  const reportMonth = monthMatch ? (monthMatch[1]||monthMatch[2]) + '月' : '';
+
+  const issues = [];
+  if(hasMissing) issues.push('未提出者あり');
+  if(planOnly) issues.push('計画書のみ');
+  if(!hasAttachment) issues.push('添付不明');
+
+  return {
+    施設名: facility ? facility.short||facility.name : '不明',
+    担当AM: facility ? facility.am : '',
+    対象月: reportMonth,
+    提出日: msg.date,
+    添付: hasAttachment ? 'あり' : '不明',
+    未提出者有無: hasMissing ? 'あり' : 'なし',
+    計画書のみ: planOnly ? 'はい' : '',
+    要確認: issues.join(' / '),
+    判定: issues.length ? '要確認' : 'OK',
+  };
+}
+
+function parseNisshi(msg, facility, targetMonth){
+  const t = msg.text;
+  const ranges = extractDateRange(t);
+  const hasAttachment = /添付|PDF|docx|xlsx|ファイル|画像/.test(t);
+
+  // Extract operations info
+  const ops = {};
+  ['入居','退去','入院','退院','体験','短期入所','外泊'].forEach(k=>{
+    const m = t.match(new RegExp(k + '[：:　 ]*([^\n]+)'));
+    if(m && !/なし/.test(m[1])) ops[k] = m[1].trim();
+  });
+
+  // Coverage check
+  let coveredDays = new Set();
+  let ym = targetMonth || getTargetMonth();
+  const [yr,mo] = ym.split('-').map(Number);
+  const total = daysInMonth(ym);
+  ranges.forEach(r=>{
+    const fmo = r.from.mo, tmo = r.to.mo;
+    // same month
+    if(fmo === mo || tmo === mo){
+      const start = fmo===mo ? r.from.d : 1;
+      const end = tmo===mo ? r.to.d : total;
+      for(let d=start;d<=end;d++) coveredDays.add(d);
+    }
+    if(r.isMonthAll && fmo===mo){
+      for(let d=1;d<=total;d++) coveredDays.add(d);
+    }
+  });
+
+  const missedDays = [];
+  for(let d=1;d<=total;d++) if(!coveredDays.has(d)) missedDays.push(d);
+  const coverRate = total ? Math.round(coveredDays.size/total*100) : 0;
+
+  const issues = [];
+  if(missedDays.length && ranges.length) issues.push(`${mo}/${missedDays[0]}〜未提出あり`);
+  if(!ranges.length) issues.push('期間特定不可');
+
+  return {
+    施設名: facility ? facility.short||facility.name : '不明',
+    担当AM: facility ? facility.am : '',
+    対象月: ym,
+    提出済期間: ranges.map(r=>`${r.from.mo}/${r.from.d}〜${r.to.mo}/${r.to.d}`).join(' / '),
+    カバー率: coverRate + '%',
+    未提出日数: missedDays.length,
+    添付: hasAttachment ? 'あり' : '不明',
+    運営情報: Object.entries(ops).map(([k,v])=>`${k}:${v}`).join(' / '),
+    要確認: issues.join(' / '),
+    判定: coverRate>=100 ? 'OK' : missedDays.length ? '漏れあり' : '要確認',
+    _coveredDays: [...coveredDays],
+    _totalDays: total,
+    _month: mo,
+    _year: yr,
+  };
+}
+
+function parseShobo(msg, facility){
+  const t = msg.text;
+  const hasAttachment = /添付|PDF|docx|xlsx|ファイル|画像/.test(t);
+  const hasPlan = /計画書|実施計画/.test(t);
+  const hasReport = /報告書|実施報告|実施しました|完了/.test(t);
+  const dateMatch = t.match(/(\d{1,2})[\/月](\d{1,2})日?.*?(実施|予定|訓練)/);
+  const implDate = dateMatch ? `${dateMatch[1]}/${dateMatch[2]}` : '';
+  const isMissing = /未提出|提出なし|未実施/.test(t);
+
+  const issues = [];
+  if(!hasPlan) issues.push('計画書なし');
+  if(!hasReport) issues.push('報告書なし');
+  if(!hasAttachment) issues.push('添付不明');
+
+  return {
+    施設名: facility ? facility.short||facility.name : '不明',
+    担当AM: facility ? facility.am : '',
+    投稿日: msg.date,
+    実施日: implDate,
+    計画書: hasPlan ? 'あり' : 'なし',
+    報告書: hasReport ? 'あり' : 'なし',
+    添付: hasAttachment ? 'あり' : '不明',
+    要確認: issues.join(' / '),
+    判定: isMissing ? '未提出' : (!hasPlan || !hasReport) ? '要確認' : 'OK',
+  };
+}
+
+function parseYell(msg, facility){
+  const t = msg.text;
+  const hasAttachment = /添付|PDF|docx|xlsx|ファイル|画像/.test(t);
+  const dateMatch = t.match(/(\d{1,2})[\/月](\d{1,2})/);
+  const implDate = dateMatch ? `${dateMatch[1]}/${dateMatch[2]}` : '';
+  const circulationDone = /全職員|回覧完了|全員確認/.test(t);
+  const monthMatch = t.match(/(\d{1,2})月[分の]?[YELL会議議事録]/i) || t.match(/(\d{4})[\/\-](\d{1,2})/);
+  const repMonth = monthMatch ? (monthMatch[2]||monthMatch[1]) + '月' : '';
+
+  const issues = [];
+  if(!hasAttachment) issues.push('添付なし');
+  if(!implDate) issues.push('実施日不明');
+
+  return {
+    施設名: facility ? facility.short||facility.name : '不明',
+    担当AM: facility ? facility.am : '',
+    対象月: repMonth,
+    投稿日: msg.date,
+    実施日: implDate,
+    添付: hasAttachment ? 'あり' : 'なし',
+    回覧完了: circulationDone ? '済' : '未確認',
+    要確認: issues.join(' / '),
+    判定: !hasAttachment ? '要確認' : 'OK',
+  };
+}
+
+const JIKO_TYPES = ['転倒','転落','落薬','誤薬','服薬忘れ','離設','無断外出','他害','車両事故','火災報知器','インシデント','アクシデント','骨折','打撲','受傷'];
+
+function parseJiko(msg, facility){
+  const t = msg.text;
+  const hasAttachment = /添付|PDF|docx|xlsx|ファイル|画像|報告書/.test(t);
+  const types = JIKO_TYPES.filter(k=>t.includes(k));
+  const countMatch = t.match(/(\d+)\s*件/);
+  const count = countMatch ? Number(countMatch[1]) : 1;
+  const dateMatch = t.match(/発生日[：:　 ]*(\d{1,2})[\/月](\d{1,2})/);
+  const incidentDate = dateMatch ? `${dateMatch[1]}/${dateMatch[2]}` : '';
+  const adminReport = /行政報告|行政へ報告|市区町村|自治体報告/.test(t);
+  const summary = t.slice(0,120).replace(/\n/g,'　');
+
+  return {
+    施設名: facility ? facility.short||facility.name : '不明',
+    担当AM: facility ? facility.am : '',
+    投稿日: msg.date,
+    発生日: incidentDate,
+    件数: count,
+    事故種別: types.join(' / ') || '不明',
+    内容概要: summary,
+    添付: hasAttachment ? 'あり' : 'なし',
+    行政報告: adminReport ? '済' : '未確認',
+    要確認: !hasAttachment ? '報告書添付なし' : '',
+    判定: !hasAttachment ? '要確認' : 'OK',
+  };
+}
+
+function parseRec(msg, facility){
+  const t = msg.text;
+  const hasAttachment = /添付|PDF|docx|xlsx|ファイル|画像/.test(t);
+  const isPlan = /計画書|実施計画|稟議/.test(t);
+  const isReport = /報告書|実施報告|実施しました|完了/.test(t);
+  const isRevision = /修正版|訂正版|差替/.test(t);
+  const contents = ['お花見','夏祭り','クリスマス会','BBQ','町内清掃','外食','旅行','映画','ゲーム','カラオケ','スポーツ','工作','料理'].filter(k=>t.includes(k));
+  const monthMatch = t.match(/(\d{1,2})月[分の]?[レク稟]/);
+  const dateMatch = t.match(/(\d{1,2})[\/月](\d{1,2})日?.*?(予定|実施)/);
+
+  const issues = [];
+  if(isRevision) issues.push('修正版');
+  if(isPlan && !isReport) issues.push('報告書未確認');
+  if(!isReport && !isPlan) issues.push('種別不明');
+  if(!hasAttachment) issues.push('添付不明');
+
+  return {
+    施設名: facility ? facility.short||facility.name : '不明',
+    担当AM: facility ? facility.am : '',
+    対象月: monthMatch ? monthMatch[1]+'月' : '',
+    投稿日: msg.date,
+    実施日: dateMatch ? `${dateMatch[1]}/${dateMatch[2]}` : '',
+    種別: isPlan && isReport ? '計画＋報告' : isPlan ? '計画書' : isReport ? '報告書' : '不明',
+    レク内容: contents.join(' / '),
+    添付: hasAttachment ? 'あり' : '不明',
+    要確認: issues.join(' / '),
+    判定: (!isPlan && !isReport) ? '要確認' : (isPlan && isReport) ? 'OK' : (isPlan ? '計画のみ' : '報告のみ'),
+  };
+}
+
+// ========================
+// MAIN RUN
+// ========================
+function run(){
+  const text = document.getElementById('chatInput').value.trim();
+  if(!text){ setStatus('チャット文章を入力してください', true); return; }
+  const targetMonth = getTargetMonth();
+  state.currentMonth = targetMonth;
+
+  // Reset results
+  Object.keys(state.results).forEach(k => state.results[k] = []);
+  state.issues = [];
+
+  const messages = splitMessages(text);
+  setStatus(`${messages.length}件のメッセージを解析中...`);
+
+  for(const msg of messages){
+    const type = classifyMessage(msg.text);
+    const facility = extractFacilityFromText(msg.text);
+    if(!type){ state.results.unmatched.push({text:msg.text.slice(0,80), date:msg.date}); continue; }
+
+    let row;
+    switch(type){
+      case 'sabikan': row = parseSabikan(msg, facility); break;
+      case 'kenshu':  row = parseKenshu(msg, facility, targetMonth); break;
+      case 'nisshi':  row = parseNisshi(msg, facility, targetMonth); break;
+      case 'shobo':   row = parseShobo(msg, facility); break;
+      case 'yell':    row = parseYell(msg, facility); break;
+      case 'jiko':    row = parseJiko(msg, facility); break;
+      case 'rec':     row = parseRec(msg, facility); break;
+    }
+    if(row){
+      if(!facility) row._unregistered = true;
+      state.results[type].push(row);
+      if(row.判定 && row.判定 !== 'OK'){
+        state.issues.push({
+          AM: row.担当AM||'不明',
+          施設: row.施設名||'不明',
+          報告種別: TYPE_LABELS[type]||type,
+          要確認内容: row.要確認||row.判定,
+          詳細: (row.内容概要||'').slice(0,60),
+          判定: row.判定,
+          前回比較: '新規発生',
+        });
+      }
+      if(row._unregistered){
+        state.issues.push({AM:'未登録',施設:'マスタ未登録',報告種別:TYPE_LABELS[type]||type,要確認内容:'施設名がマスタに未登録',詳細:msg.text.slice(0,60),判定:'要確認',前回比較:'新規発生'});
+      }
+    }
+  }
+
+  renderAll();
+  document.getElementById('issueBadge').textContent = state.issues.length;
+  setStatus(`解析完了：${messages.length}件のメッセージ、要確認 ${state.issues.length}件`, false, true);
+}
+
+const TYPE_LABELS = {sabikan:'サビ管日報',kenshu:'研修',nisshi:'業務日誌',shobo:'消防・防災',yell:'YELL会議',jiko:'事故報告',rec:'レクリエーション'};
+
+function setStatus(msg, err=false, ok=false){
+  const el = document.getElementById('parseStatus');
+  el.innerHTML = `<span class="${err?'danger':ok?'ok':''}">${esc(msg)}</span>`;
+}
+
+// ========================
+// RENDER HELPERS
+// ========================
+function esc(v){ return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+
+function renderTable(id, rows, skipKeys=[]){
+  const table = document.getElementById(id);
+  if(!table) return;
+  if(!rows || !rows.length){ table.innerHTML='<tr><td class="left">データなし</td></tr>'; return; }
+  const cols = Object.keys(rows[0]).filter(k=>!k.startsWith('_') && !skipKeys.includes(k));
+  const leftCols = new Set(['施設名','施設','担当AM','AM','氏名','要確認内容','詳細','内容概要','提出済期間','事故種別','レク内容','運営情報','前回比較']);
+  const judgeMap = {'OK':'pill-ok','要確認':'pill-warn','未提出':'pill-danger','漏れあり':'pill-warn','計画のみ':'pill-warn','報告のみ':'pill-warn','不一致':'pill-danger','一致':'pill-ok','なし一致':'pill-none','新規発生':'pill-danger','未改善':'pill-warn','改善':'pill-ok','変化なし':'pill-none'};
+  const header = `<thead><tr>${cols.map(c=>`<th class="${leftCols.has(c)?'left':''}">${esc(c)}</th>`).join('')}</tr></thead>`;
+  const body = `<tbody>${rows.map(r=>`<tr>${cols.map(c=>{
+    const v = r[c];
+    const vs = String(v??'');
+    const isJudge = c==='判定'||c==='⑨⑪判定'||c==='前回比較';
+    const cls = leftCols.has(c)?'left':'';
+    if(isJudge && judgeMap[vs]) return `<td class="${cls}"><span class="pill ${judgeMap[vs]}">${esc(vs)}</span></td>`;
+    return `<td class="${cls}">${esc(vs)}</td>`;
+  }).join('')}</tr>`).join('')}</tbody>`;
+  table.innerHTML = header + body;
+}
+
+function renderAll(){
+  renderDashboard();
+  renderIssueTable();
+  renderTable('sabikanTable', state.results.sabikan);
+  renderTable('kenshuTable', state.results.kenshu);
+  renderNisshi();
+  renderTable('shoboTable', state.results.shobo);
+  renderTable('yellTable', state.results.yell);
+  renderJiko();
+  renderTable('recTable', state.results.rec);
+  updateFilterOptions();
+}
+
+// ========================
+// DASHBOARD
+// ========================
+function renderDashboard(){
+  const r = state.results;
+  const totalFacilities = state.master.filter(f=>f.active).length;
+  const issueCount = state.issues.length;
+  const issueFacilities = new Set(state.issues.map(i=>i.施設)).size;
+  const kenshuMiss = r.kenshu.filter(x=>x.判定==='未提出'||x.要確認?.includes('未提出')).length;
+  const nisshinMiss = r.nisshi.filter(x=>x.判定==='漏れあり').length;
+  const shoboMiss = r.shobo.filter(x=>x.判定==='未提出').length;
+  const yellMiss = r.yell.filter(x=>x.判定==='未提出').length;
+  const jikoCount = r.jiko.reduce((s,x)=>s+(Number(x.件数)||1),0);
+  const jikoFac = new Set(r.jiko.map(x=>x.施設名)).size;
+  const recPlan = r.rec.filter(x=>x.種別==='計画書'||x.種別==='計画＋報告').length;
+  const recReport = r.rec.filter(x=>x.種別==='報告書'||x.種別==='計画＋報告').length;
+
+  const metrics = [
+    {label:'対象施設数', val:totalFacilities, cls:''},
+    {label:'要確認施設数', val:issueFacilities, cls: issueFacilities>0?'danger-bg':'ok-bg'},
+    {label:'要確認件数', val:issueCount, cls:issueCount>0?'warn-bg':'ok-bg'},
+    {label:'研修 要確認/未提出', val:kenshuMiss, cls:kenshuMiss>0?'warn-bg':'ok-bg'},
+    {label:'業務日誌 漏れあり', val:nisshinMiss, cls:nisshinMiss>0?'warn-bg':'ok-bg'},
+    {label:'消防・防災 要確認', val:shoboMiss, cls:shoboMiss>0?'warn-bg':'ok-bg'},
+    {label:'YELL 要確認', val:yellMiss, cls:yellMiss>0?'warn-bg':'ok-bg'},
+    {label:'事故報告 件数', val:jikoCount, cls:jikoCount>0?'danger-bg':'ok-bg'},
+    {label:'事故報告 施設数', val:jikoFac, cls:jikoFac>0?'warn-bg':'ok-bg'},
+    {label:'レク計画 件数', val:recPlan, cls:''},
+    {label:'レク報告 件数', val:recReport, cls:''},
+  ];
+
+  document.getElementById('dashMetrics').innerHTML = metrics.map(m=>
+    `<div class="metric ${m.cls}"><div class="label">${esc(m.label)}</div><div class="value">${m.val}</div></div>`
+  ).join('');
+
+  // Preview top issues
+  const top = state.issues.slice(0,10);
+  if(top.length){
+    const rows = top.map(i=>`<tr><td>${esc(i.AM)}</td><td>${esc(i.施設)}</td><td>${esc(i.報告種別)}</td><td class="left">${esc(i.要確認内容)}</td><td class="left"><span class="small">${esc(i.詳細)}</span></td><td><span class="pill ${i.判定==='OK'?'pill-ok':'pill-warn'}">${esc(i.判定)}</span></td></tr>`).join('');
+    document.getElementById('dashIssuePreview').innerHTML = `
+      <div class="section-title">要確認プレビュー（上位10件）</div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>AM</th><th>施設</th><th>種別</th><th class="left">要確認内容</th><th class="left">詳細</th><th>判定</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>`;
+  } else {
+    document.getElementById('dashIssuePreview').innerHTML = '<p class="ok">要確認項目はありません。</p>';
+  }
+}
+
+// ========================
+// ISSUE TABLE
+// ========================
+function renderIssueTable(){
+  const am = document.getElementById('filterAM')?.value || '';
+  const fac = document.getElementById('filterFacility')?.value || '';
+  const type = document.getElementById('filterType')?.value || '';
+  const status = document.getElementById('filterStatus')?.value || '';
+  let rows = state.issues;
+  if(am) rows = rows.filter(r=>r.AM===am);
+  if(fac) rows = rows.filter(r=>r.施設===fac);
+  if(type) rows = rows.filter(r=>r.報告種別===type);
+  if(status) rows = rows.filter(r=>r.判定===status);
+  renderTable('issueTable', rows);
+}
+
+function updateFilterOptions(){
+  const amSet = new Set(state.issues.map(i=>i.AM).filter(Boolean));
+  const facSet = new Set(state.issues.map(i=>i.施設).filter(Boolean));
+  const amSel = document.getElementById('filterAM');
+  const facSel = document.getElementById('filterFacility');
+  if(amSel){
+    amSel.innerHTML = `<option value="">全AM</option>` + [...amSet].sort().map(v=>`<option>${esc(v)}</option>`).join('');
+  }
+  if(facSel){
+    facSel.innerHTML = `<option value="">全施設</option>` + [...facSet].sort().map(v=>`<option>${esc(v)}</option>`).join('');
+  }
+}
+
+// ========================
+// NISSHI CALENDAR
+// ========================
+function renderNisshi(){
+  renderTable('nisshiTable', state.results.nisshi, ['_coveredDays','_totalDays','_month','_year']);
+  const box = document.getElementById('nisshiCalendar');
+  if(!state.results.nisshi.length){ box.innerHTML=''; return; }
+  let html = '<div class="section-title">業務日誌 カバー状況</div>';
+  for(const row of state.results.nisshi){
+    const total = row._totalDays || 30;
+    const covered = new Set(row._coveredDays||[]);
+    const month = row._month || '';
+    html += `<div style="margin-bottom:12px"><b>${esc(row.施設名)}</b> ${esc(row.対象月)} <span class="small">(${covered.size}/${total}日)</span>`;
+    html += `<div class="calendar-grid">`;
+    for(let d=1;d<=total;d++){
+      const cls = covered.has(d)?'cal-ok':'cal-miss';
+      html += `<div class="cal-day ${cls}">${d}</div>`;
+    }
+    html += '</div></div>';
+  }
+  box.innerHTML = html;
+}
+
+// ========================
+// JIKO SUMMARY
+// ========================
+function renderJiko(){
+  renderTable('jikoTable', state.results.jiko);
+  const r = state.results.jiko;
+  if(!r.length){ document.getElementById('jikoSummary').innerHTML=''; return; }
+
+  // By facility
+  const byFac = {};
+  r.forEach(x=>{ byFac[x.施設名] = (byFac[x.施設名]||0) + (Number(x.件数)||1); });
+  // By type
+  const byType = {};
+  r.forEach(x=>(x.事故種別||'').split(' / ').forEach(t=>{ if(t&&t!=='不明') byType[t]=(byType[t]||0)+1; }));
+
+  const facRows = Object.entries(byFac).sort((a,b)=>b[1]-a[1])
+    .map(([f,c])=>`<tr><td class="left">${esc(f)}</td><td>${c}</td></tr>`).join('');
+  const typeRows = Object.entries(byType).sort((a,b)=>b[1]-a[1])
+    .map(([t,c])=>`<tr><td class="left">${esc(t)}</td><td>${c}</td></tr>`).join('');
+
+  document.getElementById('jikoSummary').innerHTML = `
+    <div class="row" style="gap:16px;align-items:flex-start">
+      <div>
+        <div class="section-title">施設別事故件数</div>
+        <div class="table-wrap" style="max-height:220px">
+          <table><thead><tr><th class="left">施設</th><th>件数</th></tr></thead><tbody>${facRows}</tbody></table>
+        </div>
+      </div>
+      <div>
+        <div class="section-title">事故種別件数</div>
+        <div class="table-wrap" style="max-height:220px">
+          <table><thead><tr><th class="left">種別</th><th>件数</th></tr></thead><tbody>${typeRows}</tbody></table>
+        </div>
+      </div>
+    </div>`;
+}
+
+// ========================
+// SAVE / COMPARE
+// ========================
+function loadHistory(){
+  try{ const raw=localStorage.getItem(HISTORY_KEY); return raw?JSON.parse(raw):[]; }
+  catch(e){ return []; }
+}
+function storeHistory(arr){ localStorage.setItem(HISTORY_KEY, JSON.stringify(arr)); }
+
+function saveSnapshot(){
+  if(!state.results.sabikan.length && !state.results.kenshu.length && !state.issues.length){
+    alert('先にチャット文章を解析してください。'); return;
+  }
+  const snap = {
+    id: Date.now(),
+    savedAt: new Date().toISOString(),
+    month: state.currentMonth,
+    issues: JSON.parse(JSON.stringify(state.issues)),
+    results: JSON.parse(JSON.stringify(state.results)),
+  };
+  const history = loadHistory();
+  history.push(snap);
+  storeHistory(history);
+  renderSnapshotList();
+  alert(`保存しました（${new Date().toLocaleString('ja-JP')}）`);
+}
+
+function renderSnapshotList(){
+  const history = loadHistory();
+  const sel1 = document.getElementById('cmpA');
+  const sel2 = document.getElementById('cmpB');
+  const opts = history.map(s=>`<option value="${s.id}">${esc(s.savedAt.slice(0,16).replace('T',' '))} (${esc(s.month)})</option>`).join('');
+  if(sel1) sel1.innerHTML = opts;
+  if(sel2) sel2.innerHTML = opts;
+  document.getElementById('snapshotList').textContent = `保存済み ${history.length}件`;
+}
+
+function deleteSnapshot(){
+  const id = Number(document.getElementById('cmpA').value);
+  const history = loadHistory().filter(s=>s.id!==id);
+  storeHistory(history);
+  renderSnapshotList();
+}
+
+function runComparison(){
+  const idA = Number(document.getElementById('cmpA').value);
+  const idB = Number(document.getElementById('cmpB').value);
+  const history = loadHistory();
+  const snapA = history.find(s=>s.id===idA);
+  const snapB = history.find(s=>s.id===idB);
+  if(!snapA||!snapB){ alert('比較するスナップショットを選択してください'); return; }
+
+  const keyA = new Map(snapA.issues.map(i=>[`${i.施設}||${i.報告種別}||${i.要確認内容}`, i]));
+  const keyB = new Map(snapB.issues.map(i=>[`${i.施設}||${i.報告種別}||${i.要確認内容}`, i]));
+
+  const rows = [];
+  for(const [k,i] of keyB){
+    const prev = keyA.has(k) ? '未改善' : '新規発生';
+    rows.push({...i, 前回比較: prev});
+  }
+  for(const [k,i] of keyA){
+    if(!keyB.has(k)) rows.push({...i, 前回比較:'改善'});
+  }
+  rows.sort((a,b)=>['新規発生','未改善','改善'].indexOf(a.前回比較)-['新規発生','未改善','改善'].indexOf(b.前回比較));
+  renderTable('compareTable', rows);
+}
+
+// ========================
+// SHARE TEXT
+// ========================
+function generateShareText(){
+  const ym = state.currentMonth;
+  const r = state.results;
+  let text = `【チャット報告確認結果】\n対象：${ym}\n\n`;
+
+  const kenshuIssues = r.kenshu.filter(x=>x.要確認);
+  if(kenshuIssues.length){
+    text += '■研修 要確認\n';
+    kenshuIssues.forEach(x=>{ text += `${x.施設名}：${x.要確認}\n`; });
+    text += '\n';
+  }
+
+  const nisshuIssues = r.nisshi.filter(x=>x.判定!=='OK');
+  if(nisshuIssues.length){
+    text += '■業務日誌 漏れあり\n';
+    nisshuIssues.forEach(x=>{ text += `${x.施設名}：${x.要確認||x.判定}\n`; });
+    text += '\n';
+  }
+
+  const shoboIssues = r.shobo.filter(x=>x.判定!=='OK');
+  if(shoboIssues.length){
+    text += '■消防・防災 要確認\n';
+    shoboIssues.forEach(x=>{ text += `${x.施設名}：${x.要確認||x.判定}\n`; });
+    text += '\n';
+  }
+
+  const yellIssues = r.yell.filter(x=>x.判定!=='OK');
+  if(yellIssues.length){
+    text += '■YELL会議 要確認\n';
+    yellIssues.forEach(x=>{ text += `${x.施設名}：${x.要確認||x.判定}\n`; });
+    text += '\n';
+  }
+
+  const sabikanIssues = r.sabikan.filter(x=>x.判定==='要確認');
+  if(sabikanIssues.length){
+    text += '■サビ管日報 要確認\n';
+    sabikanIssues.forEach(x=>{ text += `${x.施設名}：${x.要確認||x['⑨⑪判定']}\n`; });
+    text += '\n';
+  }
+
+  const jikoFac = {};
+  r.jiko.forEach(x=>{ jikoFac[x.施設名]=(jikoFac[x.施設名]||0)+(Number(x.件数)||1); });
+  if(Object.keys(jikoFac).length){
+    text += '■事故報告\n';
+    Object.entries(jikoFac).sort((a,b)=>b[1]-a[1]).forEach(([f,c])=>{ text += `${f}：${c}件\n`; });
+    text += '\n';
+  }
+
+  const recIssues = r.rec.filter(x=>x.判定!=='OK');
+  if(recIssues.length){
+    text += '■レクリエーション 要確認\n';
+    recIssues.forEach(x=>{ text += `${x.施設名}：${x.判定}\n`; });
+    text += '\n';
+  }
+
+  text += '各AMにて担当施設の確認をお願いいたします。';
+  document.getElementById('shareText').value = text;
+}
+
+function copyShareText(){
+  const el = document.getElementById('shareText');
+  navigator.clipboard.writeText(el.value).then(()=>alert('クリップボードにコピーしました'));
+}
+
+// ========================
+// CSV DOWNLOAD
+// ========================
+function csvCell(v){ return '"'+String(v??'').replace(/"/g,'""')+'"'; }
+
+function downloadCsv(type){
+  const labelMap = {sabikan:'サビ管日報',kenshu:'研修',nisshi:'業務日誌',shobo:'消防防災',yell:'YELL会議',jiko:'事故報告',rec:'レクリエーション',issue:'要確認一覧'};
+  let rows = type==='issue' ? state.issues : (state.results[type]||[]);
+  if(!rows.length){ alert('データがありません'); return; }
+  const skipKeys = type==='nisshi' ? ['_coveredDays','_totalDays','_month','_year','_unregistered'] : ['_unregistered'];
+  const cols = Object.keys(rows[0]).filter(k=>!skipKeys.includes(k));
+  const bom = new Uint8Array([0xEF,0xBB,0xBF]);
+  const lines = [cols.join(',')].concat(rows.map(r=>cols.map(c=>csvCell(r[c])).join(',')));
+  const blob = new Blob([bom, lines.join('\r\n')],{type:'text/csv;charset=utf-8'});
+  const a = document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download=`チャット報告_${labelMap[type]||type}.csv`; a.click(); URL.revokeObjectURL(a.href);
+}
+
+function exportResultCsv(){ downloadCsv('issue'); }
+
+// ========================
+// JSON BACKUP / RESTORE
+// ========================
+function exportJson(){
+  const data = {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    master: state.master,
+    history: loadHistory(),
+    lastResults: state.results,
+    lastIssues: state.issues,
+    lastMonth: state.currentMonth,
+  };
+  const blob = new Blob([JSON.stringify(data,null,2)],{type:'application/json;charset=utf-8'});
+  const a = document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download='チャット報告チェッカー_バックアップ.json'; a.click(); URL.revokeObjectURL(a.href);
+}
+
+document.getElementById('jsonImport').addEventListener('change', async e=>{
+  const file = e.target.files[0]; if(!file) return;
+  try{
+    const text = await file.text();
+    const obj = JSON.parse(text);
+    if(obj.master) { state.master = obj.master; saveMaster(); }
+    if(obj.history) storeHistory(obj.history);
+    if(obj.lastResults) state.results = obj.lastResults;
+    if(obj.lastIssues) state.issues = obj.lastIssues;
+    if(obj.lastMonth) state.currentMonth = obj.lastMonth;
+    renderAll();
+    renderSnapshotList();
+    alert('読み込み完了');
+  }catch(err){ alert('読み込みに失敗しました: '+err.message); }
+  e.target.value='';
+});
+
+// ========================
+// FACILITY MASTER UI
+// ========================
+function renderMasterTable(){
+  const table = document.getElementById('masterTable');
+  const rows = state.master;
+  if(!rows.length){ table.innerHTML='<tr><td>データなし</td></tr>'; return; }
+  const cols = ['name','short','am','area','aliases','types','active'];
+  const labels = {name:'正式施設名',short:'表示名',am:'担当AM',area:'エリア',aliases:'表記ゆれ（カンマ区切り）',types:'対象報告',active:'有効'};
+  const header = `<thead><tr>${cols.map(c=>`<th>${esc(labels[c]||c)}</th>`).join('')}<th>削除</th></tr></thead>`;
+  const body = `<tbody>${rows.map((r,i)=>`<tr>
+    ${cols.map(c=>`<td><input value="${esc(r[c]??'')}${c==='active'?'" type="checkbox"'+(r.active?' checked':'')+'" onchange="masterEdit('+i+',\''+c+'\',this.checked)':'" onchange="masterEdit('+i+',\''+c+'\',this.value)'}"/></td>`).join('')}
+    <td><button class="btn btn-danger" style="padding:3px 8px;font-size:11px" onclick="deleteFacility(${i})">削除</button></td>
+  </tr>`).join('')}</tbody>`;
+  table.innerHTML = header + body;
+}
+
+function masterEdit(idx, col, val){
+  state.master[idx][col] = (col==='active') ? Boolean(val) : val;
+  saveMaster();
+}
+
+function addFacilityRow(){
+  const maxId = Math.max(0, ...state.master.map(f=>f.id||0));
+  state.master.push({id:maxId+1, name:'新施設', short:'', am:'', area:'', aliases:'', types:'サビ管日報,研修,業務日誌,消防・防災,YELL会議,事故報告,レクリエーション', active:true});
+  saveMaster();
+  renderMasterTable();
+}
+
+function deleteFacility(idx){
+  if(!confirm('削除しますか？')) return;
+  state.master.splice(idx,1);
+  saveMaster();
+  renderMasterTable();
+}
+
+function resetMaster(){
+  if(!confirm('マスタをデフォルトに戻しますか？（既存データが消えます）')) return;
+  state.master = JSON.parse(JSON.stringify(DEFAULT_MASTER));
+  saveMaster();
+  renderMasterTable();
+}
+
+function exportMasterCsv(){
+  const cols = ['name','short','am','area','aliases','types','active'];
+  const labels = ['正式施設名','表示名','担当AM','エリア','表記ゆれ','対象報告','有効'];
+  const lines = [labels.join(',')].concat(state.master.map(r=>cols.map(c=>csvCell(r[c])).join(',')));
+  const bom = new Uint8Array([0xEF,0xBB,0xBF]);
+  const blob = new Blob([bom, lines.join('\r\n')],{type:'text/csv;charset=utf-8'});
+  const a = document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download='施設マスタ.csv'; a.click(); URL.revokeObjectURL(a.href);
+}
+
+document.getElementById('masterCsvImport').addEventListener('change', async e=>{
+  const file = e.target.files[0]; if(!file) return;
+  try{
+    const text = await file.text();
+    const rows = parseCsvSimple(text);
+    if(!rows.length){ alert('データが読み込めませんでした'); return; }
+    const header = Object.keys(rows[0]);
+    const colMap = {
+      '正式施設名':'name','表示名':'short','担当AM':'am','エリア':'area',
+      '表記ゆれ':'aliases','対象報告':'types','有効':'active',
+      'name':'name','short':'short','am':'am','area':'area','aliases':'aliases','types':'types','active':'active'
+    };
+    state.master = rows.map((r,i)=>{
+      const obj = {id:i+1};
+      for(const [k,v] of Object.entries(r)){ const mk=colMap[k]; if(mk) obj[mk]=v; }
+      obj.active = obj.active!=='false' && obj.active!=='0';
+      return obj;
+    });
+    saveMaster();
+    renderMasterTable();
+    alert(`${state.master.length}件のマスタを取り込みました`);
+  }catch(err){ alert('CSVの読み込みに失敗しました: '+err.message); }
+  e.target.value='';
+});
+
+function exportMasterJson(){
+  const blob = new Blob([JSON.stringify(state.master,null,2)],{type:'application/json;charset=utf-8'});
+  const a = document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download='施設マスタ.json'; a.click(); URL.revokeObjectURL(a.href);
+}
+
+document.getElementById('masterJsonImport').addEventListener('change', async e=>{
+  const file = e.target.files[0]; if(!file) return;
+  try{
+    const text = await file.text();
+    state.master = JSON.parse(text);
+    saveMaster();
+    renderMasterTable();
+    alert('マスタを読み込みました');
+  }catch(err){ alert('読み込みに失敗しました'); }
+  e.target.value='';
+});
+
+// Simple CSV parser
+function parseCsvSimple(text){
+  const rows=[]; let row=[],field='',inQ=false;
+  for(let i=0;i<text.length;i++){
+    const c=text[i],n=text[i+1];
+    if(inQ){ if(c==='"'&&n==='"'){field+='"';i++;}else if(c==='"')inQ=false;else field+=c; }
+    else{ if(c==='"')inQ=true; else if(c===','){row.push(field);field='';}
+      else if(c==='\n'){row.push(field);rows.push(row);row=[];field='';}
+      else if(c!=='\r')field+=c; }
+  }
+  row.push(field);rows.push(row);
+  const header=rows.shift().map(h=>h.trim().replace(/^﻿/,''));
+  return rows.filter(r=>r.some(v=>v.trim())).map(r=>{ const obj={};header.forEach((h,i)=>obj[h]=(r[i]??'').trim());return obj; });
+}
+
+// ========================
+// TAB SWITCHING
+// ========================
+document.getElementById('mainTabBar').addEventListener('click', e=>{
+  const tab = e.target.closest('.tab');
+  if(!tab) return;
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));
+  tab.classList.add('active');
+  const id = 'tab-' + tab.dataset.tab;
+  document.getElementById(id)?.classList.add('active');
+  if(tab.dataset.tab==='master') renderMasterTable();
+  if(tab.dataset.tab==='compare') renderSnapshotList();
+});
+
+// ========================
+// INIT
+// ========================
+document.getElementById('runBtn').addEventListener('click', run);
+document.getElementById('clearBtn').addEventListener('click', ()=>{
+  document.getElementById('chatInput').value='';
+  Object.keys(state.results).forEach(k=>state.results[k]=[]);
+  state.issues=[];
+  document.getElementById('parseStatus').textContent='';
+  document.getElementById('issueBadge').textContent='0';
+  document.getElementById('dashMetrics').innerHTML='';
+  document.getElementById('dashIssuePreview').innerHTML='';
+});
+
+// Set default month to current
+(()=>{
+  const now = new Date();
+  document.getElementById('targetMonth').value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+})();
+
+loadMaster();
+renderMasterTable();
+renderSnapshotList();
+</script>
+</body>
+</html>
