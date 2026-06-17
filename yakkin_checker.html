@@ -1,0 +1,934 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>夜勤チェッカー</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap');
+
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #222638;
+    --border: #2e3347;
+    --text: #e8eaf0;
+    --text-dim: #7a8099;
+    --accent: #4f7cff;
+    --accent-glow: rgba(79,124,255,0.15);
+    --danger: #ff4f6a;
+    --danger-bg: rgba(255,79,106,0.1);
+    --warn: #f5a623;
+    --warn-bg: rgba(245,166,35,0.1);
+    --ok: #3ddc84;
+    --ok-bg: rgba(61,220,132,0.08);
+    --ok3: #00c8ff;
+    --ok3-bg: rgba(0,200,255,0.08);
+    --ok4: #c084fc;
+    --ok4-bg: rgba(192,132,252,0.08);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Noto Sans JP', sans-serif;
+    font-weight: 300;
+    min-height: 100vh;
+    padding: 32px 24px;
+  }
+
+  .header {
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    margin-bottom: 36px;
+  }
+  .header h1 { font-size: 22px; font-weight: 700; letter-spacing: 0.04em; }
+  .header .sub { font-size: 13px; color: var(--text-dim); font-family: 'DM Mono', monospace; }
+
+  /* アップロード */
+  .upload-zone {
+    border: 2px dashed var(--border);
+    border-radius: 12px;
+    padding: 48px 32px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    background: var(--surface);
+    position: relative;
+    margin-bottom: 32px;
+  }
+  .upload-zone:hover, .upload-zone.drag-over {
+    border-color: var(--accent);
+    background: var(--accent-glow);
+  }
+  .upload-zone input[type=file] {
+    position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%;
+  }
+  .upload-icon { font-size: 40px; margin-bottom: 12px; display: block; }
+  .upload-zone p { font-size: 15px; color: var(--text-dim); line-height: 1.8; }
+  .upload-zone strong { color: var(--accent); font-weight: 500; }
+
+  /* 施設名バー */
+  .facility-bar {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 28px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .facility-name { font-size: 17px; font-weight: 700; color: var(--accent); }
+  .facility-month {
+    font-family: 'DM Mono', monospace;
+    font-size: 13px;
+    color: var(--text-dim);
+    background: var(--bg);
+    padding: 4px 10px;
+    border-radius: 6px;
+  }
+  .night-codes-summary { font-size: 12px; color: var(--text-dim); margin-left: auto; }
+  .night-codes-summary span {
+    display: inline-block;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 7px;
+    margin: 2px 2px;
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    color: var(--accent);
+  }
+
+  /* サマリー */
+  .summary-row {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+  }
+  .summary-card {
+    flex: 1;
+    min-width: 90px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 12px;
+    text-align: center;
+  }
+  .summary-card .num {
+    font-size: 26px;
+    font-weight: 700;
+    font-family: 'DM Mono', monospace;
+    line-height: 1;
+    margin-bottom: 6px;
+  }
+  .summary-card .label { font-size: 11px; color: var(--text-dim); }
+  .summary-card.danger .num { color: var(--danger); }
+  .summary-card.warn   .num { color: var(--warn); }
+  .summary-card.ok     .num { color: var(--ok); }
+  .summary-card.ok3    .num { color: var(--ok3); }
+  .summary-card.ok4    .num { color: var(--ok4); }
+  .summary-card.total  .num { color: var(--text); }
+
+  .addition-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px;
+    margin-bottom: 24px;
+    display: grid;
+    grid-template-columns: minmax(160px, 220px) 1fr;
+    gap: 16px;
+    align-items: center;
+  }
+  .addition-input label {
+    display: block;
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+  }
+  .addition-input input {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    font-size: 22px;
+    font-weight: 700;
+    padding: 10px 12px;
+  }
+  .addition-input input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-glow);
+  }
+  .addition-result {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(110px, 1fr));
+    gap: 10px;
+  }
+  .addition-metric {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+  }
+  .addition-metric .value {
+    font-family: 'DM Mono', monospace;
+    font-size: 24px;
+    font-weight: 700;
+    line-height: 1;
+    margin-bottom: 6px;
+  }
+  .addition-metric .caption {
+    font-size: 11px;
+    color: var(--text-dim);
+    line-height: 1.45;
+  }
+  .addition-metric.total .value { color: var(--accent); }
+  @media (max-width: 760px) {
+    .addition-panel { grid-template-columns: 1fr; }
+    .addition-result { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+
+  /* 未定義コード */
+  .unknown-section {
+    background: var(--surface);
+    border: 1px solid var(--warn);
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 24px;
+    display: none;
+  }
+  .unknown-section.show { display: block; }
+  .unknown-section h3 {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--warn);
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .unknown-codes { display: flex; flex-wrap: wrap; gap: 6px; }
+  .unknown-code-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    align-items: flex-start;
+  }
+  .unknown-code {
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+    padding: 4px 10px;
+    border-radius: 4px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .unknown-code:hover { border-color: var(--accent); color: var(--accent); }
+  .unknown-code.marked-night { border-color: var(--ok); color: var(--ok); background: var(--ok-bg); }
+  .unknown-code.has-night-char { border-color: var(--danger); color: var(--danger); background: var(--danger-bg); }
+  .unknown-code.has-night-char.marked-night { border-color: var(--ok); color: var(--ok); background: var(--ok-bg); }
+  .code-dates {
+    font-size: 10px;
+    color: var(--danger);
+    font-family: 'DM Mono', monospace;
+    padding-left: 4px;
+  }
+  .code-dates.normal { color: var(--text-dim); }
+
+  /* 凡例 */
+  .legend {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+  .legend-dot.danger { background: var(--danger); }
+  .legend-dot.warn   { background: var(--warn); }
+  .legend-dot.ok     { background: var(--ok); }
+  .legend-dot.ok3    { background: var(--ok3); }
+  .legend-dot.ok4    { background: var(--ok4); }
+
+  /* カレンダー */
+  .calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 8px;
+    margin-bottom: 36px;
+  }
+  .cal-header {
+    text-align: center;
+    font-size: 11px;
+    color: var(--text-dim);
+    padding: 8px 0;
+    font-family: 'DM Mono', monospace;
+  }
+  .cal-day {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 8px;
+    cursor: pointer;
+    transition: all 0.15s;
+    min-height: 72px;
+  }
+  .cal-day:hover { border-color: var(--accent); transform: translateY(-1px); }
+  .cal-day.active { border-color: var(--accent); background: var(--accent-glow); }
+  .cal-day.empty { background: transparent; border-color: transparent; cursor: default; }
+  .cal-day.empty:hover { transform: none; }
+  .cal-day .day-num { font-size: 11px; color: var(--text-dim); font-family: 'DM Mono', monospace; margin-bottom: 6px; }
+  .cal-day .count { font-size: 22px; font-weight: 700; font-family: 'DM Mono', monospace; line-height: 1; }
+  .cal-day .count-label { font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+
+  .cal-day.c-danger { border-color: var(--danger); background: var(--danger-bg); }
+  .cal-day.c-danger .count { color: var(--danger); }
+  .cal-day.c-warn   { border-color: var(--warn); background: var(--warn-bg); }
+  .cal-day.c-warn   .count { color: var(--warn); }
+  .cal-day.c-ok     .count { color: var(--ok); }
+  .cal-day.c-ok3    { border-color: var(--ok3); background: var(--ok3-bg); }
+  .cal-day.c-ok3    .count { color: var(--ok3); }
+  .cal-day.c-ok4    { border-color: var(--ok4); background: var(--ok4-bg); }
+  .cal-day.c-ok4    .count { color: var(--ok4); }
+
+  /* 詳細 */
+  .detail-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 32px;
+    display: none;
+  }
+  .detail-panel.show { display: block; }
+  .detail-date {
+    font-size: 18px;
+    font-weight: 700;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .badge.danger { background: var(--danger-bg); color: var(--danger); border: 1px solid var(--danger); }
+  .badge.warn   { background: var(--warn-bg);   color: var(--warn);   border: 1px solid var(--warn); }
+  .badge.ok     { background: var(--ok-bg);     color: var(--ok);     border: 1px solid var(--ok); }
+  .badge.ok3    { background: var(--ok3-bg);    color: var(--ok3);    border: 1px solid var(--ok3); }
+  .badge.ok4    { background: var(--ok4-bg);    color: var(--ok4);    border: 1px solid var(--ok4); }
+
+  .staff-list { display: flex; flex-direction: column; gap: 8px; }
+  .staff-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    background: var(--surface2);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+  .staff-code {
+    font-family: 'DM Mono', monospace;
+    font-size: 13px;
+    color: var(--accent);
+    background: var(--bg);
+    padding: 4px 10px;
+    border-radius: 6px;
+    min-width: 90px;
+    text-align: center;
+    border: 1px solid var(--border);
+  }
+  .staff-name { font-size: 14px; font-weight: 500; flex: 1; }
+  .staff-time { font-family: 'DM Mono', monospace; font-size: 12px; color: var(--text-dim); }
+  .no-staff {
+    padding: 24px;
+    text-align: center;
+    color: var(--danger);
+    font-size: 15px;
+    font-weight: 500;
+    background: var(--danger-bg);
+    border-radius: 8px;
+    border: 1px solid var(--danger);
+  }
+
+  /* ローディング */
+  .loading { display: none; text-align: center; padding: 40px; color: var(--text-dim); }
+  .loading.show { display: block; }
+  .spinner {
+    width: 32px; height: 32px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin: 0 auto 16px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .reset-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    font-family: 'Noto Sans JP', sans-serif;
+    transition: all 0.15s;
+  }
+  .reset-btn:hover { border-color: var(--danger); color: var(--danger); }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>夜勤チェッカー</h1>
+  <span class="sub">GH シフト確認ツール</span>
+</div>
+
+<div class="upload-zone" id="uploadZone">
+  <input type="file" id="fileInput" accept=".xlsx,.xls">
+  <span class="upload-icon">📋</span>
+  <p>シフト表（xlsx）を<strong>ドラッグ＆ドロップ</strong><br>またはクリックしてファイルを選択</p>
+</div>
+
+<div class="loading" id="loading">
+  <div class="spinner"></div>
+  <p>シフト表を読み込み中...</p>
+</div>
+
+<div id="resultArea" class="hidden">
+
+  <div class="facility-bar">
+    <div>
+      <div class="facility-name" id="facilityName">-</div>
+      <div class="facility-month" id="facilityMonth">-</div>
+    </div>
+    <div class="night-codes-summary" id="nightCodesSummary"></div>
+    <button class="reset-btn" onclick="resetApp()">別のファイルを読み込む</button>
+  </div>
+
+  <!-- 未定義コード警告 -->
+  <div class="unknown-section" id="unknownSection">
+    <h3>⚠️ マスタ未定義のコードが検出されました（クリックで夜勤として追加）</h3>
+    <div class="unknown-codes" id="unknownCodes"></div>
+  </div>
+
+  <!-- 夜勤加配算定 -->
+  <div class="addition-panel">
+    <div class="addition-input">
+      <label for="residentCount">利用者数</label>
+      <input type="number" id="residentCount" min="0" step="1" value="20">
+    </div>
+    <div class="addition-result">
+      <div class="addition-metric">
+        <div class="value" id="additionDays3">0</div>
+        <div class="caption">夜勤3名の日<br>半数分算定</div>
+      </div>
+      <div class="addition-metric">
+        <div class="value" id="additionDays4">0</div>
+        <div class="caption">夜勤4名以上の日<br>全利用者分算定</div>
+      </div>
+      <div class="addition-metric">
+        <div class="value" id="additionEligibleResidents">0</div>
+        <div class="caption">1日あたり最大<br>算定対象者数</div>
+      </div>
+      <div class="addition-metric total">
+        <div class="value" id="additionTotal">0</div>
+        <div class="caption">月の算定回数<br>日数 × 利用者数</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- サマリー -->
+  <div class="summary-row">
+    <div class="summary-card danger">
+      <div class="num" id="s0">0</div>
+      <div class="label">夜勤0名の日</div>
+    </div>
+    <div class="summary-card warn">
+      <div class="num" id="s1">0</div>
+      <div class="label">夜勤1名の日</div>
+    </div>
+    <div class="summary-card ok">
+      <div class="num" id="s2">0</div>
+      <div class="label">夜勤2名の日</div>
+    </div>
+    <div class="summary-card ok3">
+      <div class="num" id="s3">0</div>
+      <div class="label">夜勤3名の日</div>
+    </div>
+    <div class="summary-card ok4">
+      <div class="num" id="s4">0</div>
+      <div class="label">夜勤4名以上の日</div>
+    </div>
+    <div class="summary-card total">
+      <div class="num" id="sTotal">0</div>
+      <div class="label">対象日数</div>
+    </div>
+  </div>
+
+  <!-- 凡例 -->
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot danger"></div>0名（要注意）</div>
+    <div class="legend-item"><div class="legend-dot warn"></div>1名</div>
+    <div class="legend-item"><div class="legend-dot ok"></div>2名</div>
+    <div class="legend-item"><div class="legend-dot ok3"></div>3名</div>
+    <div class="legend-item"><div class="legend-dot ok4"></div>4名以上</div>
+  </div>
+
+  <div class="calendar-grid" id="calendarGrid"></div>
+
+  <div class="detail-panel" id="detailPanel">
+    <div class="detail-date" id="detailDate"></div>
+    <div class="staff-list" id="staffList"></div>
+  </div>
+
+</div>
+
+<script>
+let nightCodes = {};
+let extraNightCodes = {};
+let dayData = {};
+let unknownDateMap = {}; // code -> [dates]
+let activeDay = null;
+const WEEKDAYS = ['日','月','火','水','木','金','土'];
+
+// ===== ファイル読み込み =====
+const uploadZone = document.getElementById('uploadZone');
+const fileInput = document.getElementById('fileInput');
+
+uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('drag-over'); });
+uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag-over'));
+uploadZone.addEventListener('drop', e => {
+  e.preventDefault();
+  uploadZone.classList.remove('drag-over');
+  if (e.dataTransfer.files[0]) processFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', e => { if (e.target.files[0]) processFile(e.target.files[0]); });
+document.getElementById('residentCount').addEventListener('input', () => renderAdditionSummary());
+
+function processFile(file) {
+  document.getElementById('loading').classList.add('show');
+  uploadZone.classList.add('hidden');
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const wb = XLSX.read(e.target.result, { type: 'array', cellDates: true });
+      parseWorkbook(wb);
+    } catch(err) {
+      alert('読み込みに失敗しました: ' + err.message);
+      resetApp();
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// ===== ワークブック解析 =====
+function parseWorkbook(wb) {
+  nightCodes = {};
+  extraNightCodes = {};
+  dayData = {};
+  unknownDateMap = {};
+
+  // 1. マスタ設定から夜勤コード抽出
+  const masterSheet = wb.Sheets['マスタ設定'];
+  if (masterSheet) {
+    const master = XLSX.utils.sheet_to_json(masterSheet, { header: 1, defval: '' });
+    for (let i = 7; i < master.length; i++) {
+      const row = master[i];
+      const code = String(row[0] || '').trim();
+      const startRaw = row[4];
+      const endRaw = row[10];
+      if (!code || code === '略記号') continue;
+      const startStr = toTimeStr(startRaw);
+      const endStr = toTimeStr(endRaw);
+      if (!startStr) continue;
+      let isNight = false;
+      if (typeof endRaw === 'number' && endRaw >= 1) isNight = true;
+      else if (startStr >= '16:00' && endStr && endStr < '12:00' && endStr !== '') isNight = true;
+      if (isNight) nightCodes[code] = { start: startStr, end: endStr || '翌日' };
+    }
+  }
+
+  // 2. 入力シート解析
+  const inputSheet = wb.Sheets['入力シート【現場配布用】'];
+  if (!inputSheet) { alert('入力シートが見つかりません'); resetApp(); return; }
+  const data = XLSX.utils.sheet_to_json(inputSheet, { header: 1, defval: '' });
+
+  const facilityName = String(data[1]?.[1] || '').trim();
+  const yearVal = String(data[2]?.[1] || '').trim();
+  const monthVal = String(data[2]?.[9] || '').trim();
+
+  // 日付列マッピング
+  const dateRow = data[3] || [];
+  const colToDate = {};
+  for (let col = 5; col < dateRow.length; col++) {
+    const v = dateRow[col];
+    let d = null;
+    if (v instanceof Date) d = v;
+    else if (typeof v === 'number' && v > 40000) {
+      // Excelシリアル値はUTC変換すると日付がズレることがあるため、ローカル日付として作成
+      const excelEpoch = new Date(1899, 11, 30);
+      d = new Date(excelEpoch.getFullYear(), excelEpoch.getMonth(), excelEpoch.getDate() + Math.round(v));
+    } else if (typeof v === 'string' && v.includes('-')) {
+      // new Date('YYYY-MM-DD') はUTC扱いになりやすいため、ローカル日付として作成
+      const parts = v.split('-').map(Number);
+      if (parts.length >= 3 && parts.every(n => !isNaN(n))) {
+        d = new Date(parts[0], parts[1] - 1, parts[2]);
+      }
+    }
+    if (d && !isNaN(d.getTime())) colToDate[col] = formatDateLocal(d);
+  }
+
+  for (const dt of Object.values(colToDate)) {
+    if (!dayData[dt]) dayData[dt] = [];
+  }
+
+  const skipVals = new Set(['休','希望休','有','欠','管','','nan',' ']);
+  const allNight = { ...nightCodes, ...extraNightCodes };
+
+  for (let rowI = 5; rowI < data.length; rowI++) {
+    const r = data[rowI];
+    const staffName = String(r[2] || '').trim().replace(/\u3000/g, ' ');
+    if (!staffName || staffName === 'nan') continue;
+
+    for (const [colStr, dateStr] of Object.entries(colToDate)) {
+      const col = parseInt(colStr);
+      const cell = String(r[col] || '').trim();
+      if (!cell || skipVals.has(cell) || cell === 'nan') continue;
+
+      if (allNight[cell]) {
+        dayData[dateStr].push({
+          code: cell,
+          name: staffName,
+          start: allNight[cell].start,
+          end: allNight[cell].end
+        });
+      } else {
+        // 未定義コード収集
+        if (cell.length >= 2) {
+          if (!unknownDateMap[cell]) unknownDateMap[cell] = [];
+          if (!unknownDateMap[cell].includes(dateStr)) unknownDateMap[cell].push(dateStr);
+        }
+      }
+    }
+  }
+
+  // 表示
+  document.getElementById('facilityName').textContent = facilityName || '施設名不明';
+  document.getElementById('facilityMonth').textContent = `${yearVal}年 ${monthVal}月`;
+  const summaryEl = document.getElementById('nightCodesSummary');
+  summaryEl.textContent = '夜勤コード: ';
+  Object.keys(nightCodes).forEach(c => {
+    const sp = document.createElement('span');
+    sp.textContent = c;
+    summaryEl.appendChild(sp);
+  });
+
+  renderUnknownCodes();
+  renderCalendar(colToDate);
+  renderSummary();
+
+  document.getElementById('loading').classList.remove('show');
+  document.getElementById('resultArea').classList.remove('hidden');
+}
+
+function formatDateLocal(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function parseDateLocal(s) {
+  const [y, mo, d] = s.split('-').map(Number);
+  return new Date(y, mo - 1, d);
+}
+
+function toTimeStr(val) {
+  if (!val && val !== 0) return '';
+  if (typeof val === 'string') {
+    const m = val.match(/(\d+):(\d+)/);
+    return m ? `${m[1].padStart(2,'0')}:${m[2].padStart(2,'0')}` : '';
+  }
+  if (typeof val === 'number') {
+    if (val >= 1) return '翌日';
+    const totalMin = Math.round(val * 24 * 60);
+    const h = Math.floor(totalMin / 60);
+    const min = totalMin % 60;
+    return `${String(h).padStart(2,'0')}:${String(min).padStart(2,'0')}`;
+  }
+  if (val instanceof Date) {
+    return `${String(val.getHours()).padStart(2,'0')}:${String(val.getMinutes()).padStart(2,'0')}`;
+  }
+  return '';
+}
+
+// ===== 未定義コード表示 =====
+function renderUnknownCodes() {
+  const section = document.getElementById('unknownSection');
+  const container = document.getElementById('unknownCodes');
+
+  // 明け系・既知の日勤系は除外
+  const skipPatterns = ['明','サビ','常','非','振','管','日','延'];
+  const filtered = Object.entries(unknownDateMap).filter(([c]) =>
+    !nightCodes[c] && c !== 'nan' &&
+    !skipPatterns.some(p => c.startsWith(p)) &&
+    c.length >= 2
+  );
+
+  if (filtered.length === 0) { section.classList.remove('show'); return; }
+  section.classList.add('show');
+
+  container.innerHTML = '';
+  filtered.forEach(([code, dates]) => {
+    const hasNightChar = code.includes('夜');
+    const sortedDates = [...dates].sort();
+    const dateLabels = sortedDates.map(d => {
+      const dt = parseDateLocal(d);
+      return `${dt.getMonth()+1}/${dt.getDate()}(${WEEKDAYS[dt.getDay()]})`;
+    }).join(' ');
+
+    const item = document.createElement('div');
+    item.className = 'unknown-code-item';
+
+    const btn = document.createElement('div');
+    btn.className = 'unknown-code' + (hasNightChar ? ' has-night-char' : '');
+    btn.id = 'uc_' + code;
+    btn.textContent = (hasNightChar ? '🌙 ' : '') + code;
+    btn.addEventListener('click', () => toggleExtraNight(code));
+
+    const datesDiv = document.createElement('div');
+    datesDiv.className = 'code-dates' + (hasNightChar ? '' : ' normal');
+    datesDiv.textContent = (hasNightChar ? '⚠️ ' : '') + dateLabels;
+
+    item.appendChild(btn);
+    item.appendChild(datesDiv);
+    container.appendChild(item);
+  });
+}
+
+function toggleExtraNight(code) {
+  const el = document.getElementById('uc_' + code);
+  if (extraNightCodes[code]) {
+    delete extraNightCodes[code];
+    el.classList.remove('marked-night');
+    // dayDataから該当エントリを削除
+    for (const dt of Object.keys(dayData)) {
+      dayData[dt] = dayData[dt].filter(s => !(s.code === code && s.fromExtra));
+    }
+  } else {
+    extraNightCodes[code] = { start: '?', end: '?' };
+    el.classList.add('marked-night');
+    // dayDataに追加（再走査不要：unknownDateMapから職員名なしで追加）
+    for (const dt of (unknownDateMap[code] || [])) {
+      if (!dayData[dt]) dayData[dt] = [];
+      if (!dayData[dt].find(s => s.code === code)) {
+        dayData[dt].push({ code, name: '（未確認）', start: '?', end: '?', fromExtra: true });
+      }
+    }
+  }
+  renderSummary();
+  renderCalendarCells();
+  if (activeDay) showDetail(activeDay);
+}
+
+// ===== カレンダー =====
+function countClass(n) {
+  if (n === 0) return 'c-danger';
+  if (n === 1) return 'c-warn';
+  if (n === 2) return 'c-ok';
+  if (n === 3) return 'c-ok3';
+  return 'c-ok4';
+}
+
+function renderCalendar(colToDate) {
+  const dates = [...new Set(Object.values(colToDate))].sort();
+  if (!dates.length) return;
+  const grid = document.getElementById('calendarGrid');
+  grid.innerHTML = '';
+
+  WEEKDAYS.forEach(d => {
+    const h = document.createElement('div');
+    h.className = 'cal-header';
+    h.textContent = d;
+    grid.appendChild(h);
+  });
+
+  const firstDate = parseDateLocal(dates[0]);
+  const startDow = firstDate.getDay();
+  for (let i = 0; i < startDow; i++) {
+    const e = document.createElement('div');
+    e.className = 'cal-day empty';
+    grid.appendChild(e);
+  }
+
+  dates.forEach(dt => {
+    const d = parseDateLocal(dt);
+    const count = (dayData[dt] || []).length;
+    const cell = document.createElement('div');
+    cell.className = `cal-day ${countClass(count)}`;
+    cell.dataset.date = dt;
+    cell.innerHTML = `
+      <div class="day-num">${d.getDate()}（${WEEKDAYS[d.getDay()]}）</div>
+      <div class="count">${count}</div>
+      <div class="count-label">名</div>
+    `;
+    cell.addEventListener('click', () => showDetail(dt));
+    grid.appendChild(cell);
+  });
+}
+
+function renderCalendarCells() {
+  document.querySelectorAll('.cal-day[data-date]').forEach(cell => {
+    const dt = cell.dataset.date;
+    const count = (dayData[dt] || []).length;
+    cell.className = `cal-day ${countClass(count)}${dt === activeDay ? ' active' : ''}`;
+    cell.querySelector('.count').textContent = count;
+  });
+}
+
+// ===== サマリー =====
+function renderSummary() {
+  let c0=0, c1=0, c2=0, c3=0, c4=0;
+  for (const staff of Object.values(dayData)) {
+    const n = staff.length;
+    if (n === 0) c0++;
+    else if (n === 1) c1++;
+    else if (n === 2) c2++;
+    else if (n === 3) c3++;
+    else c4++;
+  }
+  document.getElementById('s0').textContent = c0;
+  document.getElementById('s1').textContent = c1;
+  document.getElementById('s2').textContent = c2;
+  document.getElementById('s3').textContent = c3;
+  document.getElementById('s4').textContent = c4;
+  document.getElementById('sTotal').textContent = Object.keys(dayData).length;
+  renderAdditionSummary({ night3Days: c3, night4Days: c4 });
+}
+
+function calculateAdditionSummary() {
+  let night3Days = 0;
+  let night4Days = 0;
+
+  for (const staff of Object.values(dayData)) {
+    const count = staff.length;
+    if (count === 3) night3Days++;
+    else if (count >= 4) night4Days++;
+  }
+
+  return { night3Days, night4Days };
+}
+
+function renderAdditionSummary(counts = calculateAdditionSummary()) {
+  const residentInput = document.getElementById('residentCount');
+  const residentCount = Math.max(0, parseInt(residentInput.value, 10) || 0);
+  const halfResidents = Math.floor(residentCount / 2);
+  const night3Times = counts.night3Days * halfResidents;
+  const night4Times = counts.night4Days * residentCount;
+  const totalTimes = night3Times + night4Times;
+
+  document.getElementById('additionDays3').textContent = counts.night3Days;
+  document.getElementById('additionDays4').textContent = counts.night4Days;
+  document.getElementById('additionEligibleResidents').textContent = residentCount;
+  document.getElementById('additionTotal').textContent = totalTimes.toLocaleString('ja-JP');
+}
+
+// ===== 詳細パネル =====
+function showDetail(dt) {
+  activeDay = dt;
+  document.querySelectorAll('.cal-day').forEach(c => c.classList.remove('active'));
+  const cell = document.querySelector(`.cal-day[data-date="${dt}"]`);
+  if (cell) cell.classList.add('active');
+
+  const d = parseDateLocal(dt);
+  const staff = dayData[dt] || [];
+  const count = staff.length;
+
+  let badgeClass = 'ok';
+  let badgeLabel = `✓ ${count}名`;
+  if (count === 0) { badgeClass = 'danger'; badgeLabel = '⚠️ 夜勤なし'; }
+  else if (count === 1) { badgeClass = 'warn'; badgeLabel = '△ 1名'; }
+  else if (count === 3) { badgeClass = 'ok3'; badgeLabel = `✓ ${count}名`; }
+  else if (count >= 4) { badgeClass = 'ok4'; badgeLabel = `✓ ${count}名`; }
+
+  document.getElementById('detailDate').innerHTML =
+    `${d.getMonth()+1}月${d.getDate()}日（${WEEKDAYS[d.getDay()]}） <span class="badge ${badgeClass}">${badgeLabel}</span>`;
+
+  const listEl = document.getElementById('staffList');
+  listEl.innerHTML = '';
+  if (count === 0) {
+    const noStaff = document.createElement('div');
+    noStaff.className = 'no-staff';
+    noStaff.textContent = '⚠️ 夜勤配置なし';
+    listEl.appendChild(noStaff);
+  } else {
+    staff.forEach(s => {
+      const row = document.createElement('div');
+      row.className = 'staff-row';
+
+      const codeEl = document.createElement('span');
+      codeEl.className = 'staff-code';
+      codeEl.textContent = s.code;
+
+      const nameEl = document.createElement('span');
+      nameEl.className = 'staff-name';
+      nameEl.textContent = s.name;
+
+      const timeEl = document.createElement('span');
+      timeEl.className = 'staff-time';
+      timeEl.textContent = `${s.start} → ${s.end}`;
+
+      row.appendChild(codeEl);
+      row.appendChild(nameEl);
+      row.appendChild(timeEl);
+      listEl.appendChild(row);
+    });
+  }
+
+  document.getElementById('detailPanel').classList.add('show');
+  document.getElementById('detailPanel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// ===== リセット =====
+function resetApp() {
+  nightCodes = {}; extraNightCodes = {}; dayData = {}; unknownDateMap = {}; activeDay = null;
+  document.getElementById('resultArea').classList.add('hidden');
+  document.getElementById('loading').classList.remove('show');
+  document.getElementById('uploadZone').classList.remove('hidden');
+  document.getElementById('detailPanel').classList.remove('show');
+  document.getElementById('calendarGrid').innerHTML = '';
+  document.getElementById('fileInput').value = '';
+  document.getElementById('residentCount').value = 20;
+  renderAdditionSummary();
+}
+</script>
+</body>
+</html>
