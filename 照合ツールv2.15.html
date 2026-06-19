@@ -1,0 +1,679 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>シフト・勤怠CSV・タイミー明細 照合ツール v2.15</title>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <style>
+    :root{--bg:#f6f7fb;--card:#fff;--line:#dfe3ea;--text:#1f2937;--muted:#6b7280;--accent:#2563eb;--bad:#b91c1c;--warn:#b45309;--ok:#047857;--soft:#eef2ff}
+    *{box-sizing:border-box} body{margin:0;background:var(--bg);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--text)}
+    header{background:#111827;color:#fff;padding:18px 24px} header h1{font-size:20px;margin:0 0 4px} header p{margin:0;color:#cbd5e1;font-size:13px}
+    main{max-width:1280px;margin:0 auto;padding:20px}
+    .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+    .card h2{font-size:16px;margin:0 0 12px}.card h3{font-size:14px;margin:0 0 10px;color:#374151}.note{font-size:12px;color:var(--muted);line-height:1.5;margin-top:8px}
+    label{display:block;font-size:12px;font-weight:600;margin:10px 0 5px} input,select,button,textarea{font:inherit} input[type=file],input[type=number],select,textarea{width:100%;border:1px solid var(--line);border-radius:8px;padding:9px;background:#fff} textarea{min-height:92px;resize:vertical;font-size:12px;line-height:1.45}
+    button{border:0;border-radius:9px;padding:10px 14px;cursor:pointer;font-weight:700}.primary{background:var(--accent);color:#fff}.secondary{background:#e5e7eb;color:#111827}.danger{background:#fee2e2;color:#991b1b}
+    .actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.status{padding:10px 12px;border-radius:8px;background:#f3f4f6;font-size:13px;margin-top:10px;white-space:pre-wrap}
+    .summary{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin:16px 0}.kpi{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px}.kpi .num{font-size:24px;font-weight:800}.kpi .lbl{font-size:12px;color:var(--muted)}
+    .tabs{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0}.tab{background:#fff;border:1px solid var(--line)}.tab.active{background:#111827;color:#fff}
+    .tableWrap{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:auto;max-height:560px}.toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:10px 0}.toolbar input{max-width:360px;border:1px solid var(--line);border-radius:8px;padding:9px}.toolbar select{max-width:180px}
+    table{border-collapse:collapse;width:100%;font-size:12px;min-width:980px} th,td{border-bottom:1px solid #edf0f5;padding:7px 8px;text-align:left;white-space:nowrap} th{position:sticky;top:0;background:#f9fafb;z-index:1} tr:hover td{background:#f8fafc}
+    .badge{display:inline-block;border-radius:999px;padding:2px 8px;font-weight:700;font-size:11px}.bOK{background:#dcfce7;color:#166534}.bWARN{background:#fef3c7;color:#92400e}.bBAD{background:#fee2e2;color:#991b1b}.bINFO{background:#dbeafe;color:#1e40af}
+    .aliasPanel{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px;margin:16px 0}.aliasPanel h2{font-size:16px;margin:0 0 12px}.aliasForm{display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end}.aliasList{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}.aliasItem{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:999px;background:#f9fafb;padding:5px 6px 5px 10px;font-size:12px}.aliasItem button{border-radius:999px;padding:2px 7px;background:#fee2e2;color:#991b1b}.aliasAdvanced{margin-top:12px}.aliasAdvanced summary{cursor:pointer;font-size:12px;color:var(--muted);font-weight:700}
+    .small{font-size:11px;color:var(--muted)} .hide{display:none}.wide{grid-column:1/-1}.pill{background:var(--soft);border:1px solid #c7d2fe;border-radius:999px;padding:3px 8px;font-size:12px}
+    @media(max-width:900px){.grid,.summary,.aliasForm{grid-template-columns:1fr}.toolbar{display:block}.toolbar input{max-width:none;width:100%;margin-top:8px}}
+  </style>
+</head>
+<body>
+<header>
+  <h1>シフト・勤怠CSV・タイミー明細 照合ツール v2.15</h1>
+  <p>勤務表Excelの「管理用シート」と「マスタ設定」を基準に、勤怠CSV・タイミー明細CSVとのズレを確認します。</p>
+</header>
+<main>
+  <section class="grid">
+    <div class="card">
+      <h2>1. ファイル選択</h2>
+      <label>勤務表Excel（.xlsx・複数選択可）</label>
+      <input id="excelFile" type="file" accept=".xlsx,.xls" multiple />
+      <label>タイムカード実績CSV（複数選択可）</label>
+      <input id="kintaiFile" type="file" accept=".csv" multiple />
+      <label>タイミー利用明細CSV（任意・複数選択可）</label>
+      <input id="timeeFile" type="file" accept=".csv" multiple />
+      <div class="note">Excel読込にはSheetJS CDNを使用します。インターネット接続がない環境では、ライブラリのローカル配置が必要です。</div>
+    </div>
+    <div class="card">
+      <h2>2. 設定</h2>
+      <label>管理用シート名</label>
+      <input id="manageSheet" value="管理用シート" />
+      <label>マスタ設定シート名</label>
+      <input id="masterSheet" value="マスタ設定" />
+      <label>時刻ズレ許容範囲（分）</label>
+      <input id="tolerance" type="number" value="15" min="0" step="1" />
+      <label>月間時間差の許容範囲（時間）</label>
+      <input id="hourTolerance" type="number" value="0.25" min="0" step="0.25" />
+    </div>
+    <div class="card">
+      <h2>3. 実行</h2>
+      <div class="actions">
+        <button class="primary" id="runBtn">比較実行</button>
+        <button class="secondary" id="sampleBtn">読込状況確認</button>
+        <button class="danger" id="clearBtn">結果クリア</button>
+      </div>
+      <div id="status" class="status">ファイルを選択して「比較実行」を押してください。</div>
+      <div class="note">同じ職員名が複数行ある場合は、同じ職員として統合します。同じ日付に複数シフトがある場合も上書きせず、複数件として扱います。氏名・職種・勤務形態に「派遣」を含む行は完全除外します。</div>
+    </div>
+  </section>
+
+  <section class="summary" id="summary"></section>
+
+  <section class="aliasPanel">
+    <h2>同一人物名設定</h2>
+    <div class="aliasForm">
+      <div>
+        <label>基準にする名前</label>
+        <select id="aliasCanonical"></select>
+      </div>
+      <div>
+        <label>同じ人として扱う名前</label>
+        <select id="aliasVariant"></select>
+      </div>
+      <button class="primary" id="addAliasBtn" type="button">追加して再比較</button>
+    </div>
+    <div id="aliasList" class="aliasList"></div>
+    <details class="aliasAdvanced">
+      <summary>直接編集</summary>
+      <textarea id="nameAliases" placeholder="例：ソタンダキョー=SAWTHANDARKYAW&#10;エーエーアウン=AHEAHEAUNG"></textarea>
+    </details>
+  </section>
+
+  <section class="card wide">
+    <h2>結果</h2>
+    <div class="actions">
+      <button class="secondary" onclick="downloadCsv('daily')">日別ズレCSV</button>
+      <button class="secondary" onclick="downloadCsv('monthly')">月間集計CSV</button>
+      <button class="secondary" onclick="downloadCsv('timee')">タイミー照合CSV</button>
+      <button class="secondary" onclick="downloadCsv('unknown')">未登録シフトCSV</button>
+    </div>
+    <div class="tabs">
+      <button class="tab active" data-tab="daily">日別ズレ</button>
+      <button class="tab" data-tab="monthly">月間集計</button>
+      <button class="tab" data-tab="timee">タイミー照合</button>
+      <button class="tab" data-tab="unknown">未登録シフト</button>
+      <button class="tab" data-tab="master">読込マスタ</button>
+    </div>
+    <div class="toolbar">
+      <div class="small" id="countLabel">0件</div>
+      <select id="facilityFilter"></select>
+      <select id="statusFilter"></select>
+      <input id="filterText" placeholder="職員名・日付・判定で絞り込み" />
+    </div>
+    <div class="tableWrap"><table id="resultTable"></table></div>
+  </section>
+</main>
+<script>
+const COL = { B:1, M:12, AE:30, AI:34, CS:96, CT:97, CU:98 };
+const dailyCols = Array.from({length:31},(_,i)=>COL.AI + i*2);
+let state = { daily:[], monthly:[], timee:[], unknown:[], master:[], current:'daily', logs:[], nameOptions:[], facilities:[] };
+let nameAliasMap = {};
+
+const $ = id => document.getElementById(id);
+function baseNormName(v){
+  return String(v||'')
+    .normalize('NFKC')
+    .toUpperCase()
+    .replace(/[\s\u00A0\u200B-\u200D\uFEFF　]/g,'')
+    .replace(/\(?[0-9]+\)?$/,'')
+    .trim();
+}
+function normName(v){
+  const key = baseNormName(v);
+  return nameAliasMap[key] || key;
+}
+function refreshNameAliases(){
+  nameAliasMap = {};
+  const text = $('nameAliases')?.value || '';
+  text.split(/\r?\n/).forEach(line=>{
+    const s=line.trim(); if(!s || s.startsWith('#')) return;
+    const parts=s.split(/[=,、]/).map(baseNormName).filter(Boolean);
+    if(parts.length<2) return;
+    const canonical=parts[0];
+    parts.forEach(p=>{ nameAliasMap[p]=canonical; });
+  });
+}
+function aliasRules(){
+  const rows=[];
+  ($('nameAliases')?.value || '').split(/\r?\n/).forEach((line,idx)=>{
+    const s=line.trim(); if(!s || s.startsWith('#')) return;
+    const parts=s.split(/[=,、]/).map(x=>x.trim()).filter(Boolean);
+    if(parts.length>=2) rows.push({idx, canonical:parts[0], variants:parts.slice(1)});
+  });
+  return rows;
+}
+function setAliasText(lines){
+  $('nameAliases').value = lines.join('\n');
+  localStorage.setItem(aliasStoreKey,$('nameAliases').value);
+  refreshNameAliases(); renderAliasList(); renderNameOptions();
+}
+function addNameOption(set, name){ const s=String(name||'').trim(); if(s && !['職員名','従業員氏名'].includes(s)) set.add(s); }
+function fileList(id){ return Array.from($(id).files||[]); }
+function normalizeFacilityText(v){
+  const s=String(v||'').normalize('NFKC').replace(/\s+/g,'').replace(/[()（）]/g,'');
+  return s.replace(/ii$/i,'Ⅱ').replace(/i$/i,'Ⅰ');
+}
+function facilityBase(v){ return normalizeFacilityText(v).replace(/[ⅠⅡⅢⅣⅤⅰⅱⅲⅳⅴ]+$/i,'').replace(/[IVX]+$/i,''); }
+function inferFacility(file){
+  const name=file.name || '';
+  let m=name.match(/【([^】]+)】/);
+  if(m) return normalizeFacilityText(m[1]);
+  const known=['春日部','上西郷','南中丸','宇都宮','気賀','萩丘ⅰ','萩丘ⅱ','萩丘','西浅田ⅰ','西浅田ⅱ','西浅田','高丘'];
+  const hit=[...known].sort((a,b)=>normalizeFacilityText(b).length-normalizeFacilityText(a).length).find(k=>normalizeFacilityText(name).includes(normalizeFacilityText(k)));
+  if(hit) return normalizeFacilityText(hit);
+  m=name.match(/RASIEL(.+?)(?:[-_.\s　]|$)/i);
+  return m ? normalizeFacilityText(m[1]) : normalizeFacilityText(name.replace(/\.[^.]+$/,''));
+}
+function inferYearMonth(file){
+  const name=String(file?.name||'').normalize('NFKC');
+  let m=name.match(/(20\d{2})\D{0,3}([01]?\d)月/);
+  if(m) return {y:Number(m[1]), m:Number(m[2])};
+  m=name.match(/(20\d{2})[.\-_・年]?([01]\d)(?!\d)/);
+  if(m) return {y:Number(m[1]), m:Number(m[2])};
+  m=name.match(/(?:^|\D)(\d{2})([01]\d)(?!\d)/);
+  if(m) return {y:2000+Number(m[1]), m:Number(m[2])};
+  return null;
+}
+function monthKey(ym){ return ym && ym.y && ym.m ? `${ym.y}/${ym.m}` : ''; }
+function csvMonths(kintai){
+  const set=new Set();
+  Object.values(kintai.byName||{}).forEach(list=>list.forEach(r=>{
+    const m=String(r.日付||'').match(/^(\d{4})\/(\d{1,2})\//);
+    if(m) set.add(`${Number(m[1])}/${Number(m[2])}`);
+  }));
+  return [...set].sort();
+}
+function addFacility(rows, facility){ return (rows||[]).map(r=>({施設名:facility, ...r})); }
+function groupFiles(){
+  const groups={};
+  fileList('excelFile').forEach(file=>{
+    const facility=inferFacility(file), base=facilityBase(facility);
+    groups[base] ||= {base, excels:[], kintai:[], timee:[]};
+    groups[base].excels.push({file, facility});
+  });
+  const attach=(id,type)=>fileList(id).forEach(file=>{
+    const facility=inferFacility(file), base=facilityBase(facility);
+    groups[base] ||= {base, excels:[], kintai:[], timee:[]};
+    groups[base][type].push({file, facility});
+  });
+  attach('kintaiFile','kintai'); attach('timeeFile','timee');
+  return Object.values(groups).filter(g=>g.excels.length || g.kintai.length || g.timee.length).sort((a,b)=>a.base.localeCompare(b.base,'ja'));
+}
+function mergeSchedules(items){
+  const out={normal:{}, timee:[], unknown:[], cuByName:{}, metaByName:{}, excludedKeys:new Set(), y:items[0]?.y, m:items[0]?.m};
+  items.forEach(s=>{
+    Object.entries(s.normal||{}).forEach(([key, byDate])=>{
+      out.normal[key] ||= {};
+      Object.entries(byDate).forEach(([d, list])=>{ out.normal[key][d] ||= []; out.normal[key][d].push(...list); });
+    });
+    out.timee.push(...(s.timee||[])); out.unknown.push(...(s.unknown||[]));
+    Object.entries(s.cuByName||{}).forEach(([k,v])=>{ out.cuByName[k]=(out.cuByName[k]||0)+v; });
+    Object.entries(s.metaByName||{}).forEach(([k,v])=>{ if(!out.metaByName[k]) out.metaByName[k]=v; });
+    (s.excludedKeys||new Set()).forEach(k=>out.excludedKeys.add(k));
+  });
+  return out;
+}
+function mergeKintai(items){
+  const out={map:{}, byName:{}};
+  items.forEach(k=>{
+    Object.entries(k.map||{}).forEach(([key, byDate])=>{
+      out.map[key] ||= {};
+      Object.entries(byDate).forEach(([d, list])=>{ out.map[key][d] ||= []; out.map[key][d].push(...list); });
+    });
+    Object.entries(k.byName||{}).forEach(([key, list])=>{ out.byName[key] ||= []; out.byName[key].push(...list); });
+  });
+  return out;
+}
+function collectNameOptions(schedule, kintai, timeeRows=[]){
+  const names=new Set();
+  Object.values(schedule.metaByName||{}).forEach(m=>addNameOption(names,m.職員名));
+  Object.values(schedule.normal||{}).forEach(byDate=>Object.values(byDate).forEach(list=>list.forEach(r=>addNameOption(names,r.職員名))));
+  (schedule.timee||[]).forEach(r=>addNameOption(names,r.職員名));
+  Object.values(kintai.byName||{}).forEach(list=>list.forEach(r=>addNameOption(names,r.職員名)));
+  timeeRows.forEach(r=>addNameOption(names,r.氏名));
+  state.nameOptions=[...names].sort((a,b)=>a.localeCompare(b,'ja'));
+}
+function renderNameOptions(){
+  const options=state.nameOptions.length ? state.nameOptions : aliasRules().flatMap(r=>[r.canonical,...r.variants]);
+  const html=['<option value="">選択してください</option>', ...options.map(n=>`<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`)].join('');
+  $('aliasCanonical').innerHTML=html; $('aliasVariant').innerHTML=html;
+}
+function renderAliasList(){
+  const rows=aliasRules();
+  $('aliasList').innerHTML = rows.length ? rows.map(r=>`<span class="aliasItem"><span>${escapeHtml(r.canonical)} = ${escapeHtml(r.variants.join(' / '))}</span><button type="button" data-alias-line="${r.idx}">削除</button></span>`).join('') : '<span class="small">まだ設定がありません。比較実行後、結果に出た名前から選択できます。</span>';
+  document.querySelectorAll('[data-alias-line]').forEach(btn=>btn.addEventListener('click',()=>removeAliasLine(Number(btn.dataset.aliasLine))));
+}
+function removeAliasLine(idx){
+  const lines=($('nameAliases').value||'').split(/\r?\n/).filter((_,i)=>i!==idx);
+  setAliasText(lines);
+}
+async function addAliasFromSelects(){
+  const canonical=$('aliasCanonical').value, variant=$('aliasVariant').value;
+  if(!canonical || !variant){ alert('基準にする名前と、同じ人として扱う名前を選択してください。'); return; }
+  if(baseNormName(canonical)===baseNormName(variant)){ alert('同じ名前が選択されています。'); return; }
+  const lines=($('nameAliases').value||'').split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+  const canonicalKey=baseNormName(canonical), variantKey=baseNormName(variant);
+  let changed=false;
+  const next=lines.map(line=>{
+    if(line.startsWith('#')) return line;
+    const parts=line.split(/[=,、]/).map(x=>x.trim()).filter(Boolean);
+    if(parts.length<2) return line;
+    const keys=parts.map(baseNormName);
+    if(keys.includes(canonicalKey) || keys.includes(variantKey)){
+      const merged=[canonical, ...parts.filter(p=>baseNormName(p)!==canonicalKey), variant];
+      changed=true;
+      const unique=[...new Map(merged.map(p=>[baseNormName(p),p])).values()];
+      return `${unique[0]}=${unique.slice(1).join(',')}`;
+    }
+    return line;
+  });
+  if(!changed) next.push(`${canonical}=${variant}`);
+  setAliasText(next);
+  if($('excelFile').files[0] && $('kintaiFile').files[0]) await runCompare();
+}
+const normShift = v => String(v||'').replace(/[\s　]/g,'').replace(/（.*?）|\(.*?\)/g,'').trim();
+const isBlank = v => v===undefined || v===null || String(v).trim()==='' || String(v).trim()==='0';
+const containsDispatch = (...vals) => vals.some(v => normName(v).includes('派遣'));
+const OFF_SHIFT_WORDS = ['休','希休','有','有休','常有','欠','公休','振休','特休','代休','年休'];
+function isOffShift(shift){
+  const s = normShift(shift);
+  if(!s) return true;
+  return OFF_SHIFT_WORDS.some(k => s===k || s.startsWith(k));
+}
+const pad2 = n => String(n).padStart(2,'0');
+function excelSerialToDate(n){ const utc = Math.round((Number(n)-25569)*86400*1000); const d = new Date(utc); return `${d.getUTCFullYear()}/${d.getUTCMonth()+1}/${d.getUTCDate()}`; }
+function dateKey(v, y, m, day){
+  if(day) return `${y}/${m}/${day}`;
+  if(v instanceof Date) return `${v.getFullYear()}/${v.getMonth()+1}/${v.getDate()}`;
+  const s = String(v||'').trim();
+  if(!s) return '';
+  if(/^\d+(\.\d+)?$/.test(s) && Number(s)>30000) return excelSerialToDate(Number(s));
+  const mm = s.match(/(\d{4})[\/\-年](\d{1,2})[\/\-月](\d{1,2})/);
+  if(mm) return `${+mm[1]}/${+mm[2]}/${+mm[3]}`;
+  return s;
+}
+function parseYmFromSheet(rows){
+  let y = Number(rows?.[0]?.[6]) || Number(rows?.[1]?.[0]) || new Date().getFullYear();
+  let m = Number(rows?.[0]?.[14]) || Number(rows?.[1]?.[9]) || new Date().getMonth()+1;
+  return {y,m};
+}
+function timeToMin(v){
+  if(v===undefined || v===null || v==='') return null;
+  if(typeof v === 'number') return Math.round(v*1440);
+  const s = String(v).trim();
+  if(!s) return null;
+  if(/^\d+(\.\d+)?$/.test(s)){
+    const n=Number(s); if(n>=0 && n<=1.1) return Math.round(n*1440); if(n<=24) return Math.round(n*60);
+  }
+  if(s === '24:00') return 1440;
+  const mm = s.match(/(\d{1,2}):(\d{2})/);
+  if(mm) return Number(mm[1])*60+Number(mm[2]);
+  return null;
+}
+function minToTime(min){
+  if(min===null || min===undefined || isNaN(min)) return '';
+  min = Math.round(min); if(min===1440) return '24:00';
+  const sign = min<0 ? '-' : ''; min=Math.abs(min); return sign+pad2(Math.floor(min/60)%24)+':'+pad2(min%60);
+}
+function hourVal(v){ const n = Number(String(v||'').replace(/,/g,'')); return isFinite(n) ? n : 0; }
+function shiftBaseCandidates(s){
+  const x=normShift(s); const set=new Set([x]);
+  ['有','欠','休','希休','常有','振8','振10'].forEach(k=>{ if(x.startsWith(k)) set.add(k); });
+  const rubyMap = {'有ユウ':'有','欠ケツ':'欠','休ヤス':'休','振8シン':'振8','振10シン':'振10','常有ツネユウ':'常有'};
+  Object.entries(rubyMap).forEach(([a,b])=>{ if(x===a) set.add(b); if(x===b) set.add(a); });
+  return [...set];
+}
+function getMaster(master, shift){
+  const cands = shiftBaseCandidates(shift);
+  for(const c of cands) if(master[c]) return master[c];
+  const ns=normShift(shift);
+  const keys = Object.keys(master);
+  return master[keys.find(k => k===ns || k.startsWith(ns) || ns.startsWith(k))] || null;
+}
+function expectedHours(m){
+  if(!m) return 0;
+  if(m.hours) return m.hours;
+  if(m.start==null || m.end==null) return 0;
+  let end=m.end, start=m.start; if(end<start) end+=1440;
+  let h=(end-start)/60;
+  if(m.breakStart!=null && m.breakEnd!=null){ let be=m.breakEnd, bs=m.breakStart; if(be<bs) be+=1440; h -= Math.max(0,(be-bs)/60); }
+  return Math.max(0,h);
+}
+function classifyShift(m, shift){
+  const s=normShift(shift);
+  if(!m || (m.start==null && m.end==null)) return 'off';
+  if(s.includes('明') || (m.start!==null && m.start<=30 && m.end!==null && m.end<=12*60)) return 'nightOut';
+  if(s.includes('入') || m.end===1440 || (m.start!==null && m.start>=12*60 && m.end!==null && m.end>=23*60)) return 'nightIn';
+  return 'day';
+}
+async function readArrayBuffer(file){ return await file.arrayBuffer(); }
+async function readTextSmart(file){
+  const buf = await file.arrayBuffer(); const u8=new Uint8Array(buf);
+  if(u8[0]===0xef && u8[1]===0xbb && u8[2]===0xbf) return new TextDecoder('utf-8').decode(buf).replace(/^\uFEFF/, '');
+  try { const t = new TextDecoder('utf-8',{fatal:true}).decode(buf); if(!t.includes('�')) return t; } catch(e) {}
+  try { return new TextDecoder('shift_jis').decode(buf); } catch(e) { return new TextDecoder('utf-8').decode(buf); }
+}
+function parseCSV(text){
+  const rows=[]; let row=[], cell='', q=false;
+  for(let i=0;i<text.length;i++){
+    const ch=text[i], nx=text[i+1];
+    if(q){ if(ch==='"' && nx==='"'){cell+='"';i++;} else if(ch==='"'){q=false;} else cell+=ch; }
+    else { if(ch==='"') q=true; else if(ch===','){row.push(cell);cell='';} else if(ch==='\n'){row.push(cell); rows.push(row); row=[]; cell='';} else if(ch!=='\r') cell+=ch; }
+  }
+  if(cell!=='' || row.length){row.push(cell); rows.push(row);} return rows;
+}
+function rowsToObjects(rows){
+  const header = rows[0] || []; return rows.slice(1).map(r=>Object.fromEntries(header.map((h,i)=>[String(h||'').trim(), r[i]??''])));
+}
+function badge(status){
+  const s=String(status||''); let cls='bINFO'; if(s==='OK') cls='bOK'; else if(s.includes('要確認')||s.includes('不足')||s.includes('多い')||s.includes('未登録')||s.includes('なし')) cls='bBAD'; else if(s.includes('許容')||s.includes('ズレ')) cls='bWARN';
+  return `<span class="badge ${cls}">${escapeHtml(s)}</span>`;
+}
+function escapeHtml(v){ return String(v??'').replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+function normSheetName(v){ return String(v||'').normalize('NFKC').replace(/\s+/g,'').trim(); }
+function sheetInput(id, fallback){
+  const v=String($(id)?.value||'').normalize('NFKC').trim();
+  return v || fallback;
+}
+function readWorkbookRows(wb, sheetName){
+  const wanted=String(sheetName||'').normalize('NFKC').trim();
+  const names=wb.SheetNames || Object.keys(wb.Sheets||{});
+  const found=names.find(n=>n===wanted) || names.find(n=>normSheetName(n)===normSheetName(wanted));
+  const ws=wb.Sheets[found]; if(!ws) throw new Error(`シートが見つかりません: ${wanted || '(空欄)'} / このExcelのシート: ${names.join('、')}`);
+  return XLSX.utils.sheet_to_json(ws,{header:1, raw:true, defval:''});
+}
+function parseMaster(rows){
+  const master={}; const list=[];
+  for(let r=10; r<rows.length; r++){
+    const row=rows[r] || []; const raw=row[0]; if(isBlank(raw)) continue;
+    const key=normShift(raw); if(!key) continue;
+    const m={ shift:key, raw:String(raw), start:timeToMin(row[4]), end:timeToMin(row[10]), breakStart:timeToMin(row[14]), breakEnd:timeToMin(row[20]), hours:hourVal(row[24]) };
+    master[key]=m; shiftBaseCandidates(key).forEach(k=>{ if(!master[k]) master[k]=m; });
+    list.push({シフト:m.shift, 開始:minToTime(m.start), 終了:minToTime(m.end), 休憩開始:minToTime(m.breakStart), 休憩終了:minToTime(m.breakEnd), 時間:m.hours||expectedHours(m)});
+  }
+  state.master=list; return master;
+}
+function parseSchedule(rows, master, facility='', ymOverride=null){
+  const parsedYm=parseYmFromSheet(rows);
+  const {y,m}=ymOverride || parsedYm;
+  const normal={}, timee=[]; const unknown=[]; const cuByName={}; const metaByName={}; const excludedKeys=new Set();
+  for(let r=0; r<rows.length; r++){
+    const row=rows[r]||[]; const name=String(row[COL.M]||'').trim(); const key=normName(name);
+    const role=String(row[COL.B]||'').trim(), type=String(row[COL.AE]||'').trim();
+    if(!key || key.includes('氏名') || key.includes('月間営業活動時間')) continue;
+    // 氏名・職種・勤務形態のどこかに「派遣」が含まれる行は完全除外。
+    // 例：派遣、(派遣)、（派遣）、山田太郎（派遣）など。
+    if(containsDispatch(name, role, type)){ excludedKeys.add(key); continue; }
+    const cu=hourVal(row[COL.CU]); if(cu) cuByName[key]=(cuByName[key]||0)+cu;
+    if(!metaByName[key]) metaByName[key]={施設名:facility, 職員名:name, 職種:role, 勤務形態:type};
+    const isTimee = name.includes('タイミー');
+    dailyCols.forEach((ci,idx)=>{
+      const day=idx+1; const shift=String(row[ci]||'').trim(); if(isBlank(shift)) return;
+      const mobj=getMaster(master, shift); const dkey=`${y}/${m}/${day}`;
+      const record={施設名:facility, 職員名:name, 職員キー:key, 職種:role, 勤務形態:type, 日付:dkey, 日:day, シフト:shift, master:mobj, row:r+1};
+      // 休み系シフトはマスタ未登録でも正常扱いにする。
+      if(!mobj && !isOffShift(shift)) unknown.push({施設名:facility, 職員名:name, 日付:dkey, シフト:shift, 内容:'マスタ設定シートに該当シフトが見つかりません'});
+      if(isTimee) timee.push(record); else {
+        normal[key] ||= {}; normal[key][dkey] ||= []; normal[key][dkey].push(record);
+      }
+    });
+  }
+  return {normal,timee,unknown,cuByName,metaByName,excludedKeys, y,m, parsedYm, ymOverride};
+}
+function parseKintai(text, excludedKeys=new Set(), facility=''){
+  const rows=parseCSV(text); const objs=rowsToObjects(rows); const map={}; const byName={};
+  objs.forEach(o=>{
+    const name=String(o['従業員氏名']||'').trim(); if(!name || name==='従業員氏名') return;
+    const key=normName(name);
+    if(containsDispatch(name) || excludedKeys.has(key)) return;
+    const d=dateKey(o['年/月/日']); if(!d) return;
+    const rec={施設名:facility, 職員名:name, 日付:d, 出勤:String(o['出勤打刻']||'').trim(), 退勤:String(o['退勤打刻']||'').trim(), inMin:timeToMin(o['出勤打刻']), outMin:timeToMin(o['退勤打刻']), コメント:o['コメント']||''};
+    map[key] ||= {}; map[key][d] ||= []; map[key][d].push(rec); byName[key] ||= []; byName[key].push(rec);
+  });
+  return {map, byName};
+}
+function actualMonthlyHours(byName){
+  const out={};
+  Object.entries(byName).forEach(([key, list])=>{
+    const sorted=[...list].sort((a,b)=>new Date(a.日付)-new Date(b.日付)); const used=new Set(); let total=0;
+    sorted.forEach((r,i)=>{
+      if(used.has(i)) return;
+      if(r.inMin!=null && r.outMin!=null){ let end=r.outMin; if(end<r.inMin) end+=1440; total+=workHours(r.inMin,end,breakHours(r.コメント)); used.add(i); return; }
+      if(r.inMin!=null && r.outMin==null){
+        if(!isNightInClock(r.inMin)) return;
+        for(let j=i+1;j<sorted.length;j++){
+          if(used.has(j)) continue; const n=sorted[j];
+          const diff=(new Date(n.日付)-new Date(r.日付))/(86400*1000);
+          if(diff>1.5) break;
+          if(diff>0 && n.inMin==null && n.outMin!=null && isNightOutClock(n.outMin)){ total+=workHours(r.inMin,1440+n.outMin,breakHours(n.コメント)||breakHours(r.コメント)); used.add(i); used.add(j); break; }
+        }
+        if(!used.has(i)){
+          const commentOut=commentOutMin(r.コメント);
+          if(commentOut!=null && isNightOutClock(commentOut)){
+            total+=workHours(r.inMin,1440+commentOut,breakHours(r.コメント)); used.add(i);
+          }
+        }
+      }
+    });
+    out[key]=Math.round(total*100)/100;
+  }); return out;
+}
+function workHours(startMin, endMin, breakH=0){ return Math.max(0, ((endMin-startMin)/60) - (breakH||0)); }
+function isNightInClock(min){ return min>=15*60 && min<24*60; }
+function isNightOutClock(min){ return min>=5*60 && min<11*60; }
+function normalizeComment(v){ return String(v||'').normalize('NFKC').replace(/\s+/g,''); }
+function breakHours(comment){
+  const s=normalizeComment(comment);
+  const m=s.match(/(?:休憩深夜|深夜休憩|休憩)(\d+(?:\.\d+)?)時間/);
+  return m ? Number(m[1]) : 0;
+}
+function commentOutMin(comment){
+  const s=normalizeComment(comment);
+  const m=s.match(/退勤(\d{1,2})[:：](\d{2})/);
+  if(!m) return null;
+  return Number(m[1])*60+Number(m[2]);
+}
+function diffMin(a,b){ if(a==null || b==null) return null; return Math.abs(a-b); }
+function compareDaily(schedule, kintai, tol){
+  const rows=[];
+  const allKeys = new Set([...Object.keys(schedule.normal), ...Object.keys(kintai.map)]);
+  allKeys.forEach(key=>{
+    const dates = new Set([...(Object.keys(schedule.normal[key]||{})), ...(Object.keys(kintai.map[key]||{}))]);
+    dates.forEach(d=>{
+      const shifts = schedule.normal[key]?.[d] || []; const clocks = kintai.map[key]?.[d] || [];
+      if(shifts.length===0 && clocks.some(c=>c.inMin!=null || c.outMin!=null)){
+        rows.push({施設名:clocks[0].施設名||'', 職員名:clocks[0].職員名, 日付:d, シフト:'空欄', 予定開始:'', 予定終了:'', CSV出勤:clocks.map(c=>c.出勤).filter(Boolean).join(' / '), CSV退勤:clocks.map(c=>c.退勤).filter(Boolean).join(' / '), 判定:'要確認', 内容:'空欄＝休み扱いですが、CSVに打刻があります'}); return;
+      }
+      shifts.forEach(s=>{
+        const m=s.master; const cls=classifyShift(m,s.シフト); const ins=clocks.map(c=>c.inMin).filter(v=>v!=null), outs=clocks.map(c=>c.outMin).filter(v=>v!=null);
+        let status='OK', msg=[];
+        if(isOffShift(s.シフト)){
+          if(ins.length || outs.length){ status='要確認'; msg.push('休み系シフトですが打刻があります'); }
+        } else if(!m){ status='未登録'; msg.push('シフトがマスタ未登録'); }
+        else if(cls==='off'){
+          if(ins.length || outs.length){ status='要確認'; msg.push('休み系シフトですが打刻があります'); }
+        } else if(cls==='nightIn'){
+          if(!ins.length){ status='要確認'; msg.push('夜勤入り・出勤打刻なし'); }
+          else { const best=Math.min(...ins.map(v=>diffMin(v,m.start))); if(best>tol){ status='ズレ'; msg.push(`出勤 ${best}分ズレ`); } }
+        } else if(cls==='nightOut'){
+          if(!outs.length){ status='要確認'; msg.push('夜勤明け・退勤打刻なし'); }
+          else { const best=Math.min(...outs.map(v=>diffMin(v,m.end))); if(best>tol){ status='ズレ'; msg.push(`退勤 ${best}分ズレ`); } }
+        } else {
+          if(!ins.length && !outs.length){ status='要確認'; msg.push('勤務予定ですが打刻がありません'); }
+          if(m.start!=null){ if(!ins.length){ status='要確認'; msg.push('出勤打刻なし'); } else { const best=Math.min(...ins.map(v=>diffMin(v,m.start))); if(best>tol){ status='ズレ'; msg.push(`出勤 ${best}分ズレ`); } } }
+          if(m.end!=null){ if(!outs.length){ status='要確認'; msg.push('退勤打刻なし'); } else { const best=Math.min(...outs.map(v=>diffMin(v,m.end))); if(best>tol){ status='ズレ'; msg.push(`退勤 ${best}分ズレ`); } } }
+        }
+        if(status!=='OK') rows.push({施設名:s.施設名||'', 職員名:s.職員名, 日付:d, シフト:s.シフト, 予定開始:minToTime(m?.start), 予定終了:minToTime(m?.end), CSV出勤:clocks.map(c=>c.出勤).filter(Boolean).join(' / '), CSV退勤:clocks.map(c=>c.退勤).filter(Boolean).join(' / '), 判定:status, 内容:msg.join('、')});
+      });
+    });
+  }); return rows.sort((a,b)=>String(a.職員名).localeCompare(String(b.職員名),'ja') || new Date(a.日付)-new Date(b.日付));
+}
+function compareMonthly(schedule, kintai, hourTol){
+  const actual=actualMonthlyHours(kintai.byName); const keys=new Set([...Object.keys(schedule.cuByName), ...Object.keys(actual)]);
+  return [...keys].map(key=>{
+    const meta=schedule.metaByName[key] || {}; const planned=Math.round((schedule.cuByName[key]||0)*100)/100, act=actual[key]||0, diff=Math.round((act-planned)*100)/100;
+    let st=Math.abs(diff)<=hourTol?'OK':'要確認';
+    return {施設名:meta.施設名 || kintai.byName[key]?.[0]?.施設名 || '', 職員名:meta.職員名 || kintai.byName[key]?.[0]?.職員名 || key, 職種:meta.職種||'', 勤務形態:meta.勤務形態||'', 勤務表CU時間:planned, CSV実績概算時間:act, 差分:diff, 判定:st, 内容:'CSV実績は出勤・退勤打刻をペアリングして概算。休憩コメントを控除し、夜勤は入り日と翌日朝退勤、または月末コメント退勤で計算。'};
+  }).sort((a,b)=>String(a.職員名).localeCompare(String(b.職員名),'ja'));
+}
+function parseTimee(text, facility=''){
+  const rows=parseCSV(text); return rowsToObjects(rows).filter(o=>o['求人日'] && !containsDispatch(o['姓'], o['名'], o['求人タイトル'])).map(o=>({
+    施設名:facility, 求人日:dateKey(o['求人日']), QR開始:String(o['QRチェックイン時間']||'').trim(), QR終了:String(o['QRチェックアウト時間']||'').trim(), inMin:timeToMin(o['QRチェックイン時間']), outMin:timeToMin(o['QRチェックアウト時間']), 実働時間:hourVal(o['実働時間']), 氏名:`${o['姓']||''}${o['名']||''}`, 求人タイトル:o['求人タイトル']||''
+  }));
+}
+function buildTimeeExpected(schedule){
+  return schedule.timee.filter(s=>{
+    const cls=classifyShift(s.master,s.シフト);
+    return cls==='day' || cls==='nightIn';
+  }).map(s=>({施設名:s.施設名||'', 日付:s.日付, 区分:s.職員名, シフト:s.シフト, 予定開始:minToTime(s.master?.start), 予定終了:minToTime(s.master?.end), start:s.master?.start, end:s.master?.end, 予定時間:Math.round(expectedHours(s.master)*100)/100}));
+}
+function compareTimee(schedule, timeeRows, tol, hourTol){
+  const expected=buildTimeeExpected(schedule); const byKey={}; const expByKey={};
+  const keyOf=(facility,date)=>`${facilityBase(facility||'')}||${date||''}`;
+  timeeRows.forEach(t=>{ const k=keyOf(t.施設名,t.求人日); byKey[k] ||= []; byKey[k].push(t); });
+  expected.forEach(e=>{ const k=keyOf(e.施設名,e.日付); expByKey[k] ||= []; expByKey[k].push(e); });
+  const keys=new Set([...Object.keys(byKey),...Object.keys(expByKey)]); const out=[];
+  keys.forEach(k=>{
+    const exp=expByKey[k]||[], act=byKey[k]||[], usedExp=new Set(), usedAct=new Set(), matchByExp={};
+    const candidates=[];
+    exp.forEach((e,ei)=>act.forEach((a,ai)=>{
+      const startDiff=e.start!=null&&a.inMin!=null?Math.abs(e.start-a.inMin):9999;
+      const hourDiff=Math.abs((e.予定時間||0)-(a.実働時間||0));
+      candidates.push({ei,ai,startDiff,hourDiff});
+    }));
+    candidates.sort((x,y)=>x.startDiff-y.startDiff || x.hourDiff-y.hourDiff);
+    candidates.forEach(c=>{ if(!usedExp.has(c.ei) && !usedAct.has(c.ai)){ usedExp.add(c.ei); usedAct.add(c.ai); matchByExp[c.ei]=c.ai; } });
+    exp.forEach((e,ei)=>{
+      if(usedExp.has(ei)){
+        const best=matchByExp[ei];
+        const a=act[best]; const startDiff=e.start!=null&&a.inMin!=null?timeDiffMin(e.start,a.inMin):null; const endDiff=e.end!=null&&a.outMin!=null?timeDiffMin(e.end,a.outMin):null; const hourDiff=Math.round(((a.実働時間||0)-(e.予定時間||0))*100)/100; let st='OK', msg=[];
+        const badStart=startDiff!=null && startDiff>tol;
+        const badHour=Math.abs(hourDiff)>hourTol;
+        if(badStart) msg.push(`開始 ${startDiff}分ズレ`);
+        if(badHour) msg.push(`実働 ${hourDiff>=0?'+':''}${hourDiff}時間ズレ`);
+        if(badStart && badHour) st='開始・実働ズレ';
+        else if(badStart) st='開始ズレ';
+        else if(badHour) st='実働ズレ';
+        out.push({施設名:e.施設名||a.施設名||'', 日付:e.日付, シフト上区分:e.区分, シフト:e.シフト, 予定開始:e.予定開始, 予定終了:e.予定終了, 予定時間:e.予定時間, 明細QR開始:a.QR開始, 明細QR終了:a.QR終了, 明細実働時間:a.実働時間, 開始差分分:startDiff??'', 終了差分分:endDiff??'', 実働差分時間:hourDiff, ズレ箇所:msg.length?msg.join('、'):'', 判定:st, 内容:msg.join('、')||'開始・実働ともに許容範囲内。終了差分は参考値です。', 参考氏名:a.氏名});
+      } else out.push({施設名:e.施設名||'', 日付:e.日付, シフト上区分:e.区分, シフト:e.シフト, 予定開始:e.予定開始, 予定終了:e.予定終了, 予定時間:e.予定時間, 明細QR開始:'', 明細QR終了:'', 明細実働時間:'', 開始差分分:'', 終了差分分:'', 実働差分時間:'', ズレ箇所:'明細なし', 判定:'要確認', 内容:'シフト上はタイミー枠がありますが、明細が見つかりません', 参考氏名:''});
+    });
+    act.forEach((a,i)=>{ if(!usedAct.has(i)) out.push({施設名:a.施設名||'', 日付:a.求人日, シフト上区分:'', シフト:'', 予定開始:'', 予定終了:'', 予定時間:'', 明細QR開始:a.QR開始, 明細QR終了:a.QR終了, 明細実働時間:a.実働時間, 開始差分分:'', 終了差分分:'', 実働差分時間:'', ズレ箇所:'シフト枠なし', 判定:'要確認', 内容:'タイミー明細はありますが、シフト上のタイミー枠が見つかりません', 参考氏名:a.氏名}); });
+  });
+  return out.sort((a,b)=>new Date(a.日付)-new Date(b.日付));
+}
+function timeDiffMin(a,b){
+  if(a==null || b==null) return null;
+  const d=Math.abs(a-b);
+  return Math.min(d, Math.abs(a+1440-b), Math.abs(a-(b+1440)));
+}
+async function runCompare(){
+  try{
+    refreshNameAliases();
+    const groups=groupFiles();
+    if(!fileList('excelFile').length || !fileList('kintaiFile').length) throw new Error('勤務表Excelとタイムカード実績CSVを選択してください。');
+    if(!window.XLSX) throw new Error('Excel読込ライブラリを読み込めません。インターネット接続を確認してください。');
+    $('status').textContent='読み込み中...';
+    const all={daily:[], monthly:[], timee:[], unknown:[], master:[]}; const nameSet=new Set(); const facilitySet=new Set(); const logs=[];
+    for(const group of groups.filter(g=>g.excels.length)){
+      if(!group.kintai.length){ logs.push(`${group.base}: タイムカード実績CSVが見つかりません`); continue; }
+      const schedules=[];
+      for(const item of group.excels){
+        facilitySet.add(item.facility);
+        const wb=XLSX.read(await readArrayBuffer(item.file),{type:'array',cellDates:false});
+        const master=parseMaster(readWorkbookRows(wb,sheetInput('masterSheet','マスタ設定')));
+        all.master.push(...addFacility(state.master,item.facility));
+        const fileYm=inferYearMonth(item.file);
+        const schedule=parseSchedule(readWorkbookRows(wb,sheetInput('manageSheet','管理用シート')), master, item.facility, fileYm);
+        if(fileYm && monthKey(schedule.parsedYm) && monthKey(fileYm)!==monthKey(schedule.parsedYm)) logs.push(`${item.facility}: 勤務表シート上の年月 ${monthKey(schedule.parsedYm)} とファイル名の年月 ${monthKey(fileYm)} が違うため、ファイル名を優先しました`);
+        schedules.push(schedule);
+      }
+      const schedule=mergeSchedules(schedules);
+      const kintai=mergeKintai(await Promise.all(group.kintai.map(async item=>{
+        facilitySet.add(item.facility);
+        return parseKintai(await readTextSmart(item.file), schedule.excludedKeys, item.facility);
+      })));
+      const scheduleMonth=monthKey({y:schedule.y,m:schedule.m});
+      const km=csvMonths(kintai);
+      if(scheduleMonth && km.length && !km.includes(scheduleMonth)) logs.push(`${group.base}: 勤務表は ${scheduleMonth} ですが、勤怠CSVは ${km.join('、')} です`);
+      const timeeRows=(await Promise.all(group.timee.map(async item=>{
+        facilitySet.add(item.facility);
+        return parseTimee(await readTextSmart(item.file), item.facility);
+      }))).flat();
+      collectNameOptions(schedule,kintai,timeeRows); state.nameOptions.forEach(n=>nameSet.add(n));
+      all.unknown.push(...schedule.unknown);
+      all.daily.push(...compareDaily(schedule,kintai,Number($('tolerance').value||15)));
+      all.monthly.push(...compareMonthly(schedule,kintai,Number($('hourTolerance').value||0.25)));
+      if(timeeRows.length) all.timee.push(...compareTimee(schedule, timeeRows, Number($('tolerance').value||15), Number($('hourTolerance').value||0.25)));
+    }
+    state.daily=all.daily; state.monthly=all.monthly; state.timee=all.timee; state.unknown=all.unknown; state.master=all.master; state.nameOptions=[...nameSet].sort((a,b)=>a.localeCompare(b,'ja')); state.facilities=[...facilitySet].sort((a,b)=>a.localeCompare(b,'ja'));
+    renderNameOptions(); renderFacilityOptions();
+    renderSummary(); renderStatusOptions(); renderTable();
+    $('status').textContent=`比較完了\n施設: ${state.facilities.length}件\n日別ズレ: ${state.daily.length}件\n月間集計: ${state.monthly.length}名\nタイミー照合: ${state.timee.length}件\n未登録シフト: ${state.unknown.length}件\nマスタ読込: ${state.master.length}件${logs.length?'\n\n注意:\n'+logs.join('\n'):''}`;
+  }catch(e){ $('status').textContent='エラー: '+e.message; console.error(e); }
+}
+function renderSummary(){
+  const badMonthly=state.monthly.filter(r=>r.判定!=='OK').length, timeeBad=state.timee.filter(r=>r.判定!=='OK').length;
+  $('summary').innerHTML=[
+    ['日別ズレ',state.daily.length],['月間要確認',badMonthly],['タイミー要確認',timeeBad],['未登録シフト',state.unknown.length],['マスタ件数',state.master.length]
+  ].map(([l,n])=>`<div class="kpi"><div class="num">${n}</div><div class="lbl">${l}</div></div>`).join('');
+}
+function renderFacilityOptions(){
+  const current=$('facilityFilter').value;
+  $('facilityFilter').innerHTML=['<option value="">全施設</option>', ...state.facilities.map(f=>`<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`)].join('');
+  if(state.facilities.includes(current)) $('facilityFilter').value=current;
+}
+function renderStatusOptions(){
+  const current=$('statusFilter').value;
+  const statuses=[...new Set((state[state.current]||[]).map(r=>String(r.判定||'')).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ja'));
+  $('statusFilter').innerHTML=['<option value="">全判定</option>','<option value="__not_ok">OK以外</option>', ...statuses.map(s=>`<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`)].join('');
+  if(current && (current==='__not_ok' || statuses.includes(current))) $('statusFilter').value=current;
+}
+function renderTable(){
+  const data=(state[state.current]||[]).filter(r=>{
+    const facility=$('facilityFilter').value;
+    const status=$('statusFilter').value;
+    const f=$('filterText').value.trim();
+    const statusOk=!status || (status==='__not_ok' ? r.判定!=='OK' : r.判定===status);
+    return (!facility || r.施設名===facility) && statusOk && (!f || JSON.stringify(r).includes(f));
+  });
+  $('countLabel').textContent=`${data.length}件表示 / ${state[state.current].length}件`;
+  const table=$('resultTable'); if(!data.length){ table.innerHTML='<tr><td>表示するデータがありません。</td></tr>'; return; }
+  const headers=Object.keys(data[0]);
+  table.innerHTML='<thead><tr>'+headers.map(h=>`<th>${escapeHtml(h)}</th>`).join('')+'</tr></thead><tbody>'+data.map(r=>'<tr>'+headers.map(h=>`<td>${h==='判定'?badge(r[h]):escapeHtml(r[h])}</td>`).join('')+'</tr>').join('')+'</tbody>';
+}
+function toCsv(rows){
+  if(!rows.length) return '';
+  const headers=Object.keys(rows[0]); const esc=v=>'"'+String(v??'').replace(/"/g,'""')+'"';
+  return headers.map(esc).join(',')+'\n'+rows.map(r=>headers.map(h=>esc(r[h])).join(',')).join('\n');
+}
+function downloadCsv(type){
+  const rows=state[type]||[]; if(!rows.length){ alert('出力するデータがありません。'); return; }
+  const blob=new Blob(['\uFEFF'+toCsv(rows)],{type:'text/csv;charset=utf-8'}); const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob); a.download={daily:'日別ズレ一覧.csv',monthly:'職員別月間集計.csv',timee:'タイミー照合一覧.csv',unknown:'未登録シフト一覧.csv'}[type]||'result.csv'; a.click(); URL.revokeObjectURL(a.href);
+}
+function clearResults(){ state={daily:[],monthly:[],timee:[],unknown:[],master:[],current:'daily',logs:[],nameOptions:state.nameOptions||[],facilities:state.facilities||[]}; renderSummary(); renderFacilityOptions(); renderStatusOptions(); renderTable(); $('status').textContent='結果をクリアしました。'; }
+function checkSelected(){
+  const groups=groupFiles();
+  if(!groups.length){ $('status').textContent='ファイルが選択されていません。'; return; }
+  $('status').textContent=groups.map(g=>`${g.base}: 勤務表 ${g.excels.length}件 / 勤怠CSV ${g.kintai.length}件 / タイミー ${g.timee.length}件`).join('\n');
+}
+document.querySelectorAll('.tab').forEach(btn=>btn.addEventListener('click',()=>{document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); state.current=btn.dataset.tab; $('filterText').value=''; $('statusFilter').value=''; renderStatusOptions(); renderTable();}));
+$('filterText').addEventListener('input',renderTable); $('facilityFilter').addEventListener('change',renderTable); $('statusFilter').addEventListener('change',renderTable); $('runBtn').addEventListener('click',runCompare); $('clearBtn').addEventListener('click',clearResults); $('sampleBtn').addEventListener('click',checkSelected);
+const aliasStoreKey='shiftCheckerNameAliases';
+$('nameAliases').value = localStorage.getItem(aliasStoreKey) || 'ソタンダキョー=SAWTHANDARKYAW\nエーエーアウン=AHEAHEAUNG';
+$('nameAliases').addEventListener('input',()=>{ localStorage.setItem(aliasStoreKey,$('nameAliases').value); refreshNameAliases(); renderAliasList(); renderNameOptions(); });
+$('addAliasBtn').addEventListener('click',addAliasFromSelects);
+refreshNameAliases();
+renderAliasList(); renderNameOptions(); renderFacilityOptions(); renderStatusOptions();
+renderSummary(); renderTable();
+</script>
+</body>
+</html>
