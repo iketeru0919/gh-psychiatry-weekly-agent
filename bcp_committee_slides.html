@@ -745,8 +745,9 @@ body{
 <!-- NAV BAR -->
 <div id="nav">
   <button onclick="prevSlide()">◀</button>
-  <span id="counter">1 / 18</span>
+  <span id="counter"></span>
   <button onclick="nextSlide()">▶</button>
+  <button onclick="toggleFullscreen()" style="margin-left:8px;font-size:16px;padding:4px 16px;">⛶ 全画面</button>
 </div>
 
 <script>
@@ -762,10 +763,23 @@ function showSlide(n) {
 function nextSlide() { showSlide(current + 1); }
 function prevSlide() { showSlide(current - 1); }
 
+// 修正①：ボタンにフォーカスがある状態でスペースキーを押してもスライドが進まないようにする
 document.addEventListener('keydown', e => {
+  if (e.target.closest('button')) return;
   if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); nextSlide(); }
   if (e.key === 'ArrowLeft') { e.preventDefault(); prevSlide(); }
 });
+
+// 修正②：カウンターをJSで初期化（実際のスライド枚数を反映）
+document.getElementById('counter').textContent = `1 / ${slides.length}`;
+
+function toggleFullscreen() {
+  if (!document.fullscreenElement) {
+    document.documentElement.requestFullscreen().catch(() => {});
+  } else {
+    document.exitFullscreen().catch(() => {});
+  }
+}
 
 // ===== TIMER =====
 const timerState = {};
@@ -773,10 +787,12 @@ const timerState = {};
 function startTimer(id, totalSec) {
   if (timerState[id]?.interval) clearInterval(timerState[id].interval);
   const el = document.getElementById(id);
-  let remaining = timerState[id]?.remaining ?? totalSec;
+  // 修正③：終了後に再スタートした場合は最初からカウントする
+  let remaining = (timerState[id]?.remaining > 0) ? timerState[id].remaining : totalSec;
 
   timerState[id] = {
     remaining,
+    totalSec,
     interval: setInterval(() => {
       remaining--;
       timerState[id].remaining = remaining;
@@ -788,6 +804,7 @@ function startTimer(id, totalSec) {
       if (remaining <= 0) {
         clearInterval(timerState[id].interval);
         timerState[id].interval = null;
+        timerState[id].remaining = 0;
         el.textContent = '終　了';
       }
     }, 1000)
