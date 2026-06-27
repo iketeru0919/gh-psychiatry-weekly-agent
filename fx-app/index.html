@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FXルールノート</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <header class="app-header">
+    <h1>FXルールノート</h1>
+    <p class="disclaimer">このアプリは学習・記録・リスク確認用です。売買の推奨・価格予想は行いません。</p>
+  </header>
+
+  <nav class="tab-nav">
+    <button class="tab-btn active" data-tab="home">ホーム</button>
+    <button class="tab-btn" data-tab="rules">ルール設定</button>
+    <button class="tab-btn" data-tab="check">取引前チェック</button>
+    <button class="tab-btn" data-tab="calc">計算</button>
+    <button class="tab-btn" data-tab="records">取引記録</button>
+  </nav>
+
+  <main class="app-main">
+
+    <!-- ホーム：今日のチェックリスト -->
+    <section id="tab-home" class="tab-content active">
+      <h2>今日のスケジュール</h2>
+      <p class="date-display" id="today-date"></p>
+      <div class="checklist-card">
+        <div class="checklist-item">
+          <label><input type="checkbox" data-key="morning" /> <span class="time-label">07:00〜07:20</span> 今日の材料整理（ニュース上げ・下げ・中立に分類）</label>
+        </div>
+        <div class="checklist-item">
+          <label><input type="checkbox" data-key="noon" /> <span class="time-label">12:30〜12:45</span> 朝の見立てとのズレ確認</label>
+        </div>
+        <div class="checklist-item">
+          <label><input type="checkbox" data-key="evening" /> <span class="time-label">18:30〜19:00</span> 欧州市場・米指標の確認</label>
+        </div>
+        <div class="checklist-item">
+          <label><input type="checkbox" data-key="night" /> <span class="time-label">21:30〜23:00</span> 取引前チェックまたは観察</label>
+        </div>
+        <div class="checklist-item">
+          <label><input type="checkbox" data-key="after_trade" /> <span class="time-label">取引後</span> 振り返り記録</label>
+        </div>
+        <div class="checklist-item">
+          <label><input type="checkbox" data-key="summary" /> <span class="time-label">23:00〜23:15</span> 1日の学習メモまとめ</label>
+        </div>
+      </div>
+      <div class="progress-bar-wrap">
+        <div class="progress-bar" id="checklist-progress"></div>
+      </div>
+      <p class="progress-text" id="progress-text">0 / 6 完了</p>
+
+      <div class="info-box mt-20">
+        <h3>初心者の今日の方針</h3>
+        <ul>
+          <li>勝ちを狙うより、ルール通りに動けるかを確認する</li>
+          <li>重要指標がある日は観察に徹する</li>
+          <li>損切りを先に決めてから入る</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ルール設定 -->
+    <section id="tab-rules" class="tab-content">
+      <h2>自分のルール設定</h2>
+      <p class="section-desc">取引前チェックの照合基準になります。</p>
+      <form id="rules-form" class="form-card">
+        <div class="form-group">
+          <label>最大レバレッジ（倍）</label>
+          <input type="number" id="rule-max-leverage" min="1" max="25" placeholder="例: 3" />
+          <span class="hint">初心者は1〜3倍推奨</span>
+        </div>
+        <div class="form-group">
+          <label>1回の最大損失（資金の %）</label>
+          <input type="number" id="rule-max-loss" min="0.1" max="10" step="0.1" placeholder="例: 2" />
+          <span class="hint">初心者は1〜2%推奨</span>
+        </div>
+        <div class="form-group">
+          <label>取引する通貨ペア</label>
+          <select id="rule-pair">
+            <option value="USDJPY">ドル円（USDJPY）</option>
+            <option value="EURUSD">ユーロドル（EURUSD）</option>
+            <option value="GBPJPY">ポンド円（GBPJPY）</option>
+          </select>
+          <span class="hint">初心者はドル円のみ推奨</span>
+        </div>
+        <div class="form-group">
+          <label>1日の最大取引回数</label>
+          <input type="number" id="rule-max-trades" min="1" max="10" placeholder="例: 2" />
+        </div>
+        <div class="form-group">
+          <label>損切り必須</label>
+          <select id="rule-require-sl">
+            <option value="yes">はい（必ず損切りを入れる）</option>
+            <option value="no">いいえ</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>重要指標前は取引しない</label>
+          <select id="rule-no-trade-indicators">
+            <option value="yes">はい</option>
+            <option value="no">いいえ</option>
+          </select>
+          <span class="hint">雇用統計・CPI・FOMC・日銀会合など</span>
+        </div>
+        <div class="form-group">
+          <label>自分の資金（円）</label>
+          <input type="number" id="rule-capital" placeholder="例: 100000" />
+        </div>
+        <button type="submit" class="btn-primary">ルールを保存</button>
+      </form>
+      <div id="rules-saved-msg" class="saved-msg hidden">✓ ルールを保存しました</div>
+    </section>
+
+    <!-- 取引前チェック -->
+    <section id="tab-check" class="tab-content">
+      <h2>取引前チェック</h2>
+      <p class="section-desc">入力内容をあなたのルールと照合します。売買推奨は行いません。</p>
+      <form id="check-form" class="form-card">
+        <div class="form-group">
+          <label>通貨ペア</label>
+          <select id="check-pair">
+            <option value="USDJPY">ドル円（USDJPY）</option>
+            <option value="EURUSD">ユーロドル（EURUSD）</option>
+            <option value="GBPJPY">ポンド円（GBPJPY）</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>取引方向</label>
+          <div class="radio-group">
+            <label><input type="radio" name="check-direction" value="buy" /> 買い</label>
+            <label><input type="radio" name="check-direction" value="sell" /> 売り</label>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>取引理由</label>
+          <textarea id="check-reason" rows="3" placeholder="例：米金利上昇、ドル買い材料が強い"></textarea>
+        </div>
+        <div class="form-group">
+          <label>損切り位置（pips）</label>
+          <input type="number" id="check-sl" min="0" placeholder="例: 20" />
+          <span class="hint">エントリー価格から何pips離すか</span>
+        </div>
+        <div class="form-group">
+          <label>利確候補（pips）任意</label>
+          <input type="number" id="check-tp" min="0" placeholder="例: 30" />
+        </div>
+        <div class="form-group">
+          <label>ロット数（万通貨）</label>
+          <input type="number" id="check-lot" min="0.1" step="0.1" placeholder="例: 0.1" />
+        </div>
+        <div class="form-group">
+          <label>今日の重要指標</label>
+          <select id="check-indicator">
+            <option value="none">なし</option>
+            <option value="before">あり（これから発表）</option>
+            <option value="after">あり（発表済み）</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>今の気持ち</label>
+          <select id="check-emotion">
+            <option value="calm">冷静</option>
+            <option value="rush">焦り・早くやりたい</option>
+            <option value="greed">欲・絶対勝てそう</option>
+            <option value="fear">怖い・でも入りたい</option>
+          </select>
+        </div>
+        <button type="button" class="btn-primary" id="check-submit">ルールと照合する</button>
+      </form>
+
+      <div id="check-result" class="check-result hidden">
+        <h3>チェック結果</h3>
+        <div id="check-warnings"></div>
+        <div id="check-verdict"></div>
+        <p class="disclaimer-small">※ このチェックは学習補助です。取引を推奨するものではありません。</p>
+      </div>
+    </section>
+
+    <!-- ロット・レバレッジ計算 -->
+    <section id="tab-calc" class="tab-content">
+      <h2>ロット・レバレッジ計算</h2>
+      <p class="section-desc">1円動いたら何円損益が出るか確認できます。</p>
+      <div class="form-card">
+        <div class="form-group">
+          <label>資金（円）</label>
+          <input type="number" id="calc-capital" placeholder="例: 100000" />
+        </div>
+        <div class="form-group">
+          <label>ロット数（万通貨）</label>
+          <input type="number" id="calc-lot" min="0.01" step="0.01" placeholder="例: 0.1" />
+          <span class="hint">0.1万通貨 = 1,000通貨</span>
+        </div>
+        <div class="form-group">
+          <label>現在の価格（円）</label>
+          <input type="number" id="calc-price" placeholder="例: 150.00" step="0.01" />
+        </div>
+        <div class="form-group">
+          <label>損切り幅（pips）</label>
+          <input type="number" id="calc-sl-pips" placeholder="例: 20" />
+        </div>
+        <button type="button" class="btn-primary" id="calc-submit">計算する</button>
+      </div>
+
+      <div id="calc-result" class="calc-result hidden">
+        <h3>計算結果</h3>
+        <table class="result-table">
+          <tr><td>取引金額</td><td id="res-trade-amount"></td></tr>
+          <tr><td>実質レバレッジ</td><td id="res-leverage"></td></tr>
+          <tr><td>1円動いたときの損益</td><td id="res-per-yen"></td></tr>
+          <tr><td>損切り時の想定損失</td><td id="res-sl-loss"></td></tr>
+          <tr><td>資金に対する損失率</td><td id="res-loss-pct"></td></tr>
+        </table>
+        <div id="calc-warnings" class="calc-warnings"></div>
+        <p class="disclaimer-small">※ 計算はドル円を想定しています。実際の損益はスプレッドや金利の影響で変わります。</p>
+      </div>
+    </section>
+
+    <!-- 取引記録 -->
+    <section id="tab-records" class="tab-content">
+      <h2>取引記録</h2>
+      <button class="btn-secondary" id="open-record-form">＋ 新しい記録を追加</button>
+
+      <div id="record-form-wrap" class="form-card hidden mt-20">
+        <h3>取引を記録する</h3>
+        <div class="form-group">
+          <label>日付</label>
+          <input type="date" id="rec-date" />
+        </div>
+        <div class="form-group">
+          <label>通貨ペア</label>
+          <select id="rec-pair">
+            <option value="USDJPY">ドル円</option>
+            <option value="EURUSD">ユーロドル</option>
+            <option value="GBPJPY">ポンド円</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>取引方向</label>
+          <div class="radio-group">
+            <label><input type="radio" name="rec-direction" value="buy" /> 買い</label>
+            <label><input type="radio" name="rec-direction" value="sell" /> 売り</label>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>取引理由</label>
+          <textarea id="rec-reason" rows="2" placeholder="なぜ入ったか"></textarea>
+        </div>
+        <div class="form-group">
+          <label>損切りを入れたか</label>
+          <select id="rec-sl-set">
+            <option value="yes">はい</option>
+            <option value="no">いいえ</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>結果</label>
+          <select id="rec-result">
+            <option value="win">勝ち</option>
+            <option value="loss">負け</option>
+            <option value="break_even">建値</option>
+            <option value="open">未決済</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>そのときの感情</label>
+          <select id="rec-emotion">
+            <option value="calm">冷静</option>
+            <option value="rush">焦り</option>
+            <option value="greed">欲</option>
+            <option value="fear">怖さ</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>ルールを守れたか</label>
+          <select id="rec-followed">
+            <option value="yes">守れた</option>
+            <option value="no">守れなかった</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>反省・メモ</label>
+          <textarea id="rec-reflection" rows="3" placeholder="次回直すこと、気づきなど"></textarea>
+        </div>
+        <div class="btn-row">
+          <button type="button" class="btn-primary" id="save-record">保存</button>
+          <button type="button" class="btn-ghost" id="cancel-record">キャンセル</button>
+        </div>
+      </div>
+
+      <div id="records-list" class="records-list mt-20"></div>
+    </section>
+
+  </main>
+
+  <script src="js/app.js"></script>
+</body>
+</html>
