@@ -339,3 +339,206 @@ document.getElementById('save-record').addEventListener('click', () => {
 });
 
 renderRecords();
+
+// ========== AI Helper ==========
+const AI_SYSTEM_PROMPT = `あなたはFX初心者の学習補助AIです。
+以下の制約を必ず守ってください：
+・売買推奨・価格予想・利益保証は一切しません
+・ニュース整理・リスク確認・取引記録の振り返りのみ行います
+・損切り未設定・過大ロット・感情的取引には具体的に警告します
+・無理な取引より観察を優先する助言をします
+・出力は日本語のみ、300字以内で簡潔に
+・回答の末尾に必ず「※これは学習補助コメントです。売買の推奨ではありません。」を付けてください`;
+
+async function callClaudeAPI(userMessage) {
+  const apiKey = localStorage.getItem('claude_api_key');
+  if (!apiKey) {
+    throw new Error('APIキーが設定されていません。「AI振り返り」タブでAPIキーを保存してください。');
+  }
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-calls': 'true'
+    },
+    body: JSON.stringify({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 512,
+      system: AI_SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: userMessage }]
+    })
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error?.message || `APIエラー: ${res.status}`);
+  }
+
+  const data = await res.json();
+  return data.content[0].text;
+}
+
+// ========== API Key Management ==========
+const apiKeyInput = document.getElementById('api-key-input');
+const savedKey = localStorage.getItem('claude_api_key');
+if (savedKey) apiKeyInput.value = savedKey;
+
+document.getElementById('toggle-key-visibility').addEventListener('click', function() {
+  const isPassword = apiKeyInput.type === 'password';
+  apiKeyInput.type = isPassword ? 'text' : 'password';
+  this.textContent = isPassword ? '隠す' : '表示';
+});
+
+document.getElementById('save-api-key').addEventListener('click', () => {
+  const key = apiKeyInput.value.trim();
+  if (!key) { alert('APIキーを入力してください。'); return; }
+  localStorage.setItem('claude_api_key', key);
+  const msg = document.getElementById('apikey-saved');
+  msg.classList.remove('hidden');
+  setTimeout(() => msg.classList.add('hidden'), 2000);
+});
+
+// ========== Pre-trade AI Comment ==========
+document.getElementById('check-ai-btn').addEventListener('click', async function() {
+  const warnings = document.getElementById('check-warnings').innerText;
+  const verdict = document.getElementById('check-verdict').innerText;
+  const reason = document.getElementById('check-reason').value.trim();
+  const emotion = document.getElementById('check-emotion').value;
+  const sl = document.getElementById('check-sl').value;
+  const lot = document.getElementById('check-lot').value;
+  const indicator = document.getElementById('check-indicator').value;
+
+  const emotionLabel = { calm: '冷静', rush: '焦り', greed: '欲', fear: '怖さ' };
+  const indicatorLabel = { none: 'なし', before: 'あり（発表前）', after: 'あり（発表済み）' };
+
+  const msg = `取引前チェック結果を振り返ってください。
+取引理由: ${reason || '未入力'}
+損切り: ${sl ? sl + ' pips' : '未設定'}
+ロット: ${lot ? lot + ' 万通貨' : '未入力'}
+今の感情: ${emotionLabel[emotion]}
+重要指標: ${indicatorLabel[indicator]}
+ルール照合結果: ${warnings}
+総合判定: ${verdict}
+
+初心者への学習的なコメントをしてください。売買推奨はしないでください。`;
+
+  this.disabled = true;
+  this.textContent = '送信中...';
+  const resultEl = document.getElementById('check-ai-result');
+  resultEl.classList.remove('hidden');
+  resultEl.textContent = '分析中...';
+
+  try {
+    const reply = await callClaudeAPI(msg);
+    resultEl.textContent = reply;
+  } catch (e) {
+    resultEl.textContent = 'エラー: ' + e.message;
+  } finally {
+    this.disabled = false;
+    this.textContent = 'AIにコメントをもらう';
+  }
+});
+
+// ========== Review Tab ==========
+function getWeeklyStats(records) {
+  const now = new Date();
+  const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const weekly = records.filter(r => new Date(r.date) >= weekAgo);
+
+  const total = weekly.length;
+  const wins = weekly.filter(r => r.result === 'win').length;
+  const followed = weekly.filter(r => r.followed_rules === 'yes').length;
+  const slSet = weekly.filter(r => r.sl_set === 'yes').length;
+  const emotional = weekly.filter(r => r.emotion !== 'calm').length;
+
+  return { total, wins, followed, slSet, emotional };
+}
+
+function renderWeeklyStats() {
+  const records = loadRecords();
+  const s = getWeeklyStats(records);
+  const el = document.getElementById('weekly-stats');
+  if (s.total === 0) {
+    el.innerHTML = '<p style="color:#aaa;font-size:0.85rem;">直近7日間の取引記録がありません。</p>';
+    return;
+  }
+  const followRate = s.total > 0 ? Math.round((s.followed / s.total) * 100) : 0;
+  const slRate = s.total > 0 ? Math.round((s.slSet / s.total) * 100) : 0;
+  el.innerHTML = `
+    <div class="stat-grid">
+      <div class="stat-item"><div class="stat-value">${s.total}</div><div class="stat-label">取引回数</div></div>
+      <div class="stat-item highlight"><div class="stat-value">${followRate}%</div><div class="stat-label">ルール遵守率</div></div>
+      <div class="stat-item"><div class="stat-value">${slRate}%</div><div class="stat-label">損切り設定率</div></div>
+      <div class="stat-item"><div class="stat-value">${s.emotional}</div><div class="stat-label">感情的取引回数</div></div>
+    </div>`;
+}
+
+// AI Review
+document.getElementById('review-submit').addEventListener('click', async function() {
+  const period = document.getElementById('review-period').value;
+  const allRecords = loadRecords();
+  const now = new Date();
+
+  let targetRecords;
+  if (period === 'today') {
+    targetRecords = allRecords.filter(r => r.date === todayKey);
+  } else if (period === 'week') {
+    const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    targetRecords = allRecords.filter(r => new Date(r.date) >= weekAgo);
+  } else {
+    targetRecords = allRecords;
+  }
+
+  if (targetRecords.length === 0) {
+    alert('対象期間に取引記録がありません。');
+    return;
+  }
+
+  const resultLabel = { win: '勝ち', loss: '負け', break_even: '建値', open: '未決済' };
+  const emotionLabel = { calm: '冷静', rush: '焦り', greed: '欲', fear: '怖さ' };
+  const dirLabel = { buy: '買い', sell: '売り' };
+
+  const recordText = targetRecords.map(r =>
+    `[${r.date}] ${r.pair} ${dirLabel[r.direction] || ''} / 理由: ${r.reason || 'なし'} / 損切り: ${r.sl_set === 'yes' ? 'あり' : 'なし'} / 感情: ${emotionLabel[r.emotion] || ''} / 結果: ${resultLabel[r.result] || ''} / ルール: ${r.followed_rules === 'yes' ? '遵守' : '違反'} / メモ: ${r.reflection || 'なし'}`
+  ).join('\n');
+
+  const msg = `以下のFX取引記録を振り返ってください。
+
+${recordText}
+
+以下の観点で学習的なコメントをしてください：
+1. 守れたルール
+2. 守れなかったルール・改善点
+3. 感情的な取引パターンがあればその指摘
+4. 次回取引で気をつけること（3点以内）
+
+売買推奨・価格予想はしないでください。`;
+
+  this.disabled = true;
+  const resultEl = document.getElementById('review-result');
+  const loadingEl = document.getElementById('review-loading');
+  const contentEl = document.getElementById('review-content');
+  resultEl.classList.remove('hidden');
+  loadingEl.classList.remove('hidden');
+  contentEl.textContent = '';
+
+  try {
+    const reply = await callClaudeAPI(msg);
+    contentEl.textContent = reply;
+  } catch (e) {
+    contentEl.textContent = 'エラー: ' + e.message;
+  } finally {
+    loadingEl.classList.add('hidden');
+    this.disabled = false;
+  }
+});
+
+// Render weekly stats when switching to review tab
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  if (btn.dataset.tab === 'review') {
+    btn.addEventListener('click', renderWeeklyStats);
+  }
+});

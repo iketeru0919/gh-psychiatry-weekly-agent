@@ -18,6 +18,7 @@
     <button class="tab-btn" data-tab="check">取引前チェック</button>
     <button class="tab-btn" data-tab="calc">計算</button>
     <button class="tab-btn" data-tab="records">取引記録</button>
+    <button class="tab-btn" data-tab="review">AI振り返り</button>
   </nav>
 
   <main class="app-main">
@@ -174,6 +175,8 @@
         <h3>チェック結果</h3>
         <div id="check-warnings"></div>
         <div id="check-verdict"></div>
+        <button type="button" class="btn-ai mt-12" id="check-ai-btn">AIにコメントをもらう</button>
+        <div id="check-ai-result" class="ai-result hidden"></div>
         <p class="disclaimer-small">※ このチェックは学習補助です。取引を推奨するものではありません。</p>
       </div>
     </section>
@@ -290,6 +293,54 @@
       </div>
 
       <div id="records-list" class="records-list mt-20"></div>
+    </section>
+
+    <!-- AI振り返り -->
+    <section id="tab-review" class="tab-content">
+      <h2>AI振り返り</h2>
+      <p class="section-desc">取引記録をもとにAIが学習的な振り返りをします。売買推奨は行いません。</p>
+
+      <!-- API Key 設定 -->
+      <div class="form-card" id="apikey-card">
+        <div class="form-group">
+          <label>Claude API Key（ブラウザ内のみ保存・外部送信なし）</label>
+          <div class="api-key-row">
+            <input type="password" id="api-key-input" placeholder="sk-ant-..." />
+            <button type="button" class="btn-ghost" id="toggle-key-visibility">表示</button>
+          </div>
+          <span class="hint">Anthropic Consoleで発行したAPIキーを入力してください。localStorageにのみ保存されます。</span>
+        </div>
+        <button type="button" class="btn-secondary" id="save-api-key">APIキーを保存</button>
+        <div id="apikey-saved" class="saved-msg hidden">✓ 保存しました</div>
+      </div>
+
+      <!-- 振り返り対象選択 -->
+      <div class="form-card mt-20">
+        <h3>振り返る期間</h3>
+        <div class="form-group">
+          <select id="review-period">
+            <option value="today">今日</option>
+            <option value="week">直近7日間</option>
+            <option value="all">全記録</option>
+          </select>
+        </div>
+        <button type="button" class="btn-primary" id="review-submit">AIに振り返ってもらう</button>
+      </div>
+
+      <div id="review-result" class="ai-result mt-20 hidden">
+        <div id="review-loading" class="ai-loading hidden">
+          <div class="spinner"></div>
+          <span>AIが分析中です...</span>
+        </div>
+        <div id="review-content"></div>
+        <p class="disclaimer-small">※ これはAIによる学習補助コメントです。売買の推奨ではありません。</p>
+      </div>
+
+      <!-- 週間サマリー -->
+      <div class="form-card mt-20" id="weekly-summary-card">
+        <h3>今週の記録サマリー</h3>
+        <div id="weekly-stats"></div>
+      </div>
     </section>
 
   </main>
