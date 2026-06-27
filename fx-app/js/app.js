@@ -331,7 +331,7 @@ function renderRecords() {
       <div class="record-header">
         <span class="record-date">${escapeHTML(r.date)}</span>
         <div style="display:flex;gap:8px;align-items:center;">
-          <span class="record-badge badge-${safeResult}">${escapeHTML(resultLabel[r.result] || r.result)}</span>
+          <span class="record-badge badge-${safeResult}">${escapeHTML(resultLabel[safeResult])}</span>
           <button class="delete-btn" data-idx="${idx}" title="削除">✕</button>
         </div>
       </div>
