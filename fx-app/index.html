@@ -177,15 +177,23 @@
         <div id="check-verdict"></div>
         <button type="button" class="btn-ai mt-12" id="check-ai-btn">AIにコメントをもらう</button>
         <div id="check-ai-result" class="ai-result hidden"></div>
-        <p class="disclaimer-small">※ このチェックは学習補助です。取引を推奨するものではありません。</p>
+        <p class="disclaimer-small">※ このチェックは学習補助です。投資助言ではありません。最終的な取引判断は必ず利用者本人が行ってください。</p>
       </div>
     </section>
 
     <!-- ロット・レバレッジ計算 -->
     <section id="tab-calc" class="tab-content">
       <h2>ロット・レバレッジ計算</h2>
-      <p class="section-desc">1円動いたら何円損益が出るか確認できます。</p>
+      <p class="section-desc">損切り時の損失額・実質レバレッジを確認できます。</p>
       <div class="form-card">
+        <div class="form-group">
+          <label>通貨ペア</label>
+          <select id="calc-pair">
+            <option value="USDJPY">ドル円（USDJPY）</option>
+            <option value="GBPJPY">ポンド円（GBPJPY）</option>
+            <option value="EURUSD">ユーロドル（EURUSD）</option>
+          </select>
+        </div>
         <div class="form-group">
           <label>資金（円）</label>
           <input type="number" id="calc-capital" placeholder="例: 100000" />
@@ -196,12 +204,19 @@
           <span class="hint">0.1万通貨 = 1,000通貨</span>
         </div>
         <div class="form-group">
-          <label>現在の価格（円）</label>
-          <input type="number" id="calc-price" placeholder="例: 150.00" step="0.01" />
+          <label id="calc-price-label">現在の価格</label>
+          <input type="number" id="calc-price" placeholder="例: 150.00" step="0.0001" />
+          <span class="hint" id="calc-price-hint">ドル円の場合：例 150.00（円）</span>
+        </div>
+        <div class="form-group" id="calc-usdjpy-rate-wrap" style="display:none">
+          <label>ドル円レート（EURUSDの円換算に使用）</label>
+          <input type="number" id="calc-usdjpy-rate" placeholder="例: 150.00" step="0.01" />
+          <span class="hint">EURUSD取引の損益を円換算するために必要です</span>
         </div>
         <div class="form-group">
           <label>損切り幅（pips）</label>
           <input type="number" id="calc-sl-pips" placeholder="例: 20" />
+          <span class="hint" id="calc-pips-hint">ドル円・ポンド円：1pips = 0.01円　EURUSD：1pips = 0.0001ドル</span>
         </div>
         <button type="button" class="btn-primary" id="calc-submit">計算する</button>
       </div>
@@ -209,14 +224,14 @@
       <div id="calc-result" class="calc-result hidden">
         <h3>計算結果</h3>
         <table class="result-table">
-          <tr><td>取引金額</td><td id="res-trade-amount"></td></tr>
+          <tr><td>取引金額（円換算）</td><td id="res-trade-amount"></td></tr>
           <tr><td>実質レバレッジ</td><td id="res-leverage"></td></tr>
-          <tr><td>1円動いたときの損益</td><td id="res-per-yen"></td></tr>
-          <tr><td>損切り時の想定損失</td><td id="res-sl-loss"></td></tr>
+          <tr><td id="res-per-unit-label">1円動いたときの損益</td><td id="res-per-yen"></td></tr>
+          <tr><td>損切り時の想定損失（円）</td><td id="res-sl-loss"></td></tr>
           <tr><td>資金に対する損失率</td><td id="res-loss-pct"></td></tr>
         </table>
         <div id="calc-warnings" class="calc-warnings"></div>
-        <p class="disclaimer-small">※ 計算はドル円を想定しています。実際の損益はスプレッドや金利の影響で変わります。</p>
+        <p class="disclaimer-small">※ 計算は概算です。実際の損益はスプレッド・スワップ・約定レートの影響で変わります。EURUSDは入力したドル円レートで円換算しています。</p>
       </div>
     </section>
 
@@ -303,12 +318,16 @@
       <!-- API Key 設定 -->
       <div class="form-card" id="apikey-card">
         <div class="form-group">
-          <label>Claude API Key（ブラウザ内のみ保存・外部送信なし）</label>
+          <label>Claude API Key</label>
           <div class="api-key-row">
             <input type="password" id="api-key-input" placeholder="sk-ant-..." />
             <button type="button" class="btn-ghost" id="toggle-key-visibility">表示</button>
           </div>
-          <span class="hint">Anthropic Consoleで発行したAPIキーを入力してください。localStorageにのみ保存されます。</span>
+          <span class="hint">Anthropic Consoleで発行したAPIキーを入力してください。キー自体はlocalStorageに保存されます。</span>
+          <div class="api-notice">
+            AI機能を使用すると、入力内容（取引記録・チェック内容など）はAnthropicのAPIサーバーに送信されます。
+            共有PCや公共端末では使用しないでください。
+          </div>
         </div>
         <button type="button" class="btn-secondary" id="save-api-key">APIキーを保存</button>
         <div id="apikey-saved" class="saved-msg hidden">✓ 保存しました</div>
@@ -333,7 +352,7 @@
           <span>AIが分析中です...</span>
         </div>
         <div id="review-content"></div>
-        <p class="disclaimer-small">※ これはAIによる学習補助コメントです。売買の推奨ではありません。</p>
+        <p class="disclaimer-small">※ AIコメントは学習補助です。投資助言ではありません。最終的な取引判断は必ず利用者本人が行ってください。AIの出力内容で生じた損失について、本アプリは責任を負いません。</p>
       </div>
 
       <!-- 週間サマリー -->

@@ -205,7 +205,33 @@ document.getElementById('check-submit').addEventListener('click', () => {
 });
 
 // ========== Lot / Leverage Calc ==========
+
+// 通貨ペア切替時にUI更新
+document.getElementById('calc-pair').addEventListener('change', function() {
+  const isEURUSD = this.value === 'EURUSD';
+  const isJPYpair = this.value === 'USDJPY' || this.value === 'GBPJPY';
+  const usdRateWrap = document.getElementById('calc-usdjpy-rate-wrap');
+  const priceHint = document.getElementById('calc-price-hint');
+  const pipsHint = document.getElementById('calc-pips-hint');
+  const priceLabel = document.getElementById('calc-price-label');
+
+  if (isEURUSD) {
+    usdRateWrap.style.display = '';
+    priceLabel.textContent = '現在の価格（ドル）';
+    priceHint.textContent = 'EURUSDの場合：例 1.0850（ドル）';
+    pipsHint.textContent = 'EURUSD：1pips = 0.0001ドル';
+  } else {
+    usdRateWrap.style.display = 'none';
+    priceLabel.textContent = '現在の価格（円）';
+    priceHint.textContent = this.value === 'GBPJPY'
+      ? 'ポンド円の場合：例 190.00（円）'
+      : 'ドル円の場合：例 150.00（円）';
+    pipsHint.textContent = 'ドル円・ポンド円：1pips = 0.01円';
+  }
+});
+
 document.getElementById('calc-submit').addEventListener('click', () => {
+  const pair = document.getElementById('calc-pair').value;
   const capital = parseFloat(document.getElementById('calc-capital').value);
   const lot = parseFloat(document.getElementById('calc-lot').value);
   const price = parseFloat(document.getElementById('calc-price').value);
@@ -216,18 +242,40 @@ document.getElementById('calc-submit').addEventListener('click', () => {
     return;
   }
 
-  // ドル円前提：1万通貨 = 10,000通貨
   const units = lot * 10000;
-  const tradeAmount = units * price;
-  const leverage = tradeAmount / capital;
-  const perYen = units;  // ドル円：1円動くと units 円の損益
-  const slLoss = slPips > 0 ? units * (slPips * 0.01) : null;  // 1pips = 0.01円
-  const lossPct = slLoss ? (slLoss / capital) * 100 : null;
+  let tradeAmountJPY, perUnitJPY, slLossJPY, perUnitLabel;
 
-  document.getElementById('res-trade-amount').textContent = `¥${tradeAmount.toLocaleString()}`;
+  if (pair === 'USDJPY' || pair === 'GBPJPY') {
+    // 円建てペア：価格が円レート
+    // 1pips = 0.01円
+    tradeAmountJPY = units * price;
+    perUnitJPY = units;           // 1円動いたときの損益（円）
+    slLossJPY = slPips > 0 ? units * slPips * 0.01 : null;
+    perUnitLabel = '1円動いたときの損益';
+  } else {
+    // EURUSD：価格がドルレート、損益はドル建て → 円換算にドル円レートが必要
+    const usdJpy = parseFloat(document.getElementById('calc-usdjpy-rate').value);
+    if (!usdJpy) {
+      alert('EURUSDはドル円レートも入力してください。');
+      return;
+    }
+    tradeAmountJPY = units * price * usdJpy;
+    // 1pips = 0.0001ドル → 円換算
+    const perPipUSD = units * 0.0001;
+    const perPipJPY = perPipUSD * usdJpy;
+    perUnitJPY = perPipJPY;
+    slLossJPY = slPips > 0 ? perPipJPY * slPips : null;
+    perUnitLabel = '1pips動いたときの損益（円換算）';
+  }
+
+  const leverage = tradeAmountJPY / capital;
+  const lossPct = slLossJPY ? (slLossJPY / capital) * 100 : null;
+
+  document.getElementById('res-trade-amount').textContent = `¥${Math.round(tradeAmountJPY).toLocaleString()}`;
   document.getElementById('res-leverage').textContent = `${leverage.toFixed(2)} 倍`;
-  document.getElementById('res-per-yen').textContent = `±¥${perYen.toLocaleString()}`;
-  document.getElementById('res-sl-loss').textContent = slLoss ? `¥${slLoss.toLocaleString()}` : '—';
+  document.getElementById('res-per-unit-label').textContent = perUnitLabel;
+  document.getElementById('res-per-yen').textContent = `±¥${Math.round(perUnitJPY).toLocaleString()}`;
+  document.getElementById('res-sl-loss').textContent = slLossJPY ? `¥${Math.round(slLossJPY).toLocaleString()}` : '—';
   document.getElementById('res-loss-pct').textContent = lossPct ? `${lossPct.toFixed(2)}%` : '—';
 
   const warnEl = document.getElementById('calc-warnings');
