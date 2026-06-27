@@ -11,6 +11,16 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
   });
 });
 
+// ========== XSS Prevention ==========
+function escapeHTML(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // ========== LocalStorage Helpers ==========
 function loadJSON(key, fallback) {
   try { return JSON.parse(localStorage.getItem(key)) || fallback; } catch { return fallback; }
@@ -321,14 +331,14 @@ function renderRecords() {
           <button class="delete-btn" data-idx="${idx}" title="削除">✕</button>
         </div>
       </div>
-      <div class="record-pair">${r.pair}　${dirLabel[r.direction] || r.direction}</div>
-      <div class="record-reason">${r.reason || '（理由なし）'}</div>
+      <div class="record-pair">${escapeHTML(r.pair)}　${escapeHTML(dirLabel[r.direction] || r.direction)}</div>
+      <div class="record-reason">${escapeHTML(r.reason || '（理由なし）')}</div>
       <div class="record-meta">
         <span class="tag ${r.sl_set === 'yes' ? 'green' : 'red'}">損切り: ${r.sl_set === 'yes' ? 'あり' : 'なし'}</span>
-        <span class="tag">感情: ${emotionLabel[r.emotion] || r.emotion}</span>
+        <span class="tag">感情: ${escapeHTML(emotionLabel[r.emotion] || r.emotion)}</span>
         <span class="tag ${r.followed_rules === 'yes' ? 'green' : 'red'}">ルール: ${r.followed_rules === 'yes' ? '遵守' : '違反'}</span>
       </div>
-      ${r.reflection ? `<p style="margin-top:8px;font-size:0.8rem;color:#555;">${r.reflection}</p>` : ''}
+      ${r.reflection ? `<p style="margin-top:8px;font-size:0.8rem;color:#555;">${escapeHTML(r.reflection)}</p>` : ''}
     </div>`;
   }).join('');
 
