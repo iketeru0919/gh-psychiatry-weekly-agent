@@ -320,14 +320,18 @@ function renderRecords() {
   const emotionLabel = { calm: '冷静', rush: '焦り', greed: '欲', fear: '怖さ' };
   const dirLabel = { buy: '買い', sell: '売り' };
 
+  // クラス名に埋め込む値はホワイトリストで安全な値のみ通す
+  const VALID_RESULTS = new Set(['win', 'loss', 'break_even', 'open']);
+
   container.innerHTML = records.slice().reverse().map((r, i) => {
     const idx = records.length - 1 - i;
+    const safeResult = VALID_RESULTS.has(r.result) ? r.result : 'open';
     return `
-    <div class="record-card ${r.result}">
+    <div class="record-card ${safeResult}">
       <div class="record-header">
-        <span class="record-date">${r.date}</span>
+        <span class="record-date">${escapeHTML(r.date)}</span>
         <div style="display:flex;gap:8px;align-items:center;">
-          <span class="record-badge badge-${r.result}">${resultLabel[r.result] || r.result}</span>
+          <span class="record-badge badge-${safeResult}">${escapeHTML(resultLabel[r.result] || r.result)}</span>
           <button class="delete-btn" data-idx="${idx}" title="削除">✕</button>
         </div>
       </div>
@@ -335,7 +339,7 @@ function renderRecords() {
       <div class="record-reason">${escapeHTML(r.reason || '（理由なし）')}</div>
       <div class="record-meta">
         <span class="tag ${r.sl_set === 'yes' ? 'green' : 'red'}">損切り: ${r.sl_set === 'yes' ? 'あり' : 'なし'}</span>
-        <span class="tag">感情: ${escapeHTML(emotionLabel[r.emotion] || r.emotion)}</span>
+        <span class="tag">感情: ${escapeHTML(emotionLabel[r.emotion] || '不明')}</span>
         <span class="tag ${r.followed_rules === 'yes' ? 'green' : 'red'}">ルール: ${r.followed_rules === 'yes' ? '遵守' : '違反'}</span>
       </div>
       ${r.reflection ? `<p style="margin-top:8px;font-size:0.8rem;color:#555;">${escapeHTML(r.reflection)}</p>` : ''}
