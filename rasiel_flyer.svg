@@ -1,0 +1,348 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="794" height="1123" viewBox="0 0 794 1123">
+  <defs>
+    <style>
+      text { font-family: 'Hiragino Kaku Gothic Pro', 'Meiryo', 'MS Gothic', sans-serif; }
+    </style>
+    <!-- Dot pattern for shading -->
+    <pattern id="dots" x="0" y="0" width="4" height="4" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r="0.8" fill="black"/>
+    </pattern>
+    <!-- Hatch pattern -->
+    <pattern id="hatch" x="0" y="0" width="6" height="6" patternUnits="userSpaceOnUse">
+      <line x1="0" y1="6" x2="6" y2="0" stroke="black" stroke-width="1"/>
+    </pattern>
+    <!-- Light dots -->
+    <pattern id="lightdots" x="0" y="0" width="6" height="6" patternUnits="userSpaceOnUse">
+      <circle cx="1.5" cy="1.5" r="0.8" fill="black"/>
+    </pattern>
+  </defs>
+
+  <!-- White background -->
+  <rect width="794" height="1123" fill="white"/>
+
+  <!-- ===== OUTER BORDER ===== -->
+  <rect x="10" y="10" width="774" height="1103" fill="none" stroke="black" stroke-width="4"/>
+  <rect x="16" y="16" width="762" height="1091" fill="none" stroke="black" stroke-width="1.5"/>
+
+  <!-- ===== DIVIDER LINE (upper/lower half) ===== -->
+  <line x1="16" y1="560" x2="778" y2="560" stroke="black" stroke-width="3"/>
+
+  <!-- ============================================================ -->
+  <!-- UPPER HALF: ILLUSTRATION                                      -->
+  <!-- ============================================================ -->
+
+  <!-- Top title banner -->
+  <rect x="16" y="16" width="762" height="52" fill="black"/>
+  <text x="397" y="52" text-anchor="middle" fill="white" font-size="28" font-weight="bold" letter-spacing="6">障 害 者 グ ル ー プ ホ ー ム 紹 介</text>
+
+  <!-- Sub banner -->
+  <rect x="80" y="76" width="634" height="34" fill="none" stroke="black" stroke-width="2.5" rx="4"/>
+  <text x="397" y="100" text-anchor="middle" fill="black" font-size="20" font-weight="bold">～ あなたらしく、一緒に暮らせる場所 ～</text>
+
+  <!-- ===== SUN (top right) ===== -->
+  <circle cx="700" cy="155" r="36" fill="black"/>
+  <circle cx="700" cy="155" r="28" fill="white"/>
+  <!-- Sun rays -->
+  <line x1="700" y1="108" x2="700" y2="98" stroke="black" stroke-width="3"/>
+  <line x1="700" y1="202" x2="700" y2="212" stroke="black" stroke-width="3"/>
+  <line x1="653" y1="155" x2="643" y2="155" stroke="black" stroke-width="3"/>
+  <line x1="747" y1="155" x2="757" y2="155" stroke="black" stroke-width="3"/>
+  <line x1="667" y1="122" x2="660" y2="115" stroke="black" stroke-width="3"/>
+  <line x1="733" y1="188" x2="740" y2="195" stroke="black" stroke-width="3"/>
+  <line x1="733" y1="122" x2="740" y2="115" stroke="black" stroke-width="3"/>
+  <line x1="667" y1="188" x2="660" y2="195" stroke="black" stroke-width="3"/>
+  <!-- Sun face -->
+  <circle cx="692" cy="150" r="3" fill="black"/>
+  <circle cx="708" cy="150" r="3" fill="black"/>
+  <path d="M693 160 Q700 166 707 160" fill="none" stroke="black" stroke-width="2"/>
+
+  <!-- ===== CLOUD (top left) ===== -->
+  <ellipse cx="110" cy="140" rx="45" ry="25" fill="white" stroke="black" stroke-width="2.5"/>
+  <ellipse cx="85" cy="148" rx="28" ry="20" fill="white" stroke="black" stroke-width="2.5"/>
+  <ellipse cx="140" cy="152" rx="32" ry="18" fill="white" stroke="black" stroke-width="2.5"/>
+  <ellipse cx="118" cy="125" rx="30" ry="22" fill="white" stroke="black" stroke-width="2.5"/>
+
+  <!-- ===== HOUSE (center) ===== -->
+  <!-- House body -->
+  <rect x="290" y="220" width="214" height="170" fill="white" stroke="black" stroke-width="3.5"/>
+  <!-- House roof -->
+  <polygon points="270,222 397,130 524,222" fill="url(#dots)" stroke="black" stroke-width="3.5"/>
+  <!-- Roof ridge cap -->
+  <rect x="375" y="128" width="44" height="14" fill="black" rx="3"/>
+  <!-- Chimney -->
+  <rect x="450" y="140" width="24" height="50" fill="url(#hatch)" stroke="black" stroke-width="2.5"/>
+  <!-- Smoke from chimney -->
+  <path d="M455 138 Q448 125 456 115 Q464 105 457 95" fill="none" stroke="black" stroke-width="2" stroke-dasharray="4,3"/>
+  <path d="M467 135 Q460 120 468 108 Q476 96 469 84" fill="none" stroke="black" stroke-width="2" stroke-dasharray="4,3"/>
+  <!-- Door -->
+  <rect x="360" y="310" width="74" height="80" fill="white" stroke="black" stroke-width="3"/>
+  <rect x="360" y="310" width="74" height="80" fill="url(#lightdots)" stroke="black" stroke-width="3"/>
+  <ellipse cx="397" cy="355" rx="37" ry="18" fill="white" stroke="none"/>
+  <circle cx="424" cy="352" r="5" fill="black"/>
+  <!-- Door arch -->
+  <path d="M360 315 Q397 295 434 315" fill="white" stroke="black" stroke-width="3"/>
+  <!-- Windows -->
+  <!-- Left window -->
+  <rect x="306" y="252" width="62" height="52" fill="white" stroke="black" stroke-width="3"/>
+  <line x1="337" y1="252" x2="337" y2="304" stroke="black" stroke-width="2"/>
+  <line x1="306" y1="278" x2="368" y2="278" stroke="black" stroke-width="2"/>
+  <!-- Window curtain left -->
+  <path d="M308 254 Q318 270 308 278" fill="url(#lightdots)" stroke="black" stroke-width="1.5"/>
+  <path d="M366 254 Q356 270 366 278" fill="url(#lightdots)" stroke="black" stroke-width="1.5"/>
+  <!-- Right window -->
+  <rect x="426" y="252" width="62" height="52" fill="white" stroke="black" stroke-width="3"/>
+  <line x1="457" y1="252" x2="457" y2="304" stroke="black" stroke-width="2"/>
+  <line x1="426" y1="278" x2="488" y2="278" stroke="black" stroke-width="2"/>
+  <!-- Window curtain right -->
+  <path d="M428 254 Q438 270 428 278" fill="url(#lightdots)" stroke="black" stroke-width="1.5"/>
+  <path d="M486 254 Q476 270 486 278" fill="url(#lightdots)" stroke="black" stroke-width="1.5"/>
+
+  <!-- House nameplate -->
+  <rect x="310" y="312" width="50" height="20" fill="white" stroke="black" stroke-width="2"/>
+  <text x="335" y="326" text-anchor="middle" fill="black" font-size="9" font-weight="bold">RASIEL</text>
+
+  <!-- Flower bed -->
+  <rect x="290" y="386" width="214" height="8" fill="black" rx="2"/>
+  <!-- Flowers -->
+  <circle cx="310" cy="378" r="7" fill="black"/>
+  <circle cx="310" cy="378" r="4" fill="white"/>
+  <circle cx="330" cy="373" r="7" fill="black"/>
+  <circle cx="330" cy="373" r="4" fill="white"/>
+  <circle cx="350" cy="378" r="7" fill="black"/>
+  <circle cx="350" cy="378" r="4" fill="white"/>
+  <circle cx="444" cy="378" r="7" fill="black"/>
+  <circle cx="444" cy="378" r="4" fill="white"/>
+  <circle cx="464" cy="373" r="7" fill="black"/>
+  <circle cx="464" cy="373" r="4" fill="white"/>
+  <circle cx="484" cy="378" r="7" fill="black"/>
+  <circle cx="484" cy="378" r="4" fill="white"/>
+
+  <!-- ===== TREE LEFT ===== -->
+  <rect x="222" y="330" width="14" height="58" fill="url(#hatch)" stroke="black" stroke-width="2"/>
+  <ellipse cx="229" cy="300" rx="34" ry="42" fill="white" stroke="black" stroke-width="2.5"/>
+  <ellipse cx="229" cy="300" rx="24" ry="32" fill="url(#lightdots)"/>
+
+  <!-- ===== TREE RIGHT ===== -->
+  <rect x="558" y="330" width="14" height="58" fill="url(#hatch)" stroke="black" stroke-width="2"/>
+  <ellipse cx="565" cy="300" rx="34" ry="42" fill="white" stroke="black" stroke-width="2.5"/>
+  <ellipse cx="565" cy="300" rx="24" ry="32" fill="url(#lightdots)"/>
+
+  <!-- Ground line -->
+  <line x1="30" y1="394" x2="764" y2="394" stroke="black" stroke-width="2"/>
+
+  <!-- ===== CHARACTER: Female resident (left, wheelchair) ===== -->
+  <!-- Wheelchair -->
+  <circle cx="108" cy="430" r="20" fill="none" stroke="black" stroke-width="3"/>
+  <circle cx="108" cy="430" r="6" fill="black"/>
+  <circle cx="148" cy="440" r="12" fill="none" stroke="black" stroke-width="2.5"/>
+  <circle cx="148" cy="440" r="4" fill="black"/>
+  <rect x="100" y="390" width="60" height="40" rx="6" fill="white" stroke="black" stroke-width="2.5"/>
+  <line x1="160" y1="405" x2="180" y2="395" stroke="black" stroke-width="2.5"/>
+  <line x1="100" y1="430" x2="136" y2="430" stroke="black" stroke-width="2.5"/>
+  <!-- Body -->
+  <ellipse cx="145" cy="360" rx="18" ry="22" fill="white" stroke="black" stroke-width="2.5"/>
+  <!-- Blouse -->
+  <path d="M127 378 Q120 400 125 418 L165 418 Q170 400 163 378 Z" fill="url(#lightdots)" stroke="black" stroke-width="2"/>
+  <!-- Head -->
+  <circle cx="145" cy="337" r="20" fill="white" stroke="black" stroke-width="3"/>
+  <!-- Hair -->
+  <path d="M125 330 Q130 315 145 312 Q160 315 165 330 Q168 320 162 312 Q155 302 145 300 Q135 302 128 312 Q122 320 125 330 Z" fill="black"/>
+  <!-- Ahoge -->
+  <path d="M148 300 Q155 288 150 278" fill="none" stroke="black" stroke-width="2.5"/>
+  <circle cx="150" cy="276" r="4" fill="black"/>
+  <!-- Face -->
+  <circle cx="139" cy="337" r="3" fill="black"/>
+  <circle cx="151" cy="337" r="3" fill="black"/>
+  <path d="M140 347 Q145 352 150 347" fill="none" stroke="black" stroke-width="2"/>
+  <!-- Cheeks -->
+  <ellipse cx="133" cy="343" rx="5" ry="3" fill="url(#dots)"/>
+  <ellipse cx="157" cy="343" rx="5" ry="3" fill="url(#dots)"/>
+  <!-- Wave arm -->
+  <path d="M163 375 Q178 360 188 348" fill="none" stroke="black" stroke-width="3"/>
+  <circle cx="191" cy="346" r="8" fill="white" stroke="black" stroke-width="2.5"/>
+
+  <!-- ===== CHARACTER: Male resident (center-left) ===== -->
+  <!-- Head -->
+  <circle cx="248" cy="345" r="22" fill="white" stroke="black" stroke-width="3"/>
+  <!-- Hair -->
+  <path d="M226 338 Q228 318 248 314 Q268 318 270 338 Q272 325 265 315 Q257 305 248 304 Q239 305 231 315 Q224 325 226 338 Z" fill="black"/>
+  <!-- Face -->
+  <circle cx="241" cy="344" r="3.5" fill="black"/>
+  <circle cx="255" cy="344" r="3.5" fill="black"/>
+  <path d="M242 355 Q248 362 254 355" fill="none" stroke="black" stroke-width="2.5"/>
+  <!-- Cheeks -->
+  <ellipse cx="234" cy="351" rx="5" ry="3" fill="url(#dots)"/>
+  <ellipse cx="262" cy="351" rx="5" ry="3" fill="url(#dots)"/>
+  <!-- Body -->
+  <path d="M226 367 Q220 395 225 430 L271 430 Q276 395 270 367 Z" fill="white" stroke="black" stroke-width="2.5"/>
+  <!-- Shirt lines -->
+  <line x1="248" y1="367" x2="248" y2="415" stroke="black" stroke-width="1.5"/>
+  <path d="M226 378 Q248 385 270 378" fill="none" stroke="black" stroke-width="1.5"/>
+  <!-- Arms -->
+  <path d="M226 375 Q210 390 205 405" fill="none" stroke="black" stroke-width="3"/>
+  <circle cx="202" cy="408" r="8" fill="white" stroke="black" stroke-width="2.5"/>
+  <path d="M270 375 Q284 388 289 403" fill="none" stroke="black" stroke-width="3"/>
+  <circle cx="291" cy="406" r="8" fill="white" stroke="black" stroke-width="2.5"/>
+  <!-- Legs -->
+  <rect x="232" y="430" width="14" height="30" rx="4" fill="url(#lightdots)" stroke="black" stroke-width="2"/>
+  <rect x="252" y="430" width="14" height="30" rx="4" fill="url(#lightdots)" stroke="black" stroke-width="2"/>
+  <rect x="228" y="458" width="20" height="10" rx="3" fill="black"/>
+  <rect x="248" y="458" width="20" height="10" rx="3" fill="black"/>
+
+  <!-- ===== CHARACTER: Staff female (right of house) ===== -->
+  <!-- Head -->
+  <circle cx="620" cy="338" r="22" fill="white" stroke="black" stroke-width="3"/>
+  <!-- Hair bun -->
+  <path d="M598 332 Q600 312 620 308 Q640 312 642 332 Q644 320 638 310 Q630 300 620 298 Q610 300 602 310 Q596 320 598 332 Z" fill="black"/>
+  <ellipse cx="632" cy="302" rx="10" ry="8" fill="black" stroke="black" stroke-width="1"/>
+  <!-- Face -->
+  <circle cx="613" cy="337" r="3.5" fill="black"/>
+  <circle cx="627" cy="337" r="3.5" fill="black"/>
+  <!-- Smile big -->
+  <path d="M612 348 Q620 358 628 348" fill="none" stroke="black" stroke-width="2.5"/>
+  <!-- Cheeks -->
+  <ellipse cx="606" cy="344" rx="5" ry="3" fill="url(#dots)"/>
+  <ellipse cx="634" cy="344" rx="5" ry="3" fill="url(#dots)"/>
+  <!-- Apron body -->
+  <path d="M598 360 Q590 390 595 430 L645 430 Q650 390 642 360 Z" fill="white" stroke="black" stroke-width="2.5"/>
+  <!-- Apron bib -->
+  <rect x="605" y="355" width="30" height="38" rx="4" fill="url(#lightdots)" stroke="black" stroke-width="2"/>
+  <!-- Apron straps -->
+  <line x1="612" y1="356" x2="600" y2="368" stroke="black" stroke-width="2"/>
+  <line x1="628" y1="356" x2="640" y2="368" stroke="black" stroke-width="2"/>
+  <!-- Heart on apron -->
+  <path d="M613 366 Q613 363 617 363 Q620 363 620 366 Q620 363 623 363 Q627 363 627 366 Q627 371 620 376 Q613 371 613 366 Z" fill="black"/>
+  <!-- Arms extended welcome -->
+  <path d="M598 370 Q578 358 565 350" fill="none" stroke="black" stroke-width="3.5"/>
+  <circle cx="562" cy="348" r="9" fill="white" stroke="black" stroke-width="2.5"/>
+  <path d="M642 370 Q662 358 675 350" fill="none" stroke="black" stroke-width="3.5"/>
+  <circle cx="677" cy="348" r="9" fill="white" stroke="black" stroke-width="2.5"/>
+  <!-- Legs -->
+  <rect x="604" y="430" width="14" height="30" rx="4" fill="url(#lightdots)" stroke="black" stroke-width="2"/>
+  <rect x="624" y="430" width="14" height="30" rx="4" fill="url(#lightdots)" stroke="black" stroke-width="2"/>
+  <rect x="600" y="458" width="20" height="10" rx="3" fill="black"/>
+  <rect x="620" y="458" width="20" height="10" rx="3" fill="black"/>
+
+  <!-- ===== SPEECH BUBBLE from staff ===== -->
+  <ellipse cx="700" cy="310" rx="68" ry="34" fill="white" stroke="black" stroke-width="2.5"/>
+  <polygon points="668,320 648,342 678,330" fill="white" stroke="black" stroke-width="2"/>
+  <polygon points="668,320 648,342 678,330" fill="white"/>
+  <text x="700" y="304" text-anchor="middle" fill="black" font-size="13" font-weight="bold">いつでも</text>
+  <text x="700" y="322" text-anchor="middle" fill="black" font-size="13" font-weight="bold">ご相談を！</text>
+
+  <!-- ===== SPEECH BUBBLE from residents ===== -->
+  <ellipse cx="90" cy="290" rx="62" ry="32" fill="white" stroke="black" stroke-width="2.5"/>
+  <polygon points="116,308 132,335 100,318" fill="white" stroke="black" stroke-width="2"/>
+  <polygon points="116,308 132,335 100,318" fill="white"/>
+  <text x="90" y="284" text-anchor="middle" fill="black" font-size="12" font-weight="bold">ここに来て</text>
+  <text x="90" y="302" text-anchor="middle" fill="black" font-size="12" font-weight="bold">よかった♪</text>
+
+  <!-- ===== FACILITY NAME BANNER ===== -->
+  <rect x="30" y="490" width="734" height="58" fill="black" rx="6"/>
+  <text x="397" y="530" text-anchor="middle" fill="white" font-size="32" font-weight="bold" letter-spacing="4">RASIEL 宇都宮（うつのみや）</text>
+
+  <!-- ============================================================ -->
+  <!-- LOWER HALF: FACILITY INFO                                     -->
+  <!-- ============================================================ -->
+
+  <!-- ===== RECRUITMENT BANNERS ===== -->
+  <rect x="30" y="572" width="358" height="42" fill="black" rx="5"/>
+  <text x="209" y="600" text-anchor="middle" fill="white" font-size="21" font-weight="bold">★ 入居者募集中！★</text>
+
+  <rect x="406" y="572" width="358" height="42" fill="url(#hatch)" stroke="black" stroke-width="2" rx="5"/>
+  <text x="585" y="600" text-anchor="middle" fill="black" font-size="21" font-weight="bold">★ ショートステイ募集中！</text>
+
+  <!-- Room availability box -->
+  <rect x="30" y="624" width="734" height="36" fill="url(#lightdots)" stroke="black" stroke-width="2" rx="4"/>
+  <text x="397" y="648" text-anchor="middle" fill="black" font-size="18" font-weight="bold">【 女性部屋 空きあり ／ 男性部屋・女性部屋 完備 】</text>
+
+  <!-- ===== DIVIDER ===== -->
+  <line x1="30" y1="672" x2="764" y2="672" stroke="black" stroke-width="1.5" stroke-dasharray="6,4"/>
+
+  <!-- ===== FACILITY INFO LEFT COLUMN ===== -->
+  <text x="46" y="700" fill="black" font-size="15" font-weight="bold">■ 施設情報</text>
+
+  <text x="46" y="726" fill="black" font-size="14">〒329-1104</text>
+  <text x="46" y="748" fill="black" font-size="14">栃木県宇都宮市下岡本町2115番地171</text>
+
+  <text x="46" y="775" fill="black" font-size="14" font-weight="bold">TEL：</text>
+  <text x="88" y="775" fill="black" font-size="15" font-weight="bold">028-680-5661</text>
+
+  <text x="46" y="800" fill="black" font-size="14" font-weight="bold">FAX：</text>
+  <text x="88" y="800" fill="black" font-size="15" font-weight="bold">028-680-5665</text>
+
+  <!-- ===== DIVIDER VERTICAL ===== -->
+  <line x1="400" y1="678" x2="400" y2="870" stroke="black" stroke-width="1.5" stroke-dasharray="6,4"/>
+
+  <!-- ===== FEE INFO RIGHT COLUMN ===== -->
+  <text x="416" y="700" fill="black" font-size="15" font-weight="bold">■ 費用（目安）</text>
+
+  <!-- Fee table -->
+  <rect x="416" y="710" width="348" height="160" fill="none" stroke="black" stroke-width="1.5" rx="3"/>
+
+  <!-- Row 1 -->
+  <rect x="416" y="710" width="120" height="36" fill="url(#lightdots)" stroke="black" stroke-width="1"/>
+  <rect x="536" y="710" width="228" height="36" fill="white" stroke="black" stroke-width="1"/>
+  <text x="476" y="733" text-anchor="middle" fill="black" font-size="13" font-weight="bold">家　賃</text>
+  <text x="650" y="733" text-anchor="middle" fill="black" font-size="13">38,000円（日割 1,266円）</text>
+
+  <!-- Row 2 -->
+  <rect x="416" y="746" width="120" height="46" fill="url(#lightdots)" stroke="black" stroke-width="1"/>
+  <rect x="536" y="746" width="228" height="46" fill="white" stroke="black" stroke-width="1"/>
+  <text x="476" y="767" text-anchor="middle" fill="black" font-size="13" font-weight="bold">食　費</text>
+  <text x="476" y="784" text-anchor="middle" fill="black" font-size="11">（月額）</text>
+  <text x="650" y="762" text-anchor="middle" fill="black" font-size="13">30,000円（月変動なし）</text>
+  <text x="650" y="782" text-anchor="middle" fill="black" font-size="11">朝250円・昼400円・夕350円</text>
+
+  <!-- Row 3 -->
+  <rect x="416" y="792" width="120" height="36" fill="url(#lightdots)" stroke="black" stroke-width="1"/>
+  <rect x="536" y="792" width="228" height="36" fill="white" stroke="black" stroke-width="1"/>
+  <text x="476" y="815" text-anchor="middle" fill="black" font-size="13" font-weight="bold">光熱水費</text>
+  <text x="650" y="815" text-anchor="middle" fill="black" font-size="13">12,000円（日割 400円）</text>
+
+  <!-- Row 4 -->
+  <rect x="416" y="828" width="120" height="36" fill="url(#lightdots)" stroke="black" stroke-width="1"/>
+  <rect x="536" y="828" width="228" height="36" fill="white" stroke="black" stroke-width="1"/>
+  <text x="476" y="851" text-anchor="middle" fill="black" font-size="13" font-weight="bold">消耗品費</text>
+  <text x="650" y="851" text-anchor="middle" fill="black" font-size="13">3,000円（日割 100円）</text>
+
+  <!-- ===== BOTTOM SECTION ===== -->
+  <line x1="30" y1="878" x2="764" y2="878" stroke="black" stroke-width="1.5"/>
+
+  <!-- Service features -->
+  <text x="46" y="902" fill="black" font-size="14" font-weight="bold">■ サービスの特徴</text>
+
+  <text x="46" y="928" fill="black" font-size="13">●  24時間スタッフが安心をサポート</text>
+  <text x="280" y="928" fill="black" font-size="13">●  食事提供あり（朝・昼・夕）</text>
+  <text x="530" y="928" fill="black" font-size="13">●  女性スタッフ在籍</text>
+
+  <text x="46" y="952" fill="black" font-size="13">●  男性部屋・女性部屋 完備</text>
+  <text x="280" y="952" fill="black" font-size="13">●  ショートステイ対応</text>
+  <text x="530" y="952" fill="black" font-size="13">●  見学・相談 無料</text>
+
+  <!-- ===== BOTTOM BANNER ===== -->
+  <rect x="30" y="970" width="734" height="50" fill="black" rx="5"/>
+  <text x="397" y="1003" text-anchor="middle" fill="white" font-size="22" font-weight="bold">見学・お問い合わせ随時受付中！お気軽にご連絡ください</text>
+
+  <!-- Footer note -->
+  <text x="397" y="1040" text-anchor="middle" fill="black" font-size="11">※ 費用は利用状況により変動する場合があります。詳しくはお問い合わせください。</text>
+
+  <!-- Small decorative stars -->
+  <text x="50" y="1065" fill="black" font-size="14">★ ★ ★ ★ ★ ★ ★ ★ ★ ★ ★ ★ ★ ★ ★ ★ ★ ★ ★ ★ ★ ★ ★ ★ ★ ★ ★ ★</text>
+
+  <!-- Corner decorations -->
+  <rect x="20" y="20" width="30" height="30" fill="none" stroke="black" stroke-width="2"/>
+  <line x1="20" y1="20" x2="50" y2="50" stroke="black" stroke-width="1.5"/>
+  <line x1="50" y1="20" x2="20" y2="50" stroke="black" stroke-width="1.5"/>
+  <rect x="744" y="20" width="30" height="30" fill="none" stroke="black" stroke-width="2"/>
+  <line x1="744" y1="20" x2="774" y2="50" stroke="black" stroke-width="1.5"/>
+  <line x1="774" y1="20" x2="744" y2="50" stroke="black" stroke-width="1.5"/>
+  <rect x="20" y="1073" width="30" height="30" fill="none" stroke="black" stroke-width="2"/>
+  <line x1="20" y1="1073" x2="50" y2="1103" stroke="black" stroke-width="1.5"/>
+  <line x1="50" y1="1073" x2="20" y2="1103" stroke="black" stroke-width="1.5"/>
+  <rect x="744" y="1073" width="30" height="30" fill="none" stroke="black" stroke-width="2"/>
+  <line x1="744" y1="1073" x2="774" y2="1103" stroke="black" stroke-width="1.5"/>
+  <line x1="774" y1="1073" x2="744" y2="1103" stroke="black" stroke-width="1.5"/>
+
+</svg>
