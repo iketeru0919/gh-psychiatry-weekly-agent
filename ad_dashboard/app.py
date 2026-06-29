@@ -13,6 +13,7 @@ st.set_page_config(
 )
 
 DATA_DIR = Path(__file__).parent / "data" / "facilities"
+EXCEL_DIR = Path(__file__).parent / "data"
 
 # ── 閾値設定 ──────────────────────────────────────────────
 THRESHOLDS = {
@@ -27,6 +28,20 @@ THRESHOLDS = {
 
 
 def load_all_facilities() -> list[dict]:
+    """
+    データソースの優先順位:
+    1. data/ 直下に .xlsx ファイルがあればExcelから読み込む
+    2. なければ data/facilities/ のJSONから読み込む（開発・デモ用）
+    """
+    excel_files = sorted(EXCEL_DIR.glob("*.xlsx"))
+    if excel_files:
+        from excel_reader import load_from_excel
+        all_facilities = []
+        for xf in excel_files:
+            all_facilities.extend(load_from_excel(xf))
+        return all_facilities
+
+    # fallback: JSONファイル
     facilities = []
     for path in sorted(DATA_DIR.glob("*.json")):
         with open(path, encoding="utf-8") as f:
@@ -129,12 +144,39 @@ def color_cell(val, col: str) -> str:
 
 # ── サイドバー ────────────────────────────────────────────
 st.sidebar.title("🏢 ADチェックツール")
+
+# Excelアップロード
+st.sidebar.subheader("📂 データ読み込み")
+uploaded = st.sidebar.file_uploader(
+    "Excelファイルをアップロード",
+    type=["xlsx"],
+    help="施設ごとにシートが分かれているExcelファイルをアップロードしてください。",
+)
+
+if uploaded:
+    import tempfile, shutil
+    from excel_reader import load_from_excel
+    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+        shutil.copyfileobj(uploaded, tmp)
+        tmp_path = tmp.name
+    try:
+        facilities = load_from_excel(tmp_path)
+        st.sidebar.success(f"✅ {len(facilities)}施設を読み込みました")
+    except Exception as e:
+        st.sidebar.error(f"読み込みエラー: {e}")
+        facilities = load_all_facilities()
+else:
+    facilities = load_all_facilities()
+    excel_files = sorted(EXCEL_DIR.glob("*.xlsx"))
+    if excel_files:
+        st.sidebar.info(f"📄 {excel_files[0].name} を自動読み込み中")
+    else:
+        st.sidebar.caption("デモデータ（JSONサンプル）を表示中")
+
 page = st.sidebar.radio(
     "ページ選択",
     ["📊 横断ダッシュボード", "🔍 施設別詳細", "✅ 月次チェックリスト", "📈 トレンド分析"],
 )
-
-facilities = load_all_facilities()
 
 if not facilities:
     st.error("施設データが見つかりません。data/facilities/ にJSONファイルを配置してください。")
