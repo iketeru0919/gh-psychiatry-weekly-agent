@@ -33,7 +33,7 @@ def load_all_facilities() -> list[dict]:
     1. data/ 直下に .xlsx ファイルがあればExcelから読み込む
     2. なければ data/facilities/ のJSONから読み込む（開発・デモ用）
     """
-    excel_files = sorted(EXCEL_DIR.glob("*.xlsx"))
+    excel_files = sorted(EXCEL_DIR.glob("*.xlsx")) + sorted(EXCEL_DIR.glob("*.xlsm"))
     if excel_files:
         from excel_reader import load_from_excel
         all_facilities = []
@@ -149,14 +149,15 @@ st.sidebar.title("🏢 ADチェックツール")
 st.sidebar.subheader("📂 データ読み込み")
 uploaded = st.sidebar.file_uploader(
     "Excelファイルをアップロード",
-    type=["xlsx"],
+    type=["xlsx", "xlsm"],
     help="施設ごとにシートが分かれているExcelファイルをアップロードしてください。",
 )
 
 if uploaded:
     import tempfile, shutil
     from excel_reader import load_from_excel
-    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+    suffix = ".xlsm" if uploaded.name.endswith(".xlsm") else ".xlsx"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         shutil.copyfileobj(uploaded, tmp)
         tmp_path = tmp.name
     try:
@@ -167,7 +168,7 @@ if uploaded:
         facilities = load_all_facilities()
 else:
     facilities = load_all_facilities()
-    excel_files = sorted(EXCEL_DIR.glob("*.xlsx"))
+    excel_files = sorted(EXCEL_DIR.glob("*.xlsx")) + sorted(EXCEL_DIR.glob("*.xlsm"))
     if excel_files:
         st.sidebar.info(f"📄 {excel_files[0].name} を自動読み込み中")
     else:

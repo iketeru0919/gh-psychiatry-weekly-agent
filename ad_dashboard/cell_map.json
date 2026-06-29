@@ -1,19 +1,21 @@
 {
-  "_comment": "セル位置が変わったときはこのファイルだけ修正してください。行番号は1始まり、列はA/B/C...で指定。",
+  "_comment": "セル位置が変わったときはこのファイルだけ修正してください。行番号は1始まり、列はA/B/C...で指定。col_stride=列の間隔（3=3列おき）",
 
   "facility_info": {
-    "_comment": "施設基本情報のセル位置",
-    "capacity": "C1"
+    "_comment": "A1=会社名, D1=施設名, G1=定員",
+    "company": "A1",
+    "facility_name": "D1",
+    "capacity": "G1"
   },
 
   "monthly_table": {
-    "_comment": "重要指標推移テーブル。month_row=月ヘッダ行、data_col_start=データ開始列(3月)、以降1列ずつ右へ",
+    "_comment": "重要指標推移テーブル。G列=3月、以降3列ずつ右へ（J=4月、M=5月…）",
     "month_header_row": 3,
-    "data_col_start": "C",
+    "data_col_start": "G",
+    "col_stride": 3,
     "months": ["3月","4月","5月","6月","7月","8月","9月"],
 
     "rows": {
-      "_comment": "各指標の行番号",
       "residents":              4,
       "utilization_days":       5,
       "occupancy_rate":         6,
@@ -29,76 +31,91 @@
   },
 
   "weekly_table": {
-    "_comment": "週次データテーブル（当月）",
-    "week_header_row": 18,
-    "data_col_start": "C",
+    "_comment": "週次データテーブル（当月）。G列=1週目、以降3列ずつ右へ",
+    "week_header_row": 17,
+    "data_col_start": "G",
+    "col_stride": 3,
     "weeks": ["1週目","2週目","3週目","4週目","5週目"],
 
     "rows": {
-      "residents":        19,
-      "utilization_days": 20,
-      "occupancy_rate":   21,
-      "ss_days":          24,
-      "ss_rate":          25
+      "residents":        18,
+      "utilization_days": 19,
+      "occupancy_rate":   20,
+      "ss_days":          23,
+      "ss_rate":          24
     }
   },
 
   "staffing_table": {
-    "_comment": "常勤換算法・夜勤含む テーブル",
-    "month_header_row": 28,
-    "data_col_start": "C",
+    "_comment": "常勤換算法・夜勤含む。AK列=3月、以降3列ずつ（AN=4月、AQ=5月…）",
+    "month_header_row": 16,
+    "data_col_start": "AK",
+    "col_stride": 3,
 
     "rows": {
-      "実配置TC":          30,
-      "タイミー日勤時間":   31,
-      "タイミー夜勤時間":   32,
-      "派遣合計時間":       33,
-      "派遣夜勤回数":       34,
-      "派遣利用率":         35
+      "実配置TC":    17,
+      "タイミー日勤時間": 18,
+      "タイミー夜勤時間": 19,
+      "派遣日勤時間":    20,
+      "派遣夜勤回数":    21,
+      "派遣利用率":      22
     }
   },
 
   "branding_table": {
-    "_comment": "ブランディング指標（右側エリア）",
-    "month_header_row": 3,
-    "data_col_start": "J",
+    "_comment": "ブランディング指標（GH問合せ）。AC列=3月、以降2列ずつ（AE=4月、AG=5月…）",
+    "month_header_row": 4,
+    "data_col_start": "AC",
+    "col_stride": 2,
 
     "rows": {
-      "gh_inquiries":  4,
-      "ss_inquiries":  5,
-      "sales_visits":  6,
-      "tours":         7
+      "gh_inquiries": 5,
+      "sales_visits":  8
+    }
+  },
+
+  "branding_ss_table": {
+    "_comment": "ブランディング指標（SS問合せ・見学）。AQ列=3月、以降2列ずつ",
+    "month_header_row": 4,
+    "data_col_start": "AQ",
+    "col_stride": 2,
+
+    "rows": {
+      "ss_inquiries": 5,
+      "tours":         8
     }
   },
 
   "timee_table": {
-    "_comment": "タイミーリクルーティング活用指標",
-    "month_header_row": 38,
-    "data_col_start": "J",
+    "_comment": "タイミーリクルーティング活用指標。AE列=3月、以降4列ずつ（AI=4月、AM=5月…）",
+    "month_header_row": 25,
+    "data_col_start": "AE",
+    "col_stride": 4,
 
     "rows": {
-      "タイミー勤務者_日勤": 40,
-      "タイミー応募_日勤":   41,
-      "タイミー勤務者_夜勤": 42,
-      "タイミー応募_夜勤":   43,
-      "タイミー応募率":      46,
-      "タイミー採用数":      47,
-      "タイミー採用率":      48
+      "タイミー勤務者_日勤": 27,
+      "タイミー応募率":      31,
+      "タイミー採用数":      32,
+      "タイミー採用率":      33
     }
   },
 
   "operations_table": {
-    "_comment": "運営評価テーブル（別エリアまたは別シートの場合は sheet_name を指定）",
-    "month_header_row": 52,
-    "data_col_start": "B",
+    "_comment": "運営評価テーブル。AL列=4月、以降2列ずつ（AN=5月、AP=6月…）。月リストは4月始まり",
+    "month_header_row": 37,
+    "data_col_start": "AL",
+    "col_stride": 2,
+    "months": ["4月","5月","6月","7月","8月","9月"],
 
     "rows": {
-      "苦情件数":        54,
-      "重大事故件数":    57,
-      "ヒヤリハット件数": 60,
-      "応募者数":        63,
-      "入職者数":        66,
-      "退職者数":        69
+      "苦情件数":        38,
+      "重大事故件数":    42,
+      "ヒヤリハット件数": 46,
+      "応募者数":        50,
+      "入職者数":        54,
+      "退職者数":        58
     }
-  }
+  },
+
+  "_skip_sheets": ["参照セル一覧", "全施設サマリー", "3月"]
 }
