@@ -189,12 +189,43 @@ def find_header_map(row):
     return {value: idx for idx, value in enumerate(row) if value is not None}
 
 
+def validate_db_layout(ws):
+    # DBシートは列位置（M/O/P/Q/T列）を直接参照しているため、
+    # 列の挿入・削除でレイアウトが変わった場合は誤読せずに停止する。
+    rows = list(ws.iter_rows(min_row=5, max_row=6, values_only=True))
+    row5 = rows[0] if rows else ()
+    row6 = rows[1] if len(rows) > 1 else ()
+
+    def cell_text(row, idx):
+        return str(row[idx]) if len(row) > idx and row[idx] is not None else ""
+
+    problems = []
+    if "請求ベース" not in cell_text(row5, 11):
+        problems.append("L5に「請求ベース」がありません")
+    if "提供ベース" not in cell_text(row5, 13):
+        problems.append("N5に「提供ベース」がありません")
+    if "利用日数" not in cell_text(row5, 19):
+        problems.append("T5に「利用日数」がありません")
+    if "有無" not in cell_text(row6, 15):
+        problems.append("P6に「有無」がありません")
+    if "理由" not in cell_text(row6, 16):
+        problems.append("Q6に「理由」がありません")
+    if problems:
+        raise SystemExit(
+            "DBシートの列構成が想定と異なります（列の挿入・削除の可能性があります）。"
+            "ツールの列位置を実際のDBシートに合わせて修正してください: " + "、".join(problems)
+        )
+
+
 def read_db_rows(workbook_path):
     wb = openpyxl.load_workbook(workbook_path, read_only=True, data_only=True)
     if "DB" not in wb.sheetnames:
-        return {}
+        raise SystemExit(
+            f"請求Excelに「DB」シートがありません。請求Excelの取り違えの可能性があります: {workbook_path}"
+        )
     result = {}
     ws = wb["DB"]
+    validate_db_layout(ws)
     for row_num, row in enumerate(ws.iter_rows(values_only=True), start=1):
         facility = row[2] if len(row) > 2 else None
         if not facility or facility in ("施設名", "担当AM"):
@@ -218,10 +249,20 @@ def read_db_rows(workbook_path):
 def read_billing(workbook_path, month_sheet, facility_name):
     wb = openpyxl.load_workbook(workbook_path, read_only=True, data_only=True)
     if month_sheet not in wb.sheetnames:
-        return {"present": False, "users": {}, "resident_users": {}, "rows": [], "warnings": []}
+        raise SystemExit(
+            f"請求Excelに「{month_sheet}」シートがありません。対象年月と請求Excelの組み合わせを"
+            f"確認してください。（存在するシート: {', '.join(wb.sheetnames)}）"
+        )
     ws = wb[month_sheet]
     header = [cell.value for cell in next(ws.iter_rows(min_row=1, max_row=1))]
     header_map = find_header_map(header)
+    required_headers = ("利用者名", "サービス内容", "回数")
+    missing_headers = [name for name in required_headers if name not in header_map]
+    if missing_headers:
+        raise SystemExit(
+            f"請求シート「{month_sheet}」の1行目に必要なヘッダーが見つかりません: "
+            f"{', '.join(missing_headers)}（シートの構成が変わった可能性があります）"
+        )
     users = {}
     rows = []
     warnings = []
@@ -478,8 +519,6 @@ def attach_reason(diff, summary, provider_user=None):
 def classify_facility(db_row, billing, provider, diffs):
     billing_days = as_number(billing.get("life_support_days"))
     provider_days = as_number(provider.get("total_days"))
-    db_m = as_number(db_row.get("m_billed_count") if db_row else 0)
-    db_o = as_number(db_row.get("o_provider_count") if db_row else 0)
     resident_count = as_number(billing.get("resident_user_count"))
     active_count = as_number(provider.get("active_user_count"))
 
@@ -487,16 +526,40 @@ def classify_facility(db_row, billing, provider, diffs):
         return "重大"
     if any(item["severity"] == "要確認" for item in diffs) or billing_days != provider_days:
         return "要確認"
+    if not db_row:
+        # DB行が見つからない場合は0との比較で誤判定せず、未照合として注意を返す。
+        return "注意"
+    db_m = as_number(db_row.get("m_billed_count"))
+    db_o = as_number(db_row.get("o_provider_count"))
+    db_t = as_number(db_row.get("t_billed_days"))
+    if db_t != billing_days:
+        # DB T列（利用日数・請求ベース）と請求Excelの延べ日数の不一致も判定に含める。
+        return "注意"
     if db_m != resident_count or db_o != active_count:
         return "注意"
     return "OK"
 
 
 def summarize_main_reason(summary):
-    if summary["judgement"] == "注意" and summary["billing_life_support_days"] == summary["provider_total_days"]:
-        return "人数に乖離がありますが、請求延べ日数と提供延べ日数は一致しています。延べ0日利用者や人数定義を確認してください。"
     if summary["judgement"] == "OK":
         return "主要な人数・延べ日数は一致しています。"
+    if summary["judgement"] == "注意":
+        if summary.get("db_row") is None:
+            return "DBシートに施設行が見つからないため、DB列との照合ができていません。施設名の表記を確認してください。"
+        parts = []
+        if as_number(summary.get("db_t_billed_days")) != as_number(summary.get("billing_life_support_days")):
+            parts.append("DB T列の利用日数と請求Excelの延べ日数が一致していません。DBへの転記を確認してください。")
+        counts_mismatch = (
+            as_number(summary.get("db_m_billed_count")) != as_number(summary.get("billing_resident_user_count"))
+            or as_number(summary.get("db_o_provider_count")) != as_number(summary.get("provider_active_user_count"))
+        )
+        if counts_mismatch:
+            if summary.get("billing_life_support_days") == summary.get("provider_total_days"):
+                parts.append("人数に乖離がありますが、請求延べ日数と提供延べ日数は一致しています。延べ0日利用者や人数定義を確認してください。")
+            else:
+                parts.append("人数に乖離があります。差異一覧を確認してください。")
+        if parts:
+            return "".join(parts)
     return "差異一覧の理由候補・根拠・確認ポイントを確認してください。"
 
 
@@ -529,6 +592,26 @@ def analyze_facility(config, db_rows):
                 "folder": "",
                 "file": str(CONFIG["billing_workbook"]),
                 "note": message,
+            }
+        )
+    if not billing.get("present"):
+        file_records.append(
+            {
+                "facility_name": facility_name,
+                "status": "警告",
+                "folder": "",
+                "file": str(CONFIG["billing_workbook"]),
+                "note": f"請求シートに施設「{facility_name}」の行が見つかりません。施設名の表記（config・請求シートの一致）を確認してください。",
+            }
+        )
+    if not db_row:
+        file_records.append(
+            {
+                "facility_name": facility_name,
+                "status": "警告",
+                "folder": "",
+                "file": str(CONFIG["billing_workbook"]),
+                "note": f"DBシートに施設「{facility_name}」の行が見つかりません。DB列（M/O/P/Q/T）との照合は行われていません。",
             }
         )
 

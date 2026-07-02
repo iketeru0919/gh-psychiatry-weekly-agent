@@ -23,9 +23,26 @@ if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
   $ConfigPath = Join-Path $toolDir "config_auto.json"
 }
 
-$python = "C:\Users\k-takayama\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
-if (-not (Test-Path $python)) {
-  throw "Python runtime not found: $python"
+# Python runtime: try the known local runtime first, then python/py on PATH.
+$python = $null
+$knownPython = "C:\Users\k-takayama\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
+if (Test-Path $knownPython) {
+  $python = $knownPython
+} else {
+  foreach ($name in @("python", "py")) {
+    $cmd = Get-Command $name -ErrorAction SilentlyContinue
+    if ($cmd) {
+      $python = $cmd.Source
+      break
+    }
+  }
+}
+if (-not $python) {
+  throw "Python not found. Install Python 3 (https://www.python.org/) and run: pip install openpyxl"
+}
+& $python -c "import openpyxl" 2>$null | Out-Null
+if ($LASTEXITCODE -ne 0) {
+  throw "openpyxl is not available for '$python'. Run: `"$python`" -m pip install openpyxl"
 }
 if (-not (Test-Path (Join-Path $workToolDir "analyze_check.py"))) {
   throw "analyze_check.py not found. Keep the tool_runtime folder together with run_check.ps1."
