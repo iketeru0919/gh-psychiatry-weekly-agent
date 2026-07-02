@@ -7,22 +7,21 @@ import openpyxl
 
 
 SHORT_STAY_MARKERS = ("短期", "短期入所")
-LIFE_SUPPORT_MARKERS = ("生活援助日中",)
 EXCLUDE_FILE_MARKERS = ("~$", "テンプレート", "旧", "コピー", "バックアップ", "test", "テスト", "短期")
 
 
 def normalize_name(value):
     text = unicodedata.normalize("NFKC", str(value or ""))
     text = text.replace(" ", "").replace("　", "")
+    # 同一文字の異体字のみ吸収する。「菊地／菊池」のような実在する別姓の
+    # 置換は別人を同一人物として統合する恐れがあるため行わない。
     replacements = {
         "髙": "高",
         "﨑": "崎",
         "邉": "邊",
         "辺": "邊",
-        "渡邉": "渡邊",
         "栁": "柳",
         "澤": "沢",
-        "菊地": "菊池",
     }
     for src, dst in replacements.items():
         text = text.replace(src, dst)
@@ -30,9 +29,42 @@ def normalize_name(value):
 
 
 def as_number(value):
+    # 文字列で入力された数値（"31" など）も無言で0にせず数値として扱う。
+    if isinstance(value, bool):
+        return 0
     if isinstance(value, (int, float)):
         return value
+    if isinstance(value, str):
+        text = unicodedata.normalize("NFKC", value).replace(",", "").strip()
+        if not text:
+            return 0
+        try:
+            number = float(text)
+        except ValueError:
+            return 0
+        return int(number) if number.is_integer() else number
     return 0
+
+
+def is_readable_number(value):
+    # 空欄・数値・数値として解釈できる文字列なら True。
+    # False の場合は as_number が0を返すため、呼び出し側で警告として記録する。
+    if value is None:
+        return True
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, (int, float)):
+        return True
+    if isinstance(value, str):
+        text = unicodedata.normalize("NFKC", value).replace(",", "").strip()
+        if not text:
+            return True
+        try:
+            float(text)
+        except ValueError:
+            return False
+        return True
+    return False
 
 
 def is_short_stay(service_name):
@@ -40,7 +72,11 @@ def is_short_stay(service_name):
 
 
 def is_life_support(service_name):
-    return any(marker in str(service_name or "") for marker in LIFE_SUPPORT_MARKERS)
+    # 施設によりサービス名の表記が異なる（例：南中丸「生活援助日中Ⅰ４」、
+    # おきつ「生活援助Ⅰ３・大１」、貴船「生活援助Ⅰ３」）ため、
+    # 「生活援助」で始まる基本サービス行を対象とし、加算行・短期行は除外する。
+    text = str(service_name or "")
+    return text.startswith("生活援助") and "加算" not in text and not is_short_stay(text)
 
 
 def facility_folder_tokens(facility_name):
@@ -182,19 +218,26 @@ def read_db_rows(workbook_path):
 def read_billing(workbook_path, month_sheet, facility_name):
     wb = openpyxl.load_workbook(workbook_path, read_only=True, data_only=True)
     if month_sheet not in wb.sheetnames:
-        return {"present": False, "users": {}, "resident_users": {}, "rows": []}
+        return {"present": False, "users": {}, "resident_users": {}, "rows": [], "warnings": []}
     ws = wb[month_sheet]
     header = [cell.value for cell in next(ws.iter_rows(min_row=1, max_row=1))]
     header_map = find_header_map(header)
     users = {}
     rows = []
+    warnings = []
+    name_collisions = set()
     for excel_row, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
         if not row or row[0] != facility_name:
             continue
         record = {name: row[idx] if idx < len(row) else None for name, idx in header_map.items()}
         name = record.get("利用者名")
         service_name = record.get("サービス内容")
-        count = as_number(record.get("回数"))
+        count_raw = record.get("回数")
+        if not is_readable_number(count_raw):
+            warnings.append(
+                f"請求シート{excel_row}行目（{name}／{service_name}）の回数「{count_raw}」を数値として読めないため0回として扱いました。元データを確認してください。"
+            )
+        count = as_number(count_raw)
         normalized = normalize_name(name)
         user = users.setdefault(
             normalized,
@@ -209,6 +252,15 @@ def read_billing(workbook_path, month_sheet, facility_name):
                 "excel_rows": [],
             },
         )
+        recipient = record.get("受給者証番号")
+        if user["recipient_no"] is None:
+            user["recipient_no"] = recipient
+        elif recipient is not None and str(recipient) != str(user["recipient_no"]):
+            # 同じ氏名で受給者証番号が異なる行がある場合は、同姓同名の別人を
+            # 1人に集計している可能性があるため警告する。
+            name_collisions.add(
+                f"利用者「{name}」に複数の受給者証番号（{user['recipient_no']}／{recipient}）があります。同姓同名の別人を1人として集計している可能性があります。"
+            )
         user["excel_rows"].append(excel_row)
         user["services"].append(
             {
@@ -233,6 +285,7 @@ def read_billing(workbook_path, month_sheet, facility_name):
         for key, value in users.items()
         if value["life_support_days"] > 0
     }
+    warnings.extend(sorted(name_collisions))
     return {
         "present": bool(rows),
         "all_user_count": len(users),
@@ -241,22 +294,30 @@ def read_billing(workbook_path, month_sheet, facility_name):
         "users": users,
         "resident_users": resident_users,
         "rows": rows,
+        "warnings": warnings,
     }
 
 
 def read_provider_file(path):
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True, keep_vba=True)
     if "延べ日数" not in wb.sheetnames:
-        return []
+        return [], []
     ws = wb["延べ日数"]
     users = []
+    skipped = []
     for row_num, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
         name = row[1] if len(row) > 1 else None
         if not isinstance(name, str) or not name.strip() or name.startswith("氏名"):
             continue
         days = row[3] if len(row) > 3 else None
-        if not isinstance(days, (int, float)):
+        if days is None or not is_readable_number(days):
+            # 延べ日数が空欄・数値以外（数式の計算結果未保存など）の行を
+            # 無言で落とすと差異の見落としにつながるため、スキップ行として記録する。
+            skipped.append(
+                f"{row_num}行目「{name}」の延べ日数「{days}」を数値として読めないためスキップしました。"
+            )
             continue
+        days = as_number(days)
         users.append(
             {
                 "name": name,
@@ -271,7 +332,7 @@ def read_provider_file(path):
                 "source_row": row_num,
             }
         )
-    return users
+    return users, skipped
 
 
 def read_provider(paths):
@@ -280,7 +341,7 @@ def read_provider(paths):
     file_records = []
     for path in paths:
         try:
-            users = read_provider_file(path)
+            users, skipped = read_provider_file(path)
         except Exception as exc:
             file_records.append(
                 {
@@ -299,6 +360,15 @@ def read_provider(paths):
                 "note": "延べ日数シートを読み取りました。" if users else "延べ日数シートまたは利用者行が見つかりません。",
             }
         )
+        for message in skipped:
+            file_records.append(
+                {
+                    "status": "警告",
+                    "file": str(path),
+                    "folder": str(Path(path).parent),
+                    "note": message,
+                }
+            )
         for user in users:
             key = user["normalized_name"]
             if key in merged:
@@ -310,6 +380,17 @@ def read_provider(paths):
                 merged[key]["source_file"] += "\n" + user["source_file"]
             else:
                 merged[key] = user
+    for dup in duplicates:
+        # 1F/2Fの合算は正常な動きだが、同姓同名の別人を合算している可能性も
+        # あるため、どの利用者を合算したかを読取ファイル一覧で確認できるようにする。
+        file_records.append(
+            {
+                "status": "情報",
+                "file": dup["source_file"],
+                "folder": str(Path(dup["source_file"]).parent),
+                "note": f"利用者「{dup['name']}」が複数ファイルに存在するため延べ日数を合算しました。同姓同名の別人でないか確認してください。",
+            }
+        )
     return {
         "users": merged,
         "sheet_user_count": len(merged),
@@ -440,6 +521,16 @@ def analyze_facility(config, db_rows):
         item = dict(record)
         item["facility_name"] = facility_name
         file_records.append(item)
+    for message in billing.get("warnings", []):
+        file_records.append(
+            {
+                "facility_name": facility_name,
+                "status": "警告",
+                "folder": "",
+                "file": str(CONFIG["billing_workbook"]),
+                "note": message,
+            }
+        )
 
     billing_users = billing.get("resident_users", {})
     provider_users = provider.get("users", {})
