@@ -36,6 +36,7 @@ def flatten_summaries(payload):
                 "provider_sheet_user_count": s.get("provider_sheet_user_count"),
                 "db_t_billed_days": s.get("db_t_billed_days"),
                 "billing_life_support_days": s.get("billing_life_support_days"),
+                "billing_carryover_days": s.get("billing_carryover_days"),
                 "provider_total_days": s.get("provider_total_days"),
                 "db_p_gap_label": s.get("db_p_gap_label"),
                 "main_reason": s.get("main_reason"),
@@ -71,7 +72,9 @@ def flatten_db_checks(payload):
                 "billing_life_support_days": s.get("billing_life_support_days"),
                 "provider_total_days": s.get("provider_total_days"),
                 "days_check": "OK" if days_match else "確認",
+                "db_p_check": s.get("db_p_check"),
                 "db_q_gap_reason": s.get("db_q_gap_reason"),
+                "db_q_check": s.get("db_q_check"),
             }
         )
     return rows
@@ -95,9 +98,15 @@ def flatten_users(payload):
                 explanation = f"提供側が請求側より{provider - billing}日多い状態です。未請求、月遅れ、受給者証待ちの可能性があります。"
                 check_point = "請求データの対象月、月遅れ、受給者証更新状況を確認してください。"
             elif billing == 0 and provider == 0:
-                result = "延べ0日"
-                explanation = "提供側に利用者シートはありますが、延べ日数は0日です。請求漏れではない可能性が高いです。"
-                check_point = "DBの提供人数に含める定義か確認してください。"
+                carryover = row.get("billing_carryover_days") or 0
+                if carryover:
+                    result = "月遅れ請求のみ"
+                    explanation = f"当月提供分の請求・提供実績はなく、他月提供分{carryover}日の月遅れ請求のみがあります。"
+                    check_point = "月遅れ請求の対象月と、その月の提供実績を確認してください。"
+                else:
+                    result = "延べ0日"
+                    explanation = "提供側に利用者シートはありますが、延べ日数は0日です。請求漏れではない可能性が高いです。"
+                    check_point = "DBの提供人数に含める定義か確認してください。"
             rows.append(
                 {
                     **row,
@@ -229,12 +238,13 @@ def main():
             ("provider_active_user_count", "提供 実利用者数"),
             ("provider_sheet_user_count", "提供 シート人数"),
             ("db_t_billed_days", "DB T列 利用日数"),
-            ("billing_life_support_days", "請求 延べ日数"),
+            ("billing_life_support_days", "請求 延べ日数（当月提供分）"),
+            ("billing_carryover_days", "請求 月遅れ日数（他月提供分）"),
             ("provider_total_days", "提供 延べ日数"),
             ("db_p_gap_label", "DB P列"),
             ("main_reason", "主な見立て"),
         ],
-        [12, 12, 16, 16, 16, 16, 16, 16, 14, 14, 12, 60],
+        [12, 12, 16, 16, 16, 16, 16, 16, 16, 16, 14, 12, 60],
     )
     write_sheet(
         wb,
@@ -254,9 +264,11 @@ def main():
             ("billing_life_support_days", "請求 延べ日数"),
             ("provider_total_days", "提供 延べ日数"),
             ("days_check", "延べ日数判定"),
+            ("db_p_check", "DB P列整合"),
             ("db_q_gap_reason", "DB Q列 理由・対策"),
+            ("db_q_check", "DB Q列整合"),
         ],
-        [12, 8, 16, 16, 14, 16, 16, 16, 16, 16, 14, 14, 14, 60],
+        [12, 8, 16, 16, 14, 16, 16, 16, 16, 16, 14, 14, 14, 40, 60, 40],
     )
     write_sheet(
         wb,
@@ -266,9 +278,11 @@ def main():
             ("facility_name", "施設名"),
             ("user_name", "利用者名"),
             ("user_result", "照合結果"),
-            ("billing_life_support_days", "請求側：生活援助日中系の回数"),
+            ("billing_life_support_days", "請求側：生活援助日中系の回数（当月提供分）"),
             ("provider_days", "提供側：延べ日数"),
             ("difference", "差異（請求－提供）"),
+            ("billing_carryover_days", "月遅れ請求（他月提供分）"),
+            ("carryover_note", "月遅れ内訳"),
             ("readable_difference", "差異の読み方"),
             ("reason_candidate", "理由候補"),
             ("reason_confidence", "理由確度"),
@@ -277,7 +291,7 @@ def main():
             ("db_q_draft", "DB Q列への記載案"),
             ("direct_billing", "直接請求フラグ"),
         ],
-        [12, 16, 14, 18, 16, 14, 58, 44, 12, 54, 44, 72, 14],
+        [12, 16, 14, 18, 16, 14, 16, 30, 58, 44, 12, 54, 44, 72, 14],
     )
     write_sheet(
         wb,

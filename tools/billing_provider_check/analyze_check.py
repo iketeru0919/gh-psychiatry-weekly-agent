@@ -1,4 +1,6 @@
+import datetime
 import json
+import re
 import sys
 import unicodedata
 from pathlib import Path
@@ -7,7 +9,9 @@ import openpyxl
 
 
 SHORT_STAY_MARKERS = ("短期", "短期入所")
-EXCLUDE_FILE_MARKERS = ("~$", "テンプレート", "旧", "コピー", "バックアップ", "test", "テスト", "短期")
+EXCLUDE_FILE_MARKERS = ("テンプレート", "旧", "コピー", "バックアップ", "テスト", "短期")
+# 提供側の延べ日数シートで利用者ではない集計行を除外するための氏名
+NON_USER_NAMES = ("合計", "小計", "計", "総計", "平均")
 
 
 def normalize_name(value):
@@ -98,7 +102,12 @@ def should_exclude_excel(path):
     lower = name.lower()
     if not lower.endswith((".xlsx", ".xlsm")):
         return True
-    return any(marker.lower() in lower for marker in EXCLUDE_FILE_MARKERS)
+    if name.startswith("~$"):
+        return True
+    # "test" は独立した英単語の場合のみ除外する（"latest" 等の誤除外を防ぐ）。
+    if re.search(r"(?<![a-z0-9])test(?![a-z0-9])", lower):
+        return True
+    return any(marker in name for marker in EXCLUDE_FILE_MARKERS)
 
 
 def find_provider_workbooks(provider_root, facility_name, year, month):
@@ -189,6 +198,30 @@ def find_header_map(row):
     return {value: idx for idx, value in enumerate(row) if value is not None}
 
 
+def month_of(value):
+    # 日付セル・Excelシリアル値・「2026/4」等の文字列を (年, 月) に変換する。
+    # 解釈できない場合は None を返す。
+    if isinstance(value, datetime.datetime) or isinstance(value, datetime.date):
+        return (value.year, value.month)
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        if value > 20000:
+            d = datetime.datetime(1899, 12, 30) + datetime.timedelta(days=int(value))
+            return (d.year, d.month)
+        return None
+    if isinstance(value, str):
+        text = unicodedata.normalize("NFKC", value).strip()
+        match = re.match(r"(\d{4})[/\-.年](\d{1,2})", text)
+        if match:
+            return (int(match.group(1)), int(match.group(2)))
+        try:
+            return month_of(float(text))
+        except ValueError:
+            return None
+    return None
+
+
 def validate_db_layout(ws):
     # DBシートは列位置（M/O/P/Q/T列）を直接参照しているため、
     # 列の挿入・削除でレイアウトが変わった場合は誤読せずに停止する。
@@ -217,7 +250,27 @@ def validate_db_layout(ws):
         )
 
 
-def read_db_rows(workbook_path):
+def validate_db_target_month(ws, target_year, target_month):
+    # DBシートのC4（対象月）とM6/O6（当月列の日付）を確認し、
+    # 古い請求Excelを選んでしまった場合は集計せずに停止する。
+    grid = list(ws.iter_rows(min_row=4, max_row=6, values_only=True))
+    row4 = grid[0] if grid else ()
+    row6 = grid[2] if len(grid) > 2 else ()
+    candidates = []
+    for row, idx in ((row4, 2), (row6, 12), (row6, 14)):
+        if len(row) > idx:
+            parsed = month_of(row[idx])
+            if parsed:
+                candidates.append(parsed)
+    if candidates and (target_year, target_month) not in candidates:
+        found = "、".join(f"{y}年{m}月" for y, m in sorted(set(candidates)))
+        raise SystemExit(
+            f"請求ExcelのDBシートの対象月（{found}）が、指定した{target_year}年{target_month}月と"
+            "一致しません。請求Excelの取り違えを確認してください。"
+        )
+
+
+def read_db_rows(workbook_path, target_year, target_month):
     wb = openpyxl.load_workbook(workbook_path, read_only=True, data_only=True)
     if "DB" not in wb.sheetnames:
         raise SystemExit(
@@ -226,9 +279,17 @@ def read_db_rows(workbook_path):
     result = {}
     ws = wb["DB"]
     validate_db_layout(ws)
+    validate_db_target_month(ws, target_year, target_month)
     for row_num, row in enumerate(ws.iter_rows(values_only=True), start=1):
         facility = row[2] if len(row) > 2 else None
-        if not facility or facility in ("施設名", "担当AM"):
+        if not isinstance(facility, str):
+            continue
+        facility = facility.strip()
+        if not facility or facility in ("施設名", "担当AM", "暦日数", "株式会社ラシエル稼働管理"):
+            continue
+        # M/O/T列のいずれかに数値がない行（表題行・区切り行）は施設行とみなさない。
+        metrics = [row[idx] if len(row) > idx else None for idx in (12, 14, 19)]
+        if not any(isinstance(v, (int, float)) and not isinstance(v, bool) for v in metrics):
             continue
         result[str(facility)] = {
             "row": row_num,
@@ -246,7 +307,22 @@ def read_db_rows(workbook_path):
     return result
 
 
-def read_billing(workbook_path, month_sheet, facility_name):
+def empty_billing():
+    return {
+        "present": False,
+        "all_user_count": 0,
+        "resident_user_count": 0,
+        "life_support_days": 0,
+        "carryover_days": 0,
+        "users": {},
+        "resident_users": {},
+        "rows": [],
+        "warnings": [],
+    }
+
+
+def read_billing_all(workbook_path, month_sheet, target_year, target_month):
+    # 請求Excelは1回だけ読み、全施設分をまとめて集計する（施設ごとの再読込を避ける）。
     wb = openpyxl.load_workbook(workbook_path, read_only=True, data_only=True)
     if month_sheet not in wb.sheetnames:
         raise SystemExit(
@@ -263,24 +339,45 @@ def read_billing(workbook_path, month_sheet, facility_name):
             f"請求シート「{month_sheet}」の1行目に必要なヘッダーが見つかりません: "
             f"{', '.join(missing_headers)}（シートの構成が変わった可能性があります）"
         )
-    users = {}
-    rows = []
-    warnings = []
-    name_collisions = set()
+    has_provision_col = "サービス提供年月" in header_map
+    results = {}
+    collisions = {}
     for excel_row, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
-        if not row or row[0] != facility_name:
+        if not row or row[0] is None:
             continue
+        facility_name = str(row[0]).strip()
+        if not facility_name:
+            continue
+        bucket = results.setdefault(facility_name, empty_billing())
+        bucket["present"] = True
         record = {name: row[idx] if idx < len(row) else None for name, idx in header_map.items()}
         name = record.get("利用者名")
         service_name = record.get("サービス内容")
         count_raw = record.get("回数")
         if not is_readable_number(count_raw):
-            warnings.append(
+            bucket["warnings"].append(
                 f"請求シート{excel_row}行目（{name}／{service_name}）の回数「{count_raw}」を数値として読めないため0回として扱いました。元データを確認してください。"
             )
         count = as_number(count_raw)
+
+        # 請求シートには月遅れ請求（過去月提供分）が混在するため、
+        # サービス提供年月が対象月の行だけを当月分として集計し、
+        # 他月提供分は「月遅れ請求」として利用者別に別カウントする。
+        provision_month = None
+        is_current = True
+        if has_provision_col:
+            provision_raw = record.get("サービス提供年月")
+            provision_month = month_of(provision_raw)
+            if provision_month is None:
+                if provision_raw is not None:
+                    bucket["warnings"].append(
+                        f"請求シート{excel_row}行目（{name}）のサービス提供年月「{provision_raw}」を解釈できないため当月分として扱いました。"
+                    )
+            else:
+                is_current = provision_month == (target_year, target_month)
+
         normalized = normalize_name(name)
-        user = users.setdefault(
+        user = bucket["users"].setdefault(
             normalized,
             {
                 "name": name,
@@ -289,6 +386,8 @@ def read_billing(workbook_path, month_sheet, facility_name):
                 "life_support_days": 0,
                 "short_stay_days": 0,
                 "is_short_stay": False,
+                "carryover_days": 0,
+                "carryover_months": set(),
                 "services": [],
                 "excel_rows": [],
             },
@@ -299,7 +398,7 @@ def read_billing(workbook_path, month_sheet, facility_name):
         elif recipient is not None and str(recipient) != str(user["recipient_no"]):
             # 同じ氏名で受給者証番号が異なる行がある場合は、同姓同名の別人を
             # 1人に集計している可能性があるため警告する。
-            name_collisions.add(
+            collisions.setdefault(facility_name, set()).add(
                 f"利用者「{name}」に複数の受給者証番号（{user['recipient_no']}／{recipient}）があります。同姓同名の別人を1人として集計している可能性があります。"
             )
         user["excel_rows"].append(excel_row)
@@ -309,34 +408,42 @@ def read_billing(workbook_path, month_sheet, facility_name):
                 "unit": record.get("単位数"),
                 "count": count,
                 "service_units": record.get("サービス単位数"),
+                "provision_month": f"{provision_month[0]}年{provision_month[1]}月" if provision_month else None,
             }
         )
-        if is_short_stay(service_name):
-            user["is_short_stay"] = True
-            user["short_stay_days"] += count
-        if is_life_support(service_name):
-            user["life_support_days"] += count
-        rows.append(record)
+        if is_current:
+            if is_short_stay(service_name):
+                user["is_short_stay"] = True
+                user["short_stay_days"] += count
+            if is_life_support(service_name):
+                user["life_support_days"] += count
+        elif is_life_support(service_name):
+            user["carryover_days"] += count
+            user["carryover_months"].add(f"{provision_month[0]}年{provision_month[1]}月")
+        bucket["rows"].append(record)
 
-    # 短期入所と生活援助日中を同月に併用する利用者がいるため、
-    # 短期行の有無では除外せず、生活援助日中の回数があるかどうかで入居系と判定する。
-    # 短期のみの利用者は life_support_days が 0 のためここで自然に除外される。
-    resident_users = {
-        key: value
-        for key, value in users.items()
-        if value["life_support_days"] > 0
-    }
-    warnings.extend(sorted(name_collisions))
-    return {
-        "present": bool(rows),
-        "all_user_count": len(users),
-        "resident_user_count": len(resident_users),
-        "life_support_days": sum(user["life_support_days"] for user in resident_users.values()),
-        "users": users,
-        "resident_users": resident_users,
-        "rows": rows,
-        "warnings": warnings,
-    }
+    if not has_provision_col:
+        for bucket in results.values():
+            bucket["warnings"].append(
+                "請求シートに「サービス提供年月」列が見つからないため月遅れ請求を判定できません。全行を当月分として集計しています。"
+            )
+
+    for facility_name, bucket in results.items():
+        # 短期入所と生活援助日中を同月に併用する利用者がいるため、
+        # 短期行の有無では除外せず、当月の生活援助日中の回数があるかどうかで入居系と判定する。
+        # 短期のみの利用者は life_support_days が 0 のためここで自然に除外される。
+        resident_users = {
+            key: value
+            for key, value in bucket["users"].items()
+            if value["life_support_days"] > 0
+        }
+        bucket["resident_users"] = resident_users
+        bucket["all_user_count"] = len(bucket["users"])
+        bucket["resident_user_count"] = len(resident_users)
+        bucket["life_support_days"] = sum(user["life_support_days"] for user in resident_users.values())
+        bucket["carryover_days"] = sum(as_number(user["carryover_days"]) for user in bucket["users"].values())
+        bucket["warnings"].extend(sorted(collisions.get(facility_name, set())))
+    return results
 
 
 def read_provider_file(path):
@@ -349,6 +456,9 @@ def read_provider_file(path):
     for row_num, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
         name = row[1] if len(row) > 1 else None
         if not isinstance(name, str) or not name.strip() or name.startswith("氏名"):
+            continue
+        if normalize_name(name) in NON_USER_NAMES:
+            # 「合計」「小計」等の集計行を利用者として読まない。
             continue
         days = row[3] if len(row) > 3 else None
         if days is None or not is_readable_number(days):
@@ -453,14 +563,31 @@ def build_reason(diff, summary, provider_user=None):
         f"提供延べ{summary['provider_total_days']}日。"
     )
 
+    if item == "提供あり請求なし" and provider == 0 and direct_billing:
+        return {
+            "reason_confidence": "高",
+            "reason_candidate": "直接請求（他事業所・自費等）の利用者で、この請求Excelの対象外の可能性があります。",
+            "evidence": f"{evidence_base}{user_name}さんは提供側にシートがあり延べ0日、直接請求フラグ（{direct_billing}）が付いています。",
+            "check_point": "直接請求の請求経路と、DB O列の提供人数に直接請求利用者を含める定義か確認してください。",
+            "db_q_draft": "理由：直接請求の利用者を提供ベース人数に含めているため人数乖離。請求延べ日数と提供延べ日数は一致しており、請求漏れなし。対策：直接請求利用者の計上定義を確認。",
+        }
+
     if item == "提供あり請求なし" and provider == 0:
-        extra = " 直接請求フラグあり。" if direct_billing else ""
         return {
             "reason_confidence": "高",
             "reason_candidate": "延べ0日の利用者が提供ベース人数に含まれている可能性があります。",
-            "evidence": f"{evidence_base}{user_name}さんは提供側にシートがありますが延べ0日です。{extra}",
+            "evidence": f"{evidence_base}{user_name}さんは提供側にシートがありますが延べ0日です。",
             "check_point": "DB O列の提供人数に延べ0日利用者を含める定義か確認してください。",
             "db_q_draft": "理由：延べ0日の利用者を提供ベース人数に含めているため人数乖離。請求延べ日数と提供延べ日数は一致しており、請求漏れなし。対策：提供人数の計上定義を確認し、必要に応じて延べ0日利用者を除外。",
+        }
+
+    if item == "提供あり請求なし" and direct_billing:
+        return {
+            "reason_confidence": "中",
+            "reason_candidate": "直接請求（他事業所・自費等）のため、この請求Excelに載らない利用者の可能性があります。未請求とは区別して確認してください。",
+            "evidence": f"{user_name}さんは提供側に{provider}日あり直接請求フラグ（{direct_billing}）が付いていますが、この請求Excelの生活援助日中系に見当たりません。",
+            "check_point": "直接請求の請求経路で当月分が請求済みか確認してください。",
+            "db_q_draft": f"理由：{user_name}さんは直接請求のため当請求Excel対象外の可能性。提供実績{provider}日。対策：直接請求側の請求状況を確認。",
         }
 
     if item == "提供あり請求なし":
@@ -513,6 +640,11 @@ def build_reason(diff, summary, provider_user=None):
 def attach_reason(diff, summary, provider_user=None):
     enriched = dict(diff)
     enriched.update(build_reason(diff, summary, provider_user))
+    carryover = as_number(diff.get("billing_carryover_days"))
+    if carryover:
+        # 当月シートに他月提供分の請求がある利用者は月遅れ請求サイクルの
+        # 可能性が高いため、その事実を根拠に追記する。
+        enriched["evidence"] += f" なお当月の請求シートには、この利用者の他月提供分{carryover}日の月遅れ請求が含まれています。"
     return enriched
 
 
@@ -563,10 +695,10 @@ def summarize_main_reason(summary):
     return "差異一覧の理由候補・根拠・確認ポイントを確認してください。"
 
 
-def analyze_facility(config, db_rows):
+def analyze_facility(config, db_rows, billing_by_facility):
     facility_name = config["facility_name"]
     db_row = db_rows.get(facility_name, {})
-    billing = read_billing(CONFIG["billing_workbook"], CONFIG["target_month_label"], facility_name)
+    billing = billing_by_facility.get(facility_name) or empty_billing()
     discovery_records = []
     provider_paths = [Path(path) for path in config.get("provider_workbooks", [])]
     if not provider_paths and CONFIG.get("provider_root"):
@@ -629,67 +761,117 @@ def analyze_facility(config, db_rows):
         "billing_all_user_count": billing.get("all_user_count"),
         "billing_resident_user_count": billing.get("resident_user_count"),
         "billing_life_support_days": billing.get("life_support_days"),
+        "billing_carryover_days": billing.get("carryover_days"),
         "provider_sheet_user_count": provider.get("sheet_user_count"),
         "provider_active_user_count": provider.get("active_user_count"),
         "provider_total_days": provider.get("total_days"),
     }
 
+    all_billing_users = billing.get("users", {})
+    provider_readable = any(record.get("status") == "読取OK" for record in provider.get("file_records", []))
+
     diffs = []
-    for key in sorted(set(provider_users) - set(billing_users)):
-        user = provider_users[key]
-        days = as_number(user.get("days"))
-        diff = {
-            "facility_name": facility_name,
-            "user_name": user.get("name"),
-            "item": "提供あり請求なし",
-            "billing_value": 0,
-            "provider_value": days,
-            "difference": -days,
-            "severity": "注意" if days == 0 else "重大",
-        }
-        diffs.append(attach_reason(diff, summary, user))
-
-    for key in sorted(set(billing_users) - set(provider_users)):
-        user = billing_users[key]
-        days = as_number(user.get("life_support_days"))
-        diff = {
-            "facility_name": facility_name,
-            "user_name": user.get("name"),
-            "item": "請求あり提供なし",
-            "billing_value": days,
-            "provider_value": 0,
-            "difference": days,
-            "severity": "重大",
-        }
-        diffs.append(attach_reason(diff, summary))
-
-    for key in sorted(set(billing_users) & set(provider_users)):
-        billing_user = billing_users[key]
-        provider_user = provider_users[key]
-        billing_days = as_number(billing_user.get("life_support_days"))
-        provider_days = as_number(provider_user.get("days"))
-        if billing_days != provider_days:
+    if provider_readable:
+        for key in sorted(set(provider_users) - set(billing_users)):
+            user = provider_users[key]
+            days = as_number(user.get("days"))
             diff = {
                 "facility_name": facility_name,
-                "user_name": provider_user.get("name"),
-                "item": "利用者別延べ日数",
-                "billing_value": billing_days,
-                "provider_value": provider_days,
-                "difference": billing_days - provider_days,
-                "severity": "要確認",
+                "user_name": user.get("name"),
+                "item": "提供あり請求なし",
+                "billing_value": 0,
+                "provider_value": days,
+                "difference": -days,
+                "severity": "注意" if days == 0 else "重大",
+                "billing_carryover_days": as_number(all_billing_users.get(key, {}).get("carryover_days")),
             }
-            diffs.append(attach_reason(diff, summary, provider_user))
+            diffs.append(attach_reason(diff, summary, user))
 
-    summary["judgement"] = classify_facility(db_row, billing, provider, diffs)
-    summary["main_reason"] = summarize_main_reason(summary)
+        for key in sorted(set(billing_users) - set(provider_users)):
+            user = billing_users[key]
+            days = as_number(user.get("life_support_days"))
+            diff = {
+                "facility_name": facility_name,
+                "user_name": user.get("name"),
+                "item": "請求あり提供なし",
+                "billing_value": days,
+                "provider_value": 0,
+                "difference": days,
+                "severity": "重大",
+                "billing_carryover_days": as_number(user.get("carryover_days")),
+            }
+            diffs.append(attach_reason(diff, summary))
+
+        for key in sorted(set(billing_users) & set(provider_users)):
+            billing_user = billing_users[key]
+            provider_user = provider_users[key]
+            billing_days = as_number(billing_user.get("life_support_days"))
+            provider_days = as_number(provider_user.get("days"))
+            if billing_days != provider_days:
+                diff = {
+                    "facility_name": facility_name,
+                    "user_name": provider_user.get("name"),
+                    "item": "利用者別延べ日数",
+                    "billing_value": billing_days,
+                    "provider_value": provider_days,
+                    "difference": billing_days - provider_days,
+                    "severity": "要確認",
+                    "billing_carryover_days": as_number(billing_user.get("carryover_days")),
+                }
+                diffs.append(attach_reason(diff, summary, provider_user))
+
+    if not provider_readable:
+        # 提供実績Excelが1つも読めていない施設は、利用者別の差異を出すと
+        # 全員が「請求あり提供なし（重大）」になり誤報の嵐になるため、
+        # 比較不能として判定を分ける。
+        summary["judgement"] = "提供未読"
+        summary["main_reason"] = "提供実績Excelを読み取れていないため、請求との比較ができていません。読取ファイル一覧で対象フォルダ・ファイルを確認してください。"
+    else:
+        summary["judgement"] = classify_facility(db_row, billing, provider, diffs)
+        summary["main_reason"] = summarize_main_reason(summary)
+
+    # DB P列（乖離の有無）・Q列（理由記載）とツールの検出結果の整合を確認する。
+    tool_gap = bool(diffs) or summary["judgement"] in ("重大", "要確認", "注意")
+    if summary["judgement"] == "提供未読":
+        summary["db_p_check"] = "提供実績未読のため照合不可"
+        summary["db_q_check"] = "提供実績未読のため照合不可"
+    elif not db_row:
+        summary["db_p_check"] = "DB行未検出のため照合不可"
+        summary["db_q_check"] = "DB行未検出のため照合不可"
+    else:
+        p_label = str(db_row.get("p_gap_label") or "").strip()
+        db_says_gap = "乖離" in p_label or p_label == "有"
+        if db_says_gap and tool_gap:
+            summary["db_p_check"] = "整合（双方乖離あり）"
+        elif db_says_gap:
+            summary["db_p_check"] = "DBは乖離ありだがツールでは差異未検出。解消済みか、DB記載を確認してください"
+        elif tool_gap:
+            summary["db_p_check"] = "ツールで差異検出だがDB P列に乖離記載なし。DB記入漏れの可能性があります"
+        else:
+            summary["db_p_check"] = "整合（双方乖離なし）"
+        q_text = str(db_row.get("q_gap_reason") or "").strip()
+        if tool_gap and not q_text:
+            summary["db_q_check"] = "差異があるのにDB Q列が未記載。記載案の転記を検討してください"
+        elif tool_gap:
+            summary["db_q_check"] = "DB Q列に記載あり。ツールの見立てと内容を照合してください"
+        elif q_text:
+            summary["db_q_check"] = "ツール差異なしだがQ列に記載あり。解消済みの記載か確認してください"
+        else:
+            summary["db_q_check"] = "整合（差異・記載なし）"
 
     user_rows = []
     diff_by_name = {normalize_name(diff.get("user_name")): diff for diff in diffs}
-    for key in sorted(set(billing_users) | set(provider_users)):
-        billing_user = billing_users.get(key, {})
+    # 月遅れ請求のみの利用者（当月提供分の請求がない利用者）も一覧に出す。
+    carryover_keys = {
+        key for key, user in all_billing_users.items() if as_number(user.get("carryover_days"))
+    }
+    for key in sorted(set(billing_users) | set(provider_users) | carryover_keys):
+        billing_user = billing_users.get(key) or all_billing_users.get(key, {})
         provider_user = provider_users.get(key, {})
         billing_days = as_number(billing_user.get("life_support_days"))
         provider_days = as_number(provider_user.get("days"))
+        carryover_days = as_number(billing_user.get("carryover_days"))
+        carryover_months = "、".join(sorted(billing_user.get("carryover_months", set())))
         related_diff = diff_by_name.get(key, {})
         user_rows.append(
             {
@@ -699,6 +881,8 @@ def analyze_facility(config, db_rows):
                 "billing_life_support_days": billing_days,
                 "provider_days": provider_days,
                 "difference": billing_days - provider_days,
+                "billing_carryover_days": carryover_days,
+                "carryover_note": f"{carryover_months}提供分{carryover_days}日の月遅れ請求あり" if carryover_days else "",
                 "direct_billing": provider_user.get("direct_billing"),
                 "status": "OK" if billing_days == provider_days and billing_days > 0 else "確認",
                 "reason_candidate": related_diff.get("reason_candidate"),
@@ -723,13 +907,26 @@ def main():
     if "target_month_label" not in CONFIG and "target_month" in CONFIG:
         CONFIG["target_month_label"] = f"{int(CONFIG['target_month'])}月"
 
-    db_rows = read_db_rows(CONFIG["billing_workbook"])
-    raw_facilities = CONFIG.get("facilities", [])
-    facilities_config = [
-        {"facility_name": item} if isinstance(item, str) else item
-        for item in raw_facilities
-    ]
-    facilities = [analyze_facility(item, db_rows) for item in facilities_config]
+    target_year = int(CONFIG["target_year"])
+    target_month = int(CONFIG["target_month"])
+    db_rows = read_db_rows(CONFIG["billing_workbook"], target_year, target_month)
+    billing_by_facility = read_billing_all(
+        CONFIG["billing_workbook"], CONFIG["target_month_label"], target_year, target_month
+    )
+    raw_facilities = CONFIG.get("facilities") or []
+    if not raw_facilities or (
+        len(raw_facilities) == 1
+        and isinstance(raw_facilities[0], str)
+        and raw_facilities[0].strip().lower() in ("all", "全施設")
+    ):
+        # facilities が未指定・空・"all"・"全施設" の場合はDBシートの全施設を対象にする。
+        facilities_config = [{"facility_name": name} for name in db_rows]
+    else:
+        facilities_config = [
+            {"facility_name": item} if isinstance(item, str) else item
+            for item in raw_facilities
+        ]
+    facilities = [analyze_facility(item, db_rows, billing_by_facility) for item in facilities_config]
     payload = {
         "report_title": CONFIG.get("report_title", "請求提供差異チェック"),
         "target_month_label": CONFIG.get("target_month_label"),
