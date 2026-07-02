@@ -277,6 +277,8 @@ def main():
         [
             ("facility_name", "施設名"),
             ("user_name", "利用者名"),
+            ("provider_sheet_label", "提供シート名"),
+            ("match_method", "照合方法"),
             ("user_result", "照合結果"),
             ("billing_life_support_days", "請求側：生活援助日中系の回数（当月提供分）"),
             ("provider_days", "提供側：延べ日数"),
@@ -291,7 +293,7 @@ def main():
             ("db_q_draft", "DB Q列への記載案"),
             ("direct_billing", "直接請求フラグ"),
         ],
-        [12, 16, 14, 18, 16, 14, 16, 30, 58, 44, 12, 54, 44, 72, 14],
+        [12, 16, 14, 14, 14, 18, 16, 14, 16, 30, 58, 44, 12, 54, 44, 72, 14],
     )
     write_sheet(
         wb,

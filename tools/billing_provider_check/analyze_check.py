@@ -12,6 +12,8 @@ SHORT_STAY_MARKERS = ("短期", "短期入所")
 EXCLUDE_FILE_MARKERS = ("テンプレート", "旧", "コピー", "バックアップ", "テスト", "短期")
 # 提供側の延べ日数シートで利用者ではない集計行を除外するための氏名
 NON_USER_NAMES = ("合計", "小計", "計", "総計", "平均")
+# 実績記録票Excel内の利用者個人シート以外のシート名
+PROVIDER_SYSTEM_SHEETS = {"実績記録票", "算定項目リスト", "延べ日数", "重度障害者支援加算要件"}
 
 
 def normalize_name(value):
@@ -30,6 +32,18 @@ def normalize_name(value):
     for src, dst in replacements.items():
         text = text.replace(src, dst)
     return text
+
+
+def normalize_recipient(value):
+    # 受給者証番号を比較用に正規化する。Excel上は数値として保存され
+    # 先頭の0が落ちるため、数字のみを取り出して先頭の0を除いた形で比較する。
+    if value is None:
+        return None
+    text = unicodedata.normalize("NFKC", str(value)).strip()
+    digits = re.sub(r"\D", "", text)
+    if not digits:
+        return None
+    return digits.lstrip("0") or "0"
 
 
 def as_number(value):
@@ -446,42 +460,141 @@ def read_billing_all(workbook_path, month_sheet, target_year, target_month):
     return results
 
 
+def read_person_sheet(wb, sheet_name):
+    # 利用者個人シートの固定位置から情報を読む。
+    #   C2: 受給者証番号  I2: 支給決定障害者等氏名  P2: 区分
+    #   C40: 延べ日数     E40: 併用日数            U46: 特別給付費直接請求
+    ws = wb[sheet_name]
+    grid = {}
+    for row_num, row in enumerate(ws.iter_rows(min_row=1, max_row=46, values_only=True), start=1):
+        grid[row_num] = row
+
+    def cell(row_num, col_idx):
+        row = grid.get(row_num, ())
+        return row[col_idx] if len(row) > col_idx else None
+
+    # 実績記録票の個人シートかどうかを2行目のラベルで判定する。
+    if "受給者証番号" not in str(cell(2, 0) or "") or "氏名" not in str(cell(2, 5) or ""):
+        return None
+    return {
+        "full_name": cell(2, 8),
+        "recipient_no": cell(2, 2),
+        "category": cell(2, 15),
+        "days": cell(40, 2),
+        "combined_days": cell(40, 4),
+        "direct_billing": "該当" if "直接請求" in str(cell(46, 20) or "") else None,
+    }
+
+
 def read_provider_file(path):
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True, keep_vba=True)
-    if "延べ日数" not in wb.sheetnames:
-        return [], []
-    ws = wb["延べ日数"]
     users = []
     skipped = []
-    for row_num, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
-        name = row[1] if len(row) > 1 else None
-        if not isinstance(name, str) or not name.strip() or name.startswith("氏名"):
+
+    # 延べ日数シートは補助情報として読む（個人シートが無い旧式ファイル向け、
+    # および個人シートの値との突合用）。
+    nobe_rows = {}
+    if "延べ日数" in wb.sheetnames:
+        ws = wb["延べ日数"]
+        for row_num, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+            label = row[1] if len(row) > 1 else None
+            if not isinstance(label, str) or not label.strip() or label.startswith("氏名"):
+                continue
+            if normalize_name(label) in NON_USER_NAMES:
+                # 「合計」「小計」等の集計行を利用者として読まない。
+                continue
+            nobe_rows[label.strip()] = {
+                "row": row_num,
+                "category": row[2] if len(row) > 2 else None,
+                "days": row[3] if len(row) > 3 else None,
+                "single": row[5] if len(row) > 5 else None,
+                "combined": row[6] if len(row) > 6 else None,
+                "half": row[7] if len(row) > 7 else None,
+                "direct": row[8] if len(row) > 8 else None,
+            }
+
+    # 個人シートを主たる情報源として読む。延べ日数シートは数式キャッシュが
+    # 無いと空になるファイルがあるほか、氏名欄が「101清水」のような
+    # 部屋番号+姓（シート名）の施設もあり、個人シートのフルネーム・
+    # 受給者証番号でなければ請求側と照合できないため。
+    covered_labels = set()
+    unrecognized = []
+    for sheet_name in wb.sheetnames:
+        if sheet_name in PROVIDER_SYSTEM_SHEETS:
             continue
-        if normalize_name(name) in NON_USER_NAMES:
-            # 「合計」「小計」等の集計行を利用者として読まない。
+        info = read_person_sheet(wb, sheet_name)
+        if info is None:
+            unrecognized.append(sheet_name)
             continue
-        days = row[3] if len(row) > 3 else None
-        if days is None or not is_readable_number(days):
-            # 延べ日数が空欄・数値以外（数式の計算結果未保存など）の行を
-            # 無言で落とすと差異の見落としにつながるため、スキップ行として記録する。
+        covered_labels.add(sheet_name)
+        nobe = nobe_rows.get(sheet_name, {})
+
+        days = info["days"] if isinstance(info["days"], (int, float)) else None
+        if days is None and is_readable_number(info["days"]) and info["days"] is not None:
+            days = as_number(info["days"])
+        if days is None and isinstance(nobe.get("days"), (int, float)):
+            days = nobe["days"]
+        if days is None:
             skipped.append(
-                f"{row_num}行目「{name}」の延べ日数「{days}」を数値として読めないためスキップしました。"
+                f"個人シート「{sheet_name}」の延べ日数（C40セル「{info['days']}」）を数値として読めないためスキップしました。"
             )
             continue
         days = as_number(days)
+        if isinstance(nobe.get("days"), (int, float)) and as_number(nobe["days"]) != days:
+            skipped.append(
+                f"「{sheet_name}」の延べ日数が個人シート（{days}日）と延べ日数シート（{nobe['days']}日）で食い違っています。個人シートの値を採用しました。"
+            )
+
+        combined = as_number(info["combined_days"]) if is_readable_number(info["combined_days"]) else as_number(nobe.get("combined"))
+        raw_name = info["full_name"]
+        full_name = str(raw_name).strip() if isinstance(raw_name, str) and str(raw_name).strip() else None
+        display_name = full_name or sheet_name
         users.append(
             {
-                "name": name,
-                "normalized_name": normalize_name(name),
-                "category": row[2] if len(row) > 2 else None,
+                "name": display_name,
+                "sheet_label": sheet_name,
+                "normalized_name": normalize_name(display_name),
+                "recipient_no": info["recipient_no"],
+                "category": info["category"] if info["category"] is not None else nobe.get("category"),
                 "days": days,
-                "single_days": row[5] if len(row) > 5 else None,
-                "combined_days": row[6] if len(row) > 6 else None,
-                "half_days": row[7] if len(row) > 7 else None,
-                "direct_billing": row[8] if len(row) > 8 else None,
+                "single_days": days - combined,
+                "combined_days": combined,
+                "half_days": combined * 0.5,
+                "direct_billing": info["direct_billing"] or (nobe.get("direct") or None),
                 "source_file": str(path),
-                "source_row": row_num,
+                "source_row": nobe.get("row"),
             }
+        )
+
+    # 個人シートが無い利用者行（旧式ファイル等）は延べ日数シートから読む。
+    for label, nobe in nobe_rows.items():
+        if label in covered_labels:
+            continue
+        if not isinstance(nobe.get("days"), (int, float)):
+            skipped.append(
+                f"{nobe['row']}行目「{label}」の延べ日数「{nobe.get('days')}」を数値として読めず、対応する個人シートも無いためスキップしました。"
+            )
+            continue
+        users.append(
+            {
+                "name": label,
+                "sheet_label": label,
+                "normalized_name": normalize_name(label),
+                "recipient_no": None,
+                "category": nobe.get("category"),
+                "days": as_number(nobe["days"]),
+                "single_days": nobe.get("single"),
+                "combined_days": nobe.get("combined"),
+                "half_days": nobe.get("half"),
+                "direct_billing": nobe.get("direct"),
+                "source_file": str(path),
+                "source_row": nobe["row"],
+            }
+        )
+
+    if unrecognized:
+        skipped.append(
+            "個人シートとして認識できないため読み飛ばしたシート: " + "、".join(unrecognized)
         )
     return users, skipped
 
@@ -508,7 +621,7 @@ def read_provider(paths):
                 "status": "読取OK" if users else "対象外",
                 "file": str(path),
                 "folder": str(Path(path).parent),
-                "note": "延べ日数シートを読み取りました。" if users else "延べ日数シートまたは利用者行が見つかりません。",
+                "note": "利用者個人シート・延べ日数シートを読み取りました。" if users else "利用者個人シート・延べ日数シートのいずれからも利用者を読み取れません。",
             }
         )
         for message in skipped:
@@ -521,7 +634,9 @@ def read_provider(paths):
                 }
             )
         for user in users:
-            key = user["normalized_name"]
+            # 1F/2F間のフロア移動でシート名（部屋番号）が変わっても同一人物を
+            # 合算できるよう、受給者証番号があればそれを合算キーにする。
+            key = normalize_recipient(user.get("recipient_no")) or user["normalized_name"]
             if key in merged:
                 duplicates.append({"normalized_name": key, "name": user["name"], "source_file": user["source_file"]})
                 merged[key]["days"] += as_number(user["days"])
@@ -770,55 +885,100 @@ def analyze_facility(config, db_rows, billing_by_facility):
     all_billing_users = billing.get("users", {})
     provider_readable = any(record.get("status") == "読取OK" for record in provider.get("file_records", []))
 
+    # 請求側と提供側の利用者を「受給者証番号 → 氏名」の優先順で対応付ける。
+    # 提供側の氏名が「101清水」のような部屋番号+姓の施設でも、個人シートから
+    # 取得した受給者証番号・フルネームで照合できる。
+    entries = []
+    if provider_readable:
+        billing_recipient_index = {}
+        for bkey, buser in billing_users.items():
+            recipient = normalize_recipient(buser.get("recipient_no"))
+            if recipient:
+                billing_recipient_index.setdefault(recipient, bkey)
+        matched_billing = set()
+        for pkey, puser in provider_users.items():
+            recipient = normalize_recipient(puser.get("recipient_no"))
+            bkey = billing_recipient_index.get(recipient) if recipient else None
+            method = "受給者証番号" if bkey else None
+            if bkey is None:
+                name_key = puser.get("normalized_name")
+                if name_key in billing_users:
+                    bkey = name_key
+                    method = "氏名"
+            if bkey in matched_billing:
+                bkey = None
+                method = None
+            if bkey:
+                matched_billing.add(bkey)
+            entries.append({"bkey": bkey, "pkey": pkey, "method": method})
+        for bkey in billing_users:
+            if bkey not in matched_billing:
+                entries.append({"bkey": bkey, "pkey": None, "method": None})
+    else:
+        # 提供未読でも請求側の利用者は一覧に出す。
+        for bkey in billing_users:
+            entries.append({"bkey": bkey, "pkey": None, "method": None})
+
+    def entry_display_name(entry):
+        if entry.get("pkey"):
+            return provider_users[entry["pkey"]].get("name") or ""
+        if entry.get("bkey"):
+            return billing_users[entry["bkey"]].get("name") or ""
+        return ""
+
+    entries.sort(key=lambda item: normalize_name(entry_display_name(item)))
+
     diffs = []
     if provider_readable:
-        for key in sorted(set(provider_users) - set(billing_users)):
-            user = provider_users[key]
-            days = as_number(user.get("days"))
-            diff = {
-                "facility_name": facility_name,
-                "user_name": user.get("name"),
-                "item": "提供あり請求なし",
-                "billing_value": 0,
-                "provider_value": days,
-                "difference": -days,
-                "severity": "注意" if days == 0 else "重大",
-                "billing_carryover_days": as_number(all_billing_users.get(key, {}).get("carryover_days")),
-            }
-            diffs.append(attach_reason(diff, summary, user))
-
-        for key in sorted(set(billing_users) - set(provider_users)):
-            user = billing_users[key]
-            days = as_number(user.get("life_support_days"))
-            diff = {
-                "facility_name": facility_name,
-                "user_name": user.get("name"),
-                "item": "請求あり提供なし",
-                "billing_value": days,
-                "provider_value": 0,
-                "difference": days,
-                "severity": "重大",
-                "billing_carryover_days": as_number(user.get("carryover_days")),
-            }
-            diffs.append(attach_reason(diff, summary))
-
-        for key in sorted(set(billing_users) & set(provider_users)):
-            billing_user = billing_users[key]
-            provider_user = provider_users[key]
-            billing_days = as_number(billing_user.get("life_support_days"))
-            provider_days = as_number(provider_user.get("days"))
-            if billing_days != provider_days:
+        for entry in entries:
+            bkey, pkey = entry.get("bkey"), entry.get("pkey")
+            if pkey and not bkey:
+                user = provider_users[pkey]
+                days = as_number(user.get("days"))
                 diff = {
                     "facility_name": facility_name,
-                    "user_name": provider_user.get("name"),
-                    "item": "利用者別延べ日数",
-                    "billing_value": billing_days,
-                    "provider_value": provider_days,
-                    "difference": billing_days - provider_days,
-                    "severity": "要確認",
-                    "billing_carryover_days": as_number(billing_user.get("carryover_days")),
+                    "user_name": user.get("name"),
+                    "item": "提供あり請求なし",
+                    "billing_value": 0,
+                    "provider_value": days,
+                    "difference": -days,
+                    "severity": "注意" if days == 0 else "重大",
+                    "billing_carryover_days": as_number(
+                        all_billing_users.get(user.get("normalized_name"), {}).get("carryover_days")
+                    ),
                 }
-                diffs.append(attach_reason(diff, summary, provider_user))
+                diffs.append(attach_reason(diff, summary, user))
+            elif bkey and not pkey:
+                user = billing_users[bkey]
+                days = as_number(user.get("life_support_days"))
+                diff = {
+                    "facility_name": facility_name,
+                    "user_name": user.get("name"),
+                    "item": "請求あり提供なし",
+                    "billing_value": days,
+                    "provider_value": 0,
+                    "difference": days,
+                    "severity": "重大",
+                    "billing_carryover_days": as_number(user.get("carryover_days")),
+                }
+                diffs.append(attach_reason(diff, summary))
+            else:
+                billing_user = billing_users[bkey]
+                provider_user = provider_users[pkey]
+                billing_days = as_number(billing_user.get("life_support_days"))
+                provider_days = as_number(provider_user.get("days"))
+                if billing_days != provider_days:
+                    diff = {
+                        "facility_name": facility_name,
+                        "user_name": provider_user.get("name"),
+                        "item": "利用者別延べ日数",
+                        "billing_value": billing_days,
+                        "provider_value": provider_days,
+                        "difference": billing_days - provider_days,
+                        "severity": "要確認",
+                        "billing_carryover_days": as_number(billing_user.get("carryover_days")),
+                    }
+                    diffs.append(attach_reason(diff, summary, provider_user))
 
     if not provider_readable:
         # 提供実績Excelが1つも読めていない施設は、利用者別の差異を出すと
@@ -862,22 +1022,42 @@ def analyze_facility(config, db_rows, billing_by_facility):
     user_rows = []
     diff_by_name = {normalize_name(diff.get("user_name")): diff for diff in diffs}
     # 月遅れ請求のみの利用者（当月提供分の請求がない利用者）も一覧に出す。
-    carryover_keys = {
-        key for key, user in all_billing_users.items() if as_number(user.get("carryover_days"))
-    }
-    for key in sorted(set(billing_users) | set(provider_users) | carryover_keys):
-        billing_user = billing_users.get(key) or all_billing_users.get(key, {})
-        provider_user = provider_users.get(key, {})
+    covered_names = set(billing_users)
+    covered_names.update(
+        provider_users[entry["pkey"]].get("normalized_name") for entry in entries if entry.get("pkey")
+    )
+    for key, user in all_billing_users.items():
+        if as_number(user.get("carryover_days")) and key not in covered_names:
+            entries.append({"bkey": None, "pkey": None, "method": None, "carry_key": key})
+
+    for entry in entries:
+        billing_user = billing_users.get(entry.get("bkey"), {}) if entry.get("bkey") else {}
+        provider_user = provider_users.get(entry.get("pkey"), {}) if entry.get("pkey") else {}
+        if not billing_user:
+            # 月遅れ・短期など入居系集計に載らない請求情報を氏名で補完する。
+            fallback_key = entry.get("carry_key") or provider_user.get("normalized_name")
+            carry_source = all_billing_users.get(fallback_key, {})
+        else:
+            carry_source = billing_user
         billing_days = as_number(billing_user.get("life_support_days"))
         provider_days = as_number(provider_user.get("days"))
-        carryover_days = as_number(billing_user.get("carryover_days"))
-        carryover_months = "、".join(sorted(billing_user.get("carryover_months", set())))
-        related_diff = diff_by_name.get(key, {})
+        carryover_days = as_number(carry_source.get("carryover_days"))
+        carryover_months = "、".join(sorted(carry_source.get("carryover_months", set())))
+        display_name = provider_user.get("name") or billing_user.get("name") or carry_source.get("name")
+        related_diff = diff_by_name.get(normalize_name(display_name), {})
+        if entry.get("pkey") and entry.get("bkey"):
+            match_method = entry.get("method")
+        elif entry.get("pkey") or entry.get("bkey"):
+            match_method = "対応なし"
+        else:
+            match_method = "月遅れのみ"
         user_rows.append(
             {
                 "facility_name": facility_name,
-                "user_name": provider_user.get("name") or billing_user.get("name"),
-                "normalized_name": key,
+                "user_name": display_name,
+                "normalized_name": normalize_name(display_name),
+                "provider_sheet_label": provider_user.get("sheet_label"),
+                "match_method": match_method,
                 "billing_life_support_days": billing_days,
                 "provider_days": provider_days,
                 "difference": billing_days - provider_days,
