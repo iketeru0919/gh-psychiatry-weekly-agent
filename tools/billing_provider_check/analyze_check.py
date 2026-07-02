@@ -124,6 +124,38 @@ def should_exclude_excel(path):
     return any(marker in name for marker in EXCLUDE_FILE_MARKERS)
 
 
+def iter_dirs_limited(base, max_depth):
+    # 深さ制限付きのディレクトリ列挙。Dropboxの施設フォルダを無制限に
+    # 再帰走査すると全年月・過去分まで総なめして極端に遅くなるため。
+    stack = [(base, 0)]
+    while stack:
+        current, depth = stack.pop()
+        try:
+            children = [child for child in current.iterdir() if child.is_dir()]
+        except OSError:
+            continue
+        for child in children:
+            yield child
+            if depth + 1 < max_depth:
+                stack.append((child, depth + 1))
+
+
+def iter_files_limited(base, max_depth):
+    # 深さ制限付きのファイル列挙（月フォルダ直下と少数の下位フォルダのみ）。
+    stack = [(base, 0)]
+    while stack:
+        current, depth = stack.pop()
+        try:
+            entries = list(current.iterdir())
+        except OSError:
+            continue
+        for entry in entries:
+            if entry.is_file():
+                yield entry
+            elif entry.is_dir() and depth + 1 < max_depth:
+                stack.append((entry, depth + 1))
+
+
 def find_provider_workbooks(provider_root, facility_name, year, month):
     root = Path(provider_root)
     records = []
@@ -157,17 +189,25 @@ def find_provider_workbooks(provider_root, facility_name, year, month):
 
     year_text = f"{year}年"
     month_names = month_dir_candidates(year, month)
+    normalized_month_names = {normalize_name(name) for name in month_names}
     excel_files = []
     for facility_dir in facility_dirs:
         month_dirs = []
-        for subdir in facility_dir.rglob("*"):
-            if not subdir.is_dir():
-                continue
-            normalized_name = normalize_name(subdir.name)
-            if any(normalize_name(name) == normalized_name for name in month_names):
-                month_dirs.append(subdir)
-            elif year_text in str(subdir) and f"{month}月" in subdir.name and "提供分" in subdir.name:
-                month_dirs.append(subdir)
+        # まず期待される固定パス（施設/請求用/YYYY年/月フォルダ）を直接確認する。
+        # Dropbox上の施設フォルダ全体を再帰走査すると全年月分を総なめして
+        # 非常に遅くなるため、見つかればここで確定させる。
+        for month_name in month_names:
+            candidate = facility_dir / "請求用" / year_text / month_name
+            if candidate.is_dir():
+                month_dirs.append(candidate)
+        # 見つからない場合のみ、深さ制限付きで探索する（無制限のrglobは使わない）。
+        if not month_dirs:
+            for subdir in iter_dirs_limited(facility_dir, 4):
+                normalized_name = normalize_name(subdir.name)
+                if normalized_name in normalized_month_names:
+                    month_dirs.append(subdir)
+                elif year_text in str(subdir) and f"{month}月" in subdir.name and "提供分" in subdir.name:
+                    month_dirs.append(subdir)
 
         if not month_dirs:
             records.append(
@@ -182,7 +222,7 @@ def find_provider_workbooks(provider_root, facility_name, year, month):
             continue
 
         for month_dir in sorted(set(month_dirs)):
-            candidates = [path for path in month_dir.rglob("*") if path.is_file() and not should_exclude_excel(path)]
+            candidates = [path for path in iter_files_limited(month_dir, 3) if not should_exclude_excel(path)]
             if not candidates:
                 records.append(
                     {
@@ -1089,6 +1129,7 @@ def main():
 
     target_year = int(CONFIG["target_year"])
     target_month = int(CONFIG["target_month"])
+    print("請求Excelを読み込んでいます...", flush=True)
     db_rows = read_db_rows(CONFIG["billing_workbook"], target_year, target_month)
     billing_by_facility = read_billing_all(
         CONFIG["billing_workbook"], CONFIG["target_month_label"], target_year, target_month
@@ -1106,7 +1147,13 @@ def main():
             {"facility_name": item} if isinstance(item, str) else item
             for item in raw_facilities
         ]
-    facilities = [analyze_facility(item, db_rows, billing_by_facility) for item in facilities_config]
+    facilities = []
+    total = len(facilities_config)
+    for index, item in enumerate(facilities_config, start=1):
+        # Dropbox上のファイル探索・読取は時間がかかることがあるため進捗を出す。
+        print(f"[{index}/{total}] {item['facility_name']} の提供実績を確認中...", flush=True)
+        facilities.append(analyze_facility(item, db_rows, billing_by_facility))
+    print("集計が完了しました。レポートを作成します。", flush=True)
     payload = {
         "report_title": CONFIG.get("report_title", "請求提供差異チェック"),
         "target_month_label": CONFIG.get("target_month_label"),

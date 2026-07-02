@@ -134,6 +134,8 @@ $monthLabel = ("{0}{1}" -f [int]$config.target_month, [char]0x6708)
 $config | Add-Member -NotePropertyName "target_month_label" -NotePropertyValue $monthLabel -Force
 $config | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $effectiveConfigPath -Encoding UTF8
 
+Write-Host ""
+Write-Host "Analyzing... (first run may take a while while Dropbox files download)"
 & $python (Join-Path $workToolDir "analyze_check.py") $effectiveConfigPath $jsonPath
 if ($LASTEXITCODE -ne 0) {
   throw "Python analyze failed. ExitCode=$LASTEXITCODE"
