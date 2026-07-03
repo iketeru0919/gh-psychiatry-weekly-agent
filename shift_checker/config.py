@@ -79,6 +79,19 @@ class Settings:
     hour_threshold: float = 8.0        # 総労働時間の変化がこれ以上なら要確認
     incomplete_threshold: float = 80.0  # 所定不足がこれ以上なら「入力途中の可能性」
 
+    # --- 労務チェック ---
+    night_keywords: list[str] = field(default_factory=lambda: parse_words("夜,深"))
+    ake_keywords: list[str] = field(default_factory=lambda: parse_words("明"))
+    max_consecutive_days: int = 6       # 連続勤務の許容日数（超えたら重要）
+    night_shift_limit: int = 8          # 月の夜勤回数の上限目安（超えたら要確認）
+    overtime_caution: float = 30.0      # 所定超過の注意ライン（時間）
+    overtime_warning: float = 45.0      # 所定超過の警告ライン（時間・36協定原則上限）
+    # 施設別の月間公休基準。キー=施設名に含まれるキーワード、値=日数
+    # 例: {"ひまわり": 9, "さくら": {"6": 9, "7": 10}, "default": null}
+    required_holidays: dict = field(default_factory=dict)
+    # 氏名にこの語を含む行はスポット枠とみなし個人単位の労務判定から除外
+    labor_exclude_keywords: list[str] = field(default_factory=lambda: parse_words("タイミー"))
+
     @property
     def leave_words(self) -> list[str]:
         return self.paid_words + self.vacation_words
@@ -96,7 +109,8 @@ def load_settings() -> Settings:
     with open(path, encoding="utf-8") as handle:
         raw = json.load(handle)
     for key, value in raw.items():
-        if key in ("paid_words", "vacation_words") and isinstance(value, str):
+        if key in ("paid_words", "vacation_words", "night_keywords", "ake_keywords",
+                   "labor_exclude_keywords") and isinstance(value, str):
             value = parse_words(value)
         if hasattr(settings, key):
             setattr(settings, key, value)

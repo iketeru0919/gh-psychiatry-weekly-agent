@@ -16,10 +16,12 @@ from pathlib import Path
 
 from .checker import build_comparison, build_current_result, build_error_result
 from .config import load_settings, resolve_output_dir, resolve_snapshot_dir
+from .history import build_trend, update_history
+from .labor import analyze_labor
 from .parser import ShiftFileError, parse_shift_book
 from .report import write_report
 from .scanner import scan_shift_files
-from .snapshot import find_snapshot_file, latest_run_dir, save_snapshot
+from .snapshot import find_snapshot_file, latest_run_dir, month_key, save_snapshot
 
 
 def parse_month(text: str) -> tuple[int, int] | None:
@@ -94,6 +96,7 @@ def main(argv=None) -> int:
 
     results = []
     snapshot_files = {}
+    labor_rows = []
     for index, entry in enumerate(facilities, start=1):
         label = f"[{index}/{len(facilities)}] {entry.facility}"
         try:
@@ -126,6 +129,7 @@ def main(argv=None) -> int:
             )
         results.append(result)
         snapshot_files[entry.facility] = entry.chosen
+        labor_rows.extend(analyze_labor(current, entry.facility, settings, month))
         alerts = len(result.alerts)
         changes = len(result.change_rows)
         detail = f"職員{len(current.staff)}名 要確認{alerts}名"
@@ -133,9 +137,19 @@ def main(argv=None) -> int:
             detail += f" 日別変更{changes}件"
         print(f"{label} ... OK（{detail}）")
 
+    labor_rows.sort(key=lambda r: ({"critical": 0, "warning": 1, "ok": 2}[r.severity],
+                                   r.facility, r.name))
+    trend = None
+    if not args.no_snapshot:
+        records = update_history(snapshot_dir, month_key(year, month), labor_rows)
+        trend = build_trend(records)
+
     output_dir = resolve_output_dir(settings)
     report_path = write_report(results, settings, output_dir, year, month,
-                               compared=bool(previous_run), previous_stamp=previous_stamp)
+                               compared=bool(previous_run), previous_stamp=previous_stamp,
+                               labor_rows=labor_rows, trend=trend)
+    labor_alerts = sum(1 for r in labor_rows if r.severity != "ok")
+    print(f"労務チェック: 対象{len(labor_rows)}名、指摘{labor_alerts}名")
 
     if not args.no_snapshot and snapshot_files:
         run_dir = save_snapshot(snapshot_dir, year, month, snapshot_files,

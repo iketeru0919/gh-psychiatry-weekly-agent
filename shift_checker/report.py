@@ -49,7 +49,8 @@ def _fmt(value):
 
 
 def write_report(results: list[FacilityResult], settings: Settings, output_dir: Path,
-                 year: int, month: int, compared: bool, previous_stamp: str) -> Path:
+                 year: int, month: int, compared: bool, previous_stamp: str,
+                 labor_rows=None, trend=None) -> Path:
     workbook = Workbook()
     month_tag = f"{year % 100:02d}{month:02d}"
     now = datetime.now()
@@ -185,6 +186,44 @@ def write_report(results: list[FacilityResult], settings: Settings, output_dir: 
     sheet.column_dimensions["A"].width = 22
     for index in range(len(keys)):
         sheet.column_dimensions[get_column_letter(index + 2)].width = 15
+
+    # --- 労務チェック ---
+    if labor_rows is not None:
+        sheet = workbook.create_sheet("労務チェック")
+        headers = ["施設", "判定", "職員氏名", "職種", "雇用区分", "掲載行数",
+                   "総労働時間", "所定", "所定超過", "最大連続勤務", "連続勤務期間",
+                   "夜勤回数", "深夜業4回以上", "夜勤明け即日勤", "公休数", "公休基準",
+                   "有休数", "同日複数勤務", "指摘内容"]
+        rows, fills = [], []
+        for row in labor_rows:
+            rows.append([
+                row.facility, row.judgment, row.name, row.job, row.employment_type,
+                row.row_count, _fmt(row.total_hours), _fmt(row.prescribed),
+                _fmt(row.overtime), row.max_consecutive, row.consecutive_detail,
+                row.night_count, row.night_check_target,
+                len(row.ake_violations) or "",
+                row.holiday_count, _fmt(row.required_holidays), row.paid_count,
+                len(row.double_bookings) or "",
+                " / ".join(row.reasons) or "問題なし",
+            ])
+            fills.append(SEVERITY_FILLS.get(row.severity))
+        _write_table(sheet, headers, rows, fills,
+                     widths=[22, 8, 18, 18, 9, 8, 9, 7, 8, 10, 20, 8, 11, 11, 7, 8, 7, 10, 70])
+        sheet.append([])
+        sheet.append(["※連続勤務・夜勤明けは月内のみで判定（前月末からの継続は含みません）。"
+                      "公休基準はconfig.jsonのrequired_holidaysで施設別に設定できます（未設定は判定なし）。"])
+        sheet.cell(sheet.max_row, 1).font = NOTE_FONT
+
+    # --- 労務推移 ---
+    if trend and trend[1]:
+        sheet = workbook.create_sheet("労務推移")
+        trend_headers, trend_rows = trend
+        _write_table(sheet, trend_headers, trend_rows, None,
+                     widths=[22, 18, 10] + [10] * (len(trend_headers) - 3))
+        sheet.append([])
+        sheet.append(["※実行のたびに月次集計が _チェック履歴/労務推移データ.csv へ蓄積され、"
+                      "直近6ヶ月分を表示します。"])
+        sheet.cell(sheet.max_row, 1).font = NOTE_FONT
 
     # --- 勤務記号 ---
     sheet = workbook.create_sheet("勤務記号")

@@ -15,5 +15,15 @@
   "paid_words": "有,有休,有給",
   "vacation_words": "休,休み,公,公休,希休,希,希望休",
   "hour_threshold": 8,
-  "incomplete_threshold": 80
+  "incomplete_threshold": 80,
+  "night_keywords": "夜,深",
+  "ake_keywords": "明",
+  "max_consecutive_days": 6,
+  "night_shift_limit": 8,
+  "overtime_caution": 30,
+  "overtime_warning": 45,
+  "required_holidays": {
+    "default": null
+  },
+  "labor_exclude_keywords": "タイミー"
 }
