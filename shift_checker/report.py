@@ -10,7 +10,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 from .checker import FacilityResult
-from .config import SUMMARY_LABELS, Settings
+from .config import SUMMARY_GROUPS, SUMMARY_LABELS, Settings
 from .util import matches_exact
 
 HEADER_FILL = PatternFill("solid", fgColor="16324F")
@@ -143,20 +143,48 @@ def write_report(results: list[FacilityResult], settings: Settings, output_dir: 
         if not rows:
             sheet.append(["変更はありませんでした"])
 
-    # --- 配置体制 ---
-    sheet = workbook.create_sheet("配置体制")
-    keys = list(SUMMARY_LABELS.keys())
-    headers = ["施設"] + [SUMMARY_LABELS[k] for k in keys]
-    rows, fills = [], []
+    # --- 配置・体制チェック（HTML版と同じ4グループ・同じ項目名）---
+    sheet = workbook.create_sheet("配置・体制チェック")
+    keys = [key for _, group_keys in SUMMARY_GROUPS for key in group_keys]
+    group_row = ["施設"]
+    for group_name, group_keys in SUMMARY_GROUPS:
+        group_row.extend([group_name] + [""] * (len(group_keys) - 1))
+    sheet.append(group_row)
+    column_number = 2
+    for group_name, group_keys in SUMMARY_GROUPS:
+        if len(group_keys) > 1:
+            sheet.merge_cells(
+                start_row=1, start_column=column_number,
+                end_row=1, end_column=column_number + len(group_keys) - 1,
+            )
+        column_number += len(group_keys)
+    for cell in sheet[1]:
+        cell.fill = HEADER_FILL
+        cell.font = HEADER_FONT
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    sheet.append(["施設"] + [SUMMARY_LABELS[k] for k in keys])
+    for cell in sheet[2]:
+        cell.fill = HEADER_FILL
+        cell.font = HEADER_FONT
+        cell.alignment = Alignment(vertical="center", wrap_text=True)
+    sheet.merge_cells("A1:A2")
+
     for result in results:
         if not result.current:
-            rows.append([result.facility] + ["読取エラー"] + [""] * (len(keys) - 1))
-            fills.append(ERROR_FILL)
-            continue
-        summary = result.current.facility_summary
-        rows.append([result.facility] + [_fmt(summary.get(k, "")) for k in keys])
-        fills.append(WARNING_FILL if "未達" in str(summary.get("EV78", "")) else None)
-    _write_table(sheet, headers, rows, fills, widths=[22] + [13] * len(keys))
+            sheet.append([result.facility, "読取エラー"] + [""] * (len(keys) - 1))
+            fill = ERROR_FILL
+        else:
+            summary = result.current.facility_summary
+            sheet.append([result.facility] + [_fmt(summary.get(k, "")) for k in keys])
+            fill = WARNING_FILL if "未達" in str(summary.get("EV78", "")) else None
+        if fill:
+            for cell in sheet[sheet.max_row]:
+                cell.fill = fill
+    sheet.freeze_panes = "B3"
+    sheet.column_dimensions["A"].width = 22
+    for index in range(len(keys)):
+        sheet.column_dimensions[get_column_letter(index + 2)].width = 15
 
     # --- 勤務記号 ---
     sheet = workbook.create_sheet("勤務記号")
