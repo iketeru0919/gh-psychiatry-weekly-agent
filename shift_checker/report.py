@@ -48,9 +48,13 @@ def _fmt(value):
     return "" if value is None else value
 
 
+TOTAL_FILL = PatternFill("solid", fgColor="DCECFB")
+GRAND_TOTAL_FILL = PatternFill("solid", fgColor="B8D5F0")
+
+
 def write_report(results: list[FacilityResult], settings: Settings, output_dir: Path,
                  year: int, month: int, compared: bool, previous_stamp: str,
-                 labor_rows=None, trend=None) -> Path:
+                 labor_rows=None, trend=None, external_rows=None) -> Path:
     workbook = Workbook()
     month_tag = f"{year % 100:02d}{month:02d}"
     now = datetime.now()
@@ -212,6 +216,34 @@ def write_report(results: list[FacilityResult], settings: Settings, output_dir: 
         sheet.append([])
         sheet.append(["※連続勤務・夜勤明けは月内のみで判定（前月末からの継続は含みません）。"
                       "公休基準はconfig.jsonのrequired_holidaysで施設別に設定できます（未設定は判定なし）。"])
+        sheet.cell(sheet.max_row, 1).font = NOTE_FONT
+
+    # --- 外部人材（タイミー・派遣）---
+    if external_rows is not None:
+        sheet = workbook.create_sheet("外部人材")
+        headers = ["施設", "区分", "氏名・枠名", "勤務日数", "総労働時間", "夜勤回数",
+                   "有休", "公休", "前回総労働", "時間増減", "シフト変更", "外部依存度", "備考"]
+        rows, fills = [], []
+        for row in external_rows:
+            rows.append([
+                row.facility, row.category, row.name,
+                _fmt(row.work_days), _fmt(row.total_hours), _fmt(row.night_count),
+                _fmt(row.paid_count), _fmt(row.vacation_count),
+                _fmt(row.previous_hours), _fmt(row.hour_delta), _fmt(row.change_count),
+                row.dependency, row.note,
+            ])
+            if row.is_total:
+                fills.append(GRAND_TOTAL_FILL if row.facility == "全施設" else TOTAL_FILL)
+            else:
+                fills.append(None)
+        _write_table(sheet, headers, rows, fills,
+                     widths=[22, 9, 26, 9, 10, 9, 6, 6, 10, 9, 9, 10, 18])
+        if not rows:
+            sheet.append(["外部人材（氏名にタイミー・派遣を含む職員）はいませんでした"])
+        sheet.append([])
+        sheet.append(["※氏名にキーワード（タイミー・派遣）を含む職員行を記載名ごとに集計。"
+                      "括弧書きの個人名もタイミーに含めています。"
+                      "外部依存度＝区分計の総労働時間÷施設全体の総労働時間。"])
         sheet.cell(sheet.max_row, 1).font = NOTE_FONT
 
     # --- 労務推移 ---

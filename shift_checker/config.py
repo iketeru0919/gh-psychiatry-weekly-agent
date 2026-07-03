@@ -91,6 +91,8 @@ class Settings:
     required_holidays: dict = field(default_factory=dict)
     # 氏名にこの語を含む行はスポット枠とみなし個人単位の労務判定から除外
     labor_exclude_keywords: list[str] = field(default_factory=lambda: parse_words("タイミー"))
+    # 外部人材の判定キーワード（氏名に含まれていたらその区分。先に書いた方が優先）
+    external_keywords: list[str] = field(default_factory=lambda: parse_words("タイミー,派遣"))
 
     @property
     def leave_words(self) -> list[str]:
@@ -110,7 +112,7 @@ def load_settings() -> Settings:
         raw = json.load(handle)
     for key, value in raw.items():
         if key in ("paid_words", "vacation_words", "night_keywords", "ake_keywords",
-                   "labor_exclude_keywords") and isinstance(value, str):
+                   "labor_exclude_keywords", "external_keywords") and isinstance(value, str):
             value = parse_words(value)
         if hasattr(settings, key):
             setattr(settings, key, value)

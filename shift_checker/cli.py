@@ -16,6 +16,7 @@ from pathlib import Path
 
 from .checker import build_comparison, build_current_result, build_error_result
 from .config import load_settings, resolve_output_dir, resolve_snapshot_dir
+from .external import build_external_rows
 from .history import build_trend, update_history
 from .labor import analyze_labor
 from .parser import ShiftFileError, parse_shift_book
@@ -144,10 +145,14 @@ def main(argv=None) -> int:
         records = update_history(snapshot_dir, month_key(year, month), labor_rows)
         trend = build_trend(records)
 
+    external_rows = build_external_rows(results, settings)
+    external_count = sum(1 for r in external_rows if not r.is_total)
+    print(f"外部人材: {external_count}枠（タイミー・派遣）")
+
     output_dir = resolve_output_dir(settings)
     report_path = write_report(results, settings, output_dir, year, month,
                                compared=bool(previous_run), previous_stamp=previous_stamp,
-                               labor_rows=labor_rows, trend=trend)
+                               labor_rows=labor_rows, trend=trend, external_rows=external_rows)
     labor_alerts = sum(1 for r in labor_rows if r.severity != "ok")
     print(f"労務チェック: 対象{len(labor_rows)}名、指摘{labor_alerts}名")
 

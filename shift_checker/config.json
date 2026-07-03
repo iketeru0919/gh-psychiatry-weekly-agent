@@ -25,5 +25,6 @@
   "required_holidays": {
     "default": null
   },
-  "labor_exclude_keywords": "タイミー"
+  "labor_exclude_keywords": "タイミー",
+  "external_keywords": "タイミー,派遣"
 }
