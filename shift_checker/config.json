@@ -1,0 +1,19 @@
+{
+  "base_dir": "C:\\Users\\k-takayama\\Bihonest Corp. Dropbox\\17.ラシエル\\00.ラシエル_General\\1 各施設シフト管理",
+  "output_dir": "desktop",
+  "snapshot_dir": "",
+  "snapshot_keep": 10,
+  "sheet_keyword": "管理用",
+  "start_row": 10,
+  "end_row": 58,
+  "name_col": "M",
+  "shift_start": "AI",
+  "shift_end": "CQ",
+  "total_col": "CU",
+  "fulltime_col": "AE",
+  "prescribed_cell": "DL3",
+  "paid_words": "有,有休,有給",
+  "vacation_words": "休,休み,公,公休,希休,希,希望休",
+  "hour_threshold": 8,
+  "incomplete_threshold": 80
+}
