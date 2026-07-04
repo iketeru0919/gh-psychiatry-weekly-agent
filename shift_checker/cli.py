@@ -17,7 +17,8 @@ from pathlib import Path
 from .checker import build_comparison, build_current_result, build_error_result
 from .config import load_settings, resolve_output_dir, resolve_snapshot_dir
 from .external import build_external_rows
-from .history import build_trend, update_history
+from .history import (build_external_trend, build_trend, count_overtime_over_limit,
+                      update_external_history, update_history)
 from .labor import analyze_labor
 from .parser import ShiftFileError, parse_shift_book
 from .report import write_report
@@ -130,7 +131,7 @@ def main(argv=None) -> int:
             )
         results.append(result)
         snapshot_files[entry.facility] = entry.chosen
-        labor_rows.extend(analyze_labor(current, entry.facility, settings, month))
+        labor_rows.extend(analyze_labor(current, entry.facility, settings, year, month))
         alerts = len(result.alerts)
         changes = len(result.change_rows)
         detail = f"職員{len(current.staff)}名 要確認{alerts}名"
@@ -140,19 +141,32 @@ def main(argv=None) -> int:
 
     labor_rows.sort(key=lambda r: ({"critical": 0, "warning": 1, "ok": 2}[r.severity],
                                    r.facility, r.name))
-    trend = None
-    if not args.no_snapshot:
-        records = update_history(snapshot_dir, month_key(year, month), labor_rows)
-        trend = build_trend(records)
-
     external_rows = build_external_rows(results, settings)
     external_count = sum(1 for r in external_rows if not r.is_total)
     print(f"外部人材: {external_count}枠（タイミー・派遣）")
 
+    trend = None
+    external_trend = None
+    if not args.no_snapshot:
+        records = update_history(snapshot_dir, month_key(year, month), labor_rows)
+        trend = build_trend(records)
+        # 36協定: 所定超過45h以上が今年何回目かを履歴から付与
+        overtime_counts = count_overtime_over_limit(records, year, settings.overtime_warning)
+        for row in labor_rows:
+            count = overtime_counts.get((row.facility, row.name), 0)
+            if count:
+                row.overtime_year_count = f"{count}回"
+                if count > settings.overtime_year_limit:
+                    row.overtime_year_count += f"（上限{settings.overtime_year_limit}回超）"
+        external_records = update_external_history(
+            snapshot_dir, month_key(year, month), external_rows)
+        external_trend = build_external_trend(external_records)
+
     output_dir = resolve_output_dir(settings)
     report_path = write_report(results, settings, output_dir, year, month,
                                compared=bool(previous_run), previous_stamp=previous_stamp,
-                               labor_rows=labor_rows, trend=trend, external_rows=external_rows)
+                               labor_rows=labor_rows, trend=trend,
+                               external_rows=external_rows, external_trend=external_trend)
     labor_alerts = sum(1 for r in labor_rows if r.severity != "ok")
     print(f"労務チェック: 対象{len(labor_rows)}名、指摘{labor_alerts}名")
 

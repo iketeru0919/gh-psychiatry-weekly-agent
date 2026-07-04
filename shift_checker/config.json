@@ -26,5 +26,11 @@
     "default": null
   },
   "labor_exclude_keywords": "タイミー",
-  "external_keywords": "タイミー,派遣"
+  "external_keywords": "タイミー,派遣",
+  "insurance_weekly_line": 20,
+  "overtime_year_limit": 6,
+  "external_rates": {
+    "タイミー": null,
+    "派遣": null
+  }
 }

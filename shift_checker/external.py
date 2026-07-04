@@ -33,6 +33,9 @@ class ExternalRow:
     change_count: int | None
     dependency: str      # 外部依存度（計の行のみ）
     note: str
+    cost: float | None = None       # 概算費用（単価設定時のみ）
+    dep_pct: float | None = None    # 依存度の数値（ダッシュボード用）
+    facility_hours: float | None = None  # 施設全体の総労働時間（計の行のみ）
 
 
 def external_category(name: str, settings: Settings) -> str | None:
@@ -135,13 +138,15 @@ def build_external_rows(results, settings: Settings) -> list[ExternalRow]:
                 note = "新規"
             elif not cur_rows:
                 note = "今回なし（前回のみ）"
+            rate = settings.external_rates.get(category)
+            cost = round2(total_hours * rate) if rate and total_hours else None
             all_rows.append(ExternalRow(
                 facility=result.facility, category=category, name=name, is_total=False,
                 work_days=work_days, total_hours=total_hours, night_count=night,
                 paid_count=paid, vacation_count=vacation,
                 previous_hours=previous_hours, hour_delta=delta,
                 change_count=changes_by_name.get(name) if result.previous else None,
-                dependency="", note=note,
+                dependency="", note=note, cost=cost,
             ))
             bucket = facility_totals.setdefault(category, dict(
                 count=0, days=0, hours=0.0, night=0, prev_count=0, prev_hours=0.0, changes=0))
@@ -157,10 +162,10 @@ def build_external_rows(results, settings: Settings) -> list[ExternalRow]:
 
         for category in sorted(facility_totals):
             bucket = facility_totals[category]
-            dependency = (
-                f"{round2(bucket['hours'] / facility_hours * 100):g}%"
-                if facility_hours else ""
+            dep_pct = (
+                round2(bucket["hours"] / facility_hours * 100) if facility_hours else None
             )
+            rate = settings.external_rates.get(category)
             all_rows.append(ExternalRow(
                 facility=result.facility, category=category,
                 name=f"{category}計（{bucket['count']}枠）", is_total=True,
@@ -170,7 +175,11 @@ def build_external_rows(results, settings: Settings) -> list[ExternalRow]:
                 hour_delta=(round2(bucket["hours"] - bucket["prev_hours"])
                             if result.previous else None),
                 change_count=bucket["changes"] if result.previous else None,
-                dependency=dependency, note="",
+                dependency=f"{dep_pct:g}%" if dep_pct is not None else "",
+                note="",
+                cost=round2(bucket["hours"] * rate) if rate else None,
+                dep_pct=dep_pct,
+                facility_hours=facility_hours,
             ))
             g = grand.setdefault(category, dict(count=0, days=0, hours=0.0, night=0,
                                                 prev_hours=0.0, changes=0, compared=False))
@@ -184,6 +193,7 @@ def build_external_rows(results, settings: Settings) -> list[ExternalRow]:
 
     for category in sorted(grand):
         g = grand[category]
+        rate = settings.external_rates.get(category)
         all_rows.append(ExternalRow(
             facility="全施設", category=category,
             name=f"{category}合計（{g['count']}枠）", is_total=True,
@@ -193,5 +203,6 @@ def build_external_rows(results, settings: Settings) -> list[ExternalRow]:
             hour_delta=round2(g["hours"] - g["prev_hours"]) if g["compared"] else None,
             change_count=g["changes"] if g["compared"] else None,
             dependency="", note="",
+            cost=round2(g["hours"] * rate) if rate else None,
         ))
     return all_rows

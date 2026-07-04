@@ -50,6 +50,18 @@ class LaborRow:
     required_holidays: object = None  # 基準未設定ならNone
     double_bookings: list[str] = field(default_factory=list)
     reasons: list[str] = field(default_factory=list)
+    # 指摘カテゴリ（該当時のみ値が入る。氏名の隣に並べる列）
+    category_summary: str = ""
+    cat_consecutive: str = ""
+    cat_ake: str = ""
+    cat_night: str = ""
+    cat_holiday: str = ""
+    cat_double: str = ""
+    cat_overtime: str = ""
+    cat_insurance: str = ""
+    weekly_avg_hours: float | None = None
+    insurance_mark: str = ""       # 氏名に「社保」表記があれば ○
+    overtime_year_count: str = ""  # 45h超が今年何回目か（履歴から実行時に付与）
 
     @property
     def judgment(self) -> str:
@@ -86,7 +98,7 @@ def required_holidays_for(facility: str, month: int, settings: Settings):
 
 
 def analyze_labor(book: ShiftBook, facility: str, settings: Settings,
-                  month: int) -> list[LaborRow]:
+                  year: int, month: int) -> list[LaborRow]:
     # --- 人物単位に統合（兼務の複数行を束ねる）---
     persons: dict[str, list] = {}
     for staff in book.staff.values():
@@ -200,9 +212,26 @@ def analyze_labor(book: ShiftBook, facility: str, settings: Settings,
         if fulltime and total_hours is not None and prescribed is not None:
             overtime = round2(total_hours - prescribed)
 
+        # 社保加入ライン（非常勤のみ）: 月間時間を週平均に換算して目安ラインと比較
+        import calendar as _calendar
+        days_in_month = _calendar.monthrange(year, month)[1]
+        weekly_avg = None
+        if total_hours is not None:
+            weekly_avg = round2(total_hours / (days_in_month / 7))
+        insurance_mark = "○" if any("社保" in normalize(s.name) for s in person_rows) else ""
+        insurance_alert = (
+            not fulltime
+            and not insurance_mark
+            and weekly_avg is not None
+            and weekly_avg >= settings.insurance_weekly_line
+        )
+
         # --- 判定 ---
         reasons = []
         severity = "ok"
+        categories = []
+        cat_consecutive = cat_ake = cat_night = cat_holiday = ""
+        cat_double = cat_overtime = cat_insurance = ""
 
         def raise_to(level: str):
             nonlocal severity
@@ -211,25 +240,46 @@ def analyze_labor(book: ShiftBook, facility: str, settings: Settings,
 
         if max_consecutive > settings.max_consecutive_days:
             raise_to("critical")
+            categories.append("連続勤務")
+            cat_consecutive = f"{max_consecutive}日"
             reasons.append(f"連続勤務{max_consecutive}日 {consecutive_detail}")
         if ake_violations:
             raise_to("critical")
+            categories.append("夜勤明け")
+            cat_ake = f"{len(ake_violations)}件"
             reasons.append(f"夜勤明け即日勤 {len(ake_violations)}件（{'、'.join(ake_violations[:3])}）")
         if overtime is not None and overtime >= settings.overtime_warning:
             raise_to("critical")
+            categories.append("時間外")
+            cat_overtime = f"{format_signed(overtime)}h"
             reasons.append(f"所定超過 {format_signed(overtime)}時間（45時間基準超）")
         elif overtime is not None and overtime >= settings.overtime_caution:
             raise_to("warning")
+            categories.append("時間外")
+            cat_overtime = f"{format_signed(overtime)}h"
             reasons.append(f"所定超過 {format_signed(overtime)}時間（30時間注意）")
         if night_count > settings.night_shift_limit:
             raise_to("warning")
+            categories.append("夜勤超過")
+            cat_night = f"{night_count}回"
             reasons.append(f"夜勤{night_count}回（上限目安{settings.night_shift_limit}回超）")
         if required is not None and holiday_count < required:
             raise_to("warning")
+            categories.append("公休不足")
+            cat_holiday = f"{holiday_count}/{required}日"
             reasons.append(f"公休{holiday_count}日（基準{required}日に不足）")
         if double_bookings:
             raise_to("warning")
+            categories.append("二重割当")
+            cat_double = f"{len(double_bookings)}件"
             reasons.append(f"同日に異なる勤務 {len(double_bookings)}件（{'、'.join(double_bookings[:3])}）")
+        if insurance_alert:
+            raise_to("warning")
+            categories.append("社保ライン")
+            cat_insurance = f"週{weekly_avg:g}h"
+            reasons.append(
+                f"社保加入ライン超の可能性（週平均{weekly_avg:g}h・氏名に社保表記なし）"
+            )
 
         rows.append(LaborRow(
             facility=facility,
@@ -251,6 +301,16 @@ def analyze_labor(book: ShiftBook, facility: str, settings: Settings,
             required_holidays=required,
             double_bookings=double_bookings,
             reasons=reasons,
+            category_summary="・".join(categories),
+            cat_consecutive=cat_consecutive,
+            cat_ake=cat_ake,
+            cat_night=cat_night,
+            cat_holiday=cat_holiday,
+            cat_double=cat_double,
+            cat_overtime=cat_overtime,
+            cat_insurance=cat_insurance,
+            weekly_avg_hours=weekly_avg,
+            insurance_mark=insurance_mark,
         ))
 
     rows.sort(key=lambda r: (SEVERITY_ORDER[r.severity], r.name))

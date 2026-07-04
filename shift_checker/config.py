@@ -93,6 +93,12 @@ class Settings:
     labor_exclude_keywords: list[str] = field(default_factory=lambda: parse_words("タイミー"))
     # 外部人材の判定キーワード（氏名に含まれていたらその区分。先に書いた方が優先）
     external_keywords: list[str] = field(default_factory=lambda: parse_words("タイミー,派遣"))
+    # 社保加入ラインの目安（週平均時間。非常勤で社保表記が無い人がこれを超えたら要確認）
+    insurance_weekly_line: float = 20.0
+    # 45時間超の年間上限（36協定の特別条項回数）
+    overtime_year_limit: int = 6
+    # 外部人材の時間単価（円）。設定すると概算費用を出力。例: {"タイミー": 1400, "派遣": 2200}
+    external_rates: dict = field(default_factory=dict)
 
     @property
     def leave_words(self) -> list[str]:
