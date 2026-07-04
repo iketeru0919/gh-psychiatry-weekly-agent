@@ -29,6 +29,8 @@ class UserRow:
     rate: object               # 利用率・稼働率（%値）
     is_total: bool = False
     note: str = ""
+    prev_days: object = None   # 前回スナップショット時点の延べ日数
+    days_delta: object = None  # 延べ日数の増減（今回−前回）
 
 
 def _load_grid(path, max_row=60, max_col=10):
@@ -163,3 +165,43 @@ def parse_users(path, facility: str) -> list[UserRow]:
     if residents or short_stays:
         rows.append(_summary_row(facility, "施設合計", residents + short_stays, month_days))
     return rows
+
+
+def merge_previous(current_rows: list[UserRow],
+                   previous_rows: list[UserRow]) -> list[UserRow]:
+    """前回スナップショットの利用者情報を突合し、前回延べ日数・増減を付与する。
+
+    前回いて今回いない利用者は「今回なし」の行として該当区分の計の直前に挿入する。
+    """
+    prev_detail = {(r.kind, r.name): r for r in previous_rows if not r.is_total}
+    prev_totals = {r.kind: r for r in previous_rows if r.is_total}
+
+    for row in current_rows:
+        prev = prev_totals.get(row.kind) if row.is_total \
+            else prev_detail.pop((row.kind, row.name), None)
+        if prev is not None:
+            row.prev_days = prev.days
+            if _numeric(row.days) is not None and _numeric(prev.days) is not None:
+                row.days_delta = round2(row.days - prev.days)
+        elif not row.is_total:
+            row.note = (row.note + " / " if row.note else "") + "新規（前回なし）"
+
+    if not prev_detail:
+        return current_rows
+
+    merged: list[UserRow] = []
+    for row in current_rows:
+        if row.is_total and row.kind in ("入居計", "ショートステイ計"):
+            base_kind = row.kind[:-1]
+            for (kind, name), prev in list(prev_detail.items()):
+                if kind == base_kind:
+                    merged.append(UserRow(
+                        facility=prev.facility, kind=kind, name=name,
+                        grade=prev.grade, severe=prev.severe, days=None,
+                        month_days=prev.month_days, rate=None,
+                        prev_days=prev.days,
+                        note="今回なし（退去・終了の可能性）",
+                    ))
+                    del prev_detail[(kind, name)]
+        merged.append(row)
+    return merged

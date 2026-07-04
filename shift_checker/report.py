@@ -62,7 +62,7 @@ def _num(value):
 def write_report(results: list[FacilityResult], settings: Settings, output_dir: Path,
                  year: int, month: int, compared: bool, previous_stamp: str,
                  labor_rows=None, trend=None, external_rows=None,
-                 external_trend=None, user_rows=None) -> Path:
+                 external_trend=None, user_rows=None, users_trend=None) -> Path:
     workbook = Workbook()
     month_tag = f"{year % 100:02d}{month:02d}"
     now = datetime.now()
@@ -333,12 +333,13 @@ def write_report(results: list[FacilityResult], settings: Settings, output_dir: 
     if user_rows is not None:
         sheet = workbook.create_sheet("利用者一覧")
         headers = ["施設", "種別", "利用者名", "障害区分", "重度", "延べ利用日数",
-                   "月の日数", "利用率(%)", "備考"]
+                   "前回延べ", "増減", "月の日数", "利用率(%)", "備考"]
         rows, fills = [], []
         for row in user_rows:
             rows.append([
                 row.facility, row.kind, row.name, _fmt(row.grade), row.severe,
-                _fmt(row.days), _fmt(row.month_days), _fmt(row.rate), row.note,
+                _fmt(row.days), _fmt(row.prev_days), _fmt(row.days_delta),
+                _fmt(row.month_days), _fmt(row.rate), row.note,
             ])
             if row.kind == "施設合計":
                 fills.append(GRAND_TOTAL_FILL)
@@ -349,10 +350,29 @@ def write_report(results: list[FacilityResult], settings: Settings, output_dir: 
             else:
                 fills.append(None)
         _write_table(sheet, headers, rows, fills,
-                     widths=[22, 13, 18, 9, 10, 12, 9, 10, 34])
+                     widths=[22, 13, 18, 9, 10, 12, 9, 8, 9, 10, 34])
+        for row_number in range(2, len(rows) + 2):
+            cell = sheet.cell(row_number, 8)  # 増減
+            number = _num(cell.value)
+            if number is not None and number < 0:
+                cell.font = RED_FONT  # 月内で延べ日数が減るのは入力修正の可能性
+        if users_trend and users_trend[1]:
+            sheet.append([])
+            sheet.append(["■ 延べ日数・稼働率の推移（今月の実行日別）"])
+            sheet.cell(sheet.max_row, 1).font = Font(bold=True, size=11)
+            trend_headers, trend_rows = users_trend
+            sheet.append(trend_headers)
+            for cell in sheet[sheet.max_row]:
+                if cell.value:
+                    cell.fill = HEADER_FILL
+                    cell.font = HEADER_FONT
+            for trend_row in trend_rows:
+                sheet.append(trend_row)
         sheet.append([])
         sheet.append(["※計の行: 障害区分=平均、延べ利用日数=合計、利用率=延べ合計÷（月の日数×人数）。"
-                      "入居者で延べ日数が月の日数より少ない行は黄色（入退去・入院等の確認用）。"])
+                      "入居者で延べ日数が月の日数より少ない行は黄色（入退去・入院等の確認用）。"
+                      "前回延べ・増減は前回スナップショット時点との比較。増減マイナスは赤字。"
+                      "推移表は実行のたびに蓄積され、週1実行なら月内の延べ日数の伸びが週次で並びます。"])
         sheet.cell(sheet.max_row, 1).font = NOTE_FONT
 
     # --- 労務推移 ---

@@ -17,14 +17,15 @@ from pathlib import Path
 from .checker import build_comparison, build_current_result, build_error_result
 from .config import load_settings, resolve_output_dir, resolve_snapshot_dir
 from .external import build_external_rows
-from .history import (build_external_trend, build_trend, count_overtime_over_limit,
-                      update_external_history, update_history)
+from .history import (build_external_trend, build_trend, build_users_trend,
+                      count_overtime_over_limit, update_external_history,
+                      update_history, update_users_history)
 from .labor import analyze_labor
 from .parser import ShiftFileError, parse_shift_book
 from .report import write_report
 from .scanner import scan_shift_files
 from .snapshot import find_snapshot_file, latest_run_dir, month_key, save_snapshot
-from .users import parse_users
+from .users import merge_previous, parse_users
 
 
 def parse_month(text: str) -> tuple[int, int] | None:
@@ -135,7 +136,16 @@ def main(argv=None) -> int:
         snapshot_files[entry.facility] = entry.chosen
         labor_rows.extend(analyze_labor(current, entry.facility, settings, year, month))
         try:
-            user_rows.extend(parse_users(entry.chosen, entry.facility))
+            facility_users = parse_users(entry.chosen, entry.facility)
+            if previous_run:
+                snapshot_file = find_snapshot_file(previous_run, entry.facility)
+                if snapshot_file:
+                    try:
+                        facility_users = merge_previous(
+                            facility_users, parse_users(snapshot_file, entry.facility))
+                    except ShiftFileError:
+                        pass
+            user_rows.extend(facility_users)
         except ShiftFileError as error:
             from .users import UserRow
             user_rows.append(UserRow(
@@ -156,6 +166,7 @@ def main(argv=None) -> int:
 
     trend = None
     external_trend = None
+    users_trend = None
     if not args.no_snapshot:
         records = update_history(snapshot_dir, month_key(year, month), labor_rows)
         trend = build_trend(records)
@@ -170,13 +181,17 @@ def main(argv=None) -> int:
         external_records = update_external_history(
             snapshot_dir, month_key(year, month), external_rows)
         external_trend = build_external_trend(external_records)
+        from datetime import date as _date
+        users_records = update_users_history(
+            snapshot_dir, month_key(year, month), _date.today().isoformat(), user_rows)
+        users_trend = build_users_trend(users_records, month_key(year, month))
 
     output_dir = resolve_output_dir(settings)
     report_path = write_report(results, settings, output_dir, year, month,
                                compared=bool(previous_run), previous_stamp=previous_stamp,
                                labor_rows=labor_rows, trend=trend,
                                external_rows=external_rows, external_trend=external_trend,
-                               user_rows=user_rows)
+                               user_rows=user_rows, users_trend=users_trend)
     resident_total = sum(
         int(r.name.rstrip("名")) for r in user_rows if r.kind == "入居計")
     print(f"利用者一覧: 入居者{resident_total}名を抽出")

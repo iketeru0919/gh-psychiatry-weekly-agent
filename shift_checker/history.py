@@ -150,6 +150,81 @@ def build_external_trend(records: list[dict], max_months: int = 6):
     return headers, rows
 
 
+USERS_HISTORY_FILENAME = "利用者推移データ.csv"
+USERS_FIELDS = ["年月", "実行日", "施設", "種別", "人数", "延べ日数", "稼働率"]
+
+
+def load_users_history(snapshot_dir: Path) -> list[dict]:
+    path = snapshot_dir / USERS_HISTORY_FILENAME
+    if not path.exists():
+        return []
+    try:
+        with open(path, encoding="utf-8-sig", newline="") as handle:
+            return [row for row in csv.DictReader(handle)]
+    except (OSError, csv.Error):
+        return []
+
+
+def update_users_history(snapshot_dir: Path, month_key: str, run_date: str,
+                         user_rows) -> list[dict]:
+    """利用者の計（入居計/ショートステイ計/施設合計）を実行日付きで蓄積する。
+
+    月次ではなく実行単位で残すため、週1実行すれば月内の延べ日数の
+    伸びがそのまま推移として見える。同日再実行は上書き。
+    """
+    totals = [r for r in user_rows if r.is_total]
+    records = load_users_history(snapshot_dir)
+    updated = {(r.facility, r.kind) for r in totals}
+    records = [
+        r for r in records
+        if not (r.get("年月") == month_key and r.get("実行日") == run_date
+                and (r.get("施設", ""), r.get("種別", "")) in updated)
+    ]
+    for row in totals:
+        records.append({
+            "年月": month_key,
+            "実行日": run_date,
+            "施設": row.facility,
+            "種別": row.kind,
+            "人数": row.name.rstrip("名"),
+            "延べ日数": "" if row.days is None else row.days,
+            "稼働率": "" if row.rate is None else row.rate,
+        })
+    records.sort(key=lambda r: (str(r.get("年月")), str(r.get("実行日")),
+                                str(r.get("施設")), str(r.get("種別"))))
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    with open(snapshot_dir / USERS_HISTORY_FILENAME, "w",
+              encoding="utf-8-sig", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=USERS_FIELDS)
+        writer.writeheader()
+        writer.writerows(records)
+    return records
+
+
+def build_users_trend(records: list[dict], month_key: str, max_runs: int = 8):
+    """対象月の利用者推移表（施設 | 種別 | 指標 | 実行日1..N）を作る。"""
+    month_records = [r for r in records if r.get("年月") == month_key]
+    dates = sorted({r["実行日"] for r in month_records if r.get("実行日")})[-max_runs:]
+    if not dates:
+        return [], []
+    by_key: dict[tuple[str, str], dict[str, dict]] = {}
+    for record in month_records:
+        if record.get("実行日") not in dates:
+            continue
+        key = (record.get("施設", ""), record.get("種別", ""))
+        by_key.setdefault(key, {})[record["実行日"]] = record
+    headers = ["施設", "種別", "指標"] + dates
+    rows = []
+    kind_order = {"入居計": 0, "ショートステイ計": 1, "施設合計": 2}
+    for (facility, kind), daily in sorted(
+            by_key.items(), key=lambda kv: (kv[0][0], kind_order.get(kv[0][1], 9))):
+        for metric in ("延べ日数", "稼働率"):
+            values = [daily.get(d, {}).get(metric, "") for d in dates]
+            if any(v not in ("", None) for v in values):
+                rows.append([facility, kind, metric] + values)
+    return headers, rows
+
+
 def build_trend(records: list[dict], metrics=("夜勤回数", "所定超過"),
                 max_months: int = 6) -> tuple[list[str], list[list]]:
     """推移表（施設 | 職員 | 指標 | 月1..月N）のヘッダーと行を作る。"""
