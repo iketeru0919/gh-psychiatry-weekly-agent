@@ -24,6 +24,7 @@ from .parser import ShiftFileError, parse_shift_book
 from .report import write_report
 from .scanner import scan_shift_files
 from .snapshot import find_snapshot_file, latest_run_dir, month_key, save_snapshot
+from .users import parse_users
 
 
 def parse_month(text: str) -> tuple[int, int] | None:
@@ -99,6 +100,7 @@ def main(argv=None) -> int:
     results = []
     snapshot_files = {}
     labor_rows = []
+    user_rows = []
     for index, entry in enumerate(facilities, start=1):
         label = f"[{index}/{len(facilities)}] {entry.facility}"
         try:
@@ -132,6 +134,13 @@ def main(argv=None) -> int:
         results.append(result)
         snapshot_files[entry.facility] = entry.chosen
         labor_rows.extend(analyze_labor(current, entry.facility, settings, year, month))
+        try:
+            user_rows.extend(parse_users(entry.chosen, entry.facility))
+        except ShiftFileError as error:
+            from .users import UserRow
+            user_rows.append(UserRow(
+                facility=entry.facility, kind="取得不可", name="", grade="",
+                severe="", days="", month_days="", rate="", note=str(error)))
         alerts = len(result.alerts)
         changes = len(result.change_rows)
         detail = f"職員{len(current.staff)}名 要確認{alerts}名"
@@ -166,7 +175,11 @@ def main(argv=None) -> int:
     report_path = write_report(results, settings, output_dir, year, month,
                                compared=bool(previous_run), previous_stamp=previous_stamp,
                                labor_rows=labor_rows, trend=trend,
-                               external_rows=external_rows, external_trend=external_trend)
+                               external_rows=external_rows, external_trend=external_trend,
+                               user_rows=user_rows)
+    resident_total = sum(
+        int(r.name.rstrip("名")) for r in user_rows if r.kind == "入居計")
+    print(f"利用者一覧: 入居者{resident_total}名を抽出")
     labor_alerts = sum(1 for r in labor_rows if r.severity != "ok")
     print(f"労務チェック: 対象{len(labor_rows)}名、指摘{labor_alerts}名")
 

@@ -62,7 +62,7 @@ def _num(value):
 def write_report(results: list[FacilityResult], settings: Settings, output_dir: Path,
                  year: int, month: int, compared: bool, previous_stamp: str,
                  labor_rows=None, trend=None, external_rows=None,
-                 external_trend=None) -> Path:
+                 external_trend=None, user_rows=None) -> Path:
     workbook = Workbook()
     month_tag = f"{year % 100:02d}{month:02d}"
     now = datetime.now()
@@ -329,6 +329,32 @@ def write_report(results: list[FacilityResult], settings: Settings, output_dir: 
                       "外部依存度＝区分計の総労働時間÷施設全体の総労働時間。" + rates_note])
         sheet.cell(sheet.max_row, 1).font = NOTE_FONT
 
+    # --- 利用者一覧（人員配置【入力用】より）---
+    if user_rows is not None:
+        sheet = workbook.create_sheet("利用者一覧")
+        headers = ["施設", "種別", "利用者名", "障害区分", "重度", "延べ利用日数",
+                   "月の日数", "利用率(%)", "備考"]
+        rows, fills = [], []
+        for row in user_rows:
+            rows.append([
+                row.facility, row.kind, row.name, _fmt(row.grade), row.severe,
+                _fmt(row.days), _fmt(row.month_days), _fmt(row.rate), row.note,
+            ])
+            if row.kind == "施設合計":
+                fills.append(GRAND_TOTAL_FILL)
+            elif row.is_total:
+                fills.append(TOTAL_FILL)
+            elif row.note:
+                fills.append(WARNING_FILL)
+            else:
+                fills.append(None)
+        _write_table(sheet, headers, rows, fills,
+                     widths=[22, 13, 18, 9, 10, 12, 9, 10, 34])
+        sheet.append([])
+        sheet.append(["※計の行: 障害区分=平均、延べ利用日数=合計、利用率=延べ合計÷（月の日数×人数）。"
+                      "入居者で延べ日数が月の日数より少ない行は黄色（入退去・入院等の確認用）。"])
+        sheet.cell(sheet.max_row, 1).font = NOTE_FONT
+
     # --- 労務推移 ---
     if trend and trend[1]:
         sheet = workbook.create_sheet("労務推移")
@@ -362,9 +388,15 @@ def write_report(results: list[FacilityResult], settings: Settings, output_dir: 
 
     # --- ダッシュボード（エリア全体を1枚で。先頭シートに配置）---
     sheet = workbook.create_sheet("ダッシュボード", 0)
-    headers = ["施設", "状態", "職員数", "体制加算判定", "配置過不足(BU75)",
+    headers = ["施設", "状態", "職員数", "入居者数", "平均区分", "稼働率",
+               "体制加算判定", "配置過不足(BU75)",
                "支援員過不足", "世話人過不足", "労務指摘(重要)", "労務指摘(要確認)",
                "外部依存度", "外部概算費用(円)", "入力途中(人)", "シフト変更(件)"]
+    users_by_facility: dict[str, dict] = {}
+    for row in (user_rows or []):
+        if row.kind == "入居計":
+            users_by_facility[row.facility] = {
+                "count": row.name.rstrip("名"), "grade": row.grade, "rate": row.rate}
     labor_by_facility: dict[str, list] = {}
     for row in (labor_rows or []):
         labor_by_facility.setdefault(row.facility, []).append(row)
@@ -409,8 +441,12 @@ def write_report(results: list[FacilityResult], settings: Settings, output_dir: 
         if bucket and bucket["has_cost"]:
             cost_value = round(bucket["cost"])
         judgment = str(summary.get("EV78", ""))
+        users = users_by_facility.get(result.facility, {})
         sheet.append([
-            result.facility, result.status, len(result.current.staff), judgment,
+            result.facility, result.status, len(result.current.staff),
+            users.get("count", ""), users.get("grade", ""),
+            f"{users['rate']:g}%" if users.get("rate") is not None else "",
+            judgment,
             _fmt(summary.get("BU75", "")), support_diff, care_diff,
             labor_critical or "", labor_warning or "",
             dependency, cost_value, incomplete or "", len(result.change_rows) or "",
@@ -446,7 +482,8 @@ def write_report(results: list[FacilityResult], settings: Settings, output_dir: 
         if isinstance(cells["外部概算費用(円)"].value, (int, float)):
             cells["外部概算費用(円)"].number_format = "#,##0"
     sheet.freeze_panes = "B2"
-    for index, width in enumerate([22, 10, 7, 12, 12, 11, 11, 11, 12, 10, 13, 10, 11], start=1):
+    for index, width in enumerate(
+            [22, 10, 7, 8, 8, 8, 12, 12, 11, 11, 11, 12, 10, 13, 10, 11], start=1):
         sheet.column_dimensions[get_column_letter(index)].width = width
     sheet.append([])
     for line in (
