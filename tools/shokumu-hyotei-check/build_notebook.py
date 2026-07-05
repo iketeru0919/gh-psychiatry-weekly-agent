@@ -71,18 +71,29 @@ print(f"読み取った職員データ: {len(records)} 行")
 print(f"検出したエラー: {len(issues)} 件")
 print(f"出力ファイル: {out_path}\\n")
 
+from collections import Counter
+
 if issues:
     print('=' * 70)
-    print('【エラー一覧】')
+    print('【エラー件数(種別ごと)】 ※明細は出力Excelの「エラー詳細」シート参照')
     print('=' * 70)
-    for i in sorted(issues, key=lambda x: (x.facility, str(x.month), str(x.row))):
-        row = f" 行{i.row}" if i.row != '-' else ''
-        print(f"[{i.kind}] {i.facility} / {i.month}{row}: {i.detail}")
+    for kind, n in Counter(i.kind for i in issues).most_common():
+        print(f"  {kind}: {n} 件")
+
+    # 件数の多い「空欄」「値の異常」以外は、重要なので明細も画面に出す
+    important = [i for i in issues if i.kind not in ('空欄', '値の異常')]
+    if important:
+        print()
+        print('=' * 70)
+        print(f'【要確認のエラー明細】({len(important)} 件)')
+        print('=' * 70)
+        for i in sorted(important, key=lambda x: (x.kind, x.facility, str(x.month))):
+            row = f" 行{i.row}" if i.row != '-' else ''
+            print(f"[{i.kind}] {i.facility} / {i.month}{row}: {i.detail}")
 else:
     print('エラーは見つかりませんでした。')
 
 # 施設ごとの件数サマリー
-from collections import Counter
 c = Counter((r.facility, r.month) for r in records)
 print()
 print('=' * 70)
