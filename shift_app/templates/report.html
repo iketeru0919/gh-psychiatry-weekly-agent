@@ -51,7 +51,7 @@
 <script>
 const FID = {{ f.id }};
 const $ = s => document.querySelector(s);
-function esc(s){return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;');}
+function esc(s){return String(s ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
 function table(rows){
   if (!rows || !rows.length) return '<p style="color:#667">なし</p>';
   const cols = Object.keys(rows[0]);

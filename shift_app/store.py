@@ -3,6 +3,8 @@ import json
 import os
 import sqlite3
 import time
+import uuid
+from contextlib import contextmanager
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS facilities (
@@ -100,10 +102,19 @@ class Store:
         with self._db() as db:
             db.executescript(_SCHEMA)
 
+    @contextmanager
     def _db(self):
+        """コミットとクローズを保証する接続(Windowsのファイルロック残り対策)。"""
         db = sqlite3.connect(self.db_path)
         db.row_factory = sqlite3.Row
-        return db
+        try:
+            yield db
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
 
     @property
     def cache_dir(self):
@@ -114,7 +125,7 @@ class Store:
 
     # --- facilities ---
     def add_facility(self, name, year, month, file_bytes):
-        fname = f'{int(time.time())}-{name[:40].replace("/", "_")}.xlsx'
+        fname = f'{uuid.uuid4().hex}.xlsx'   # 衝突・OS禁止文字の問題を避ける
         with open(self.upload_path(fname), 'wb') as fh:
             fh.write(file_bytes)
         with self._db() as db:
@@ -136,8 +147,12 @@ class Store:
     def delete_facility(self, fid):
         f = self.facility(fid)
         with self._db() as db:
-            db.execute('DELETE FROM overrides WHERE facility_id=?', (fid,))
-            db.execute('DELETE FROM facilities WHERE id=?', (fid,))
+            # 監査ログ(edit_log)は意図的に残す。それ以外の関連データは全削除
+            for table in ('overrides', 'csv_files', 'reports', 'summaries',
+                          'snapshots', 'user_facilities', 'facilities'):
+                key = 'id' if table == 'facilities' else 'facility_id'
+                db.execute(f'DELETE FROM {table} WHERE {key}=?', (fid,))
+            db.execute('DELETE FROM settings WHERE key=?', (f'import_warnings_{fid}',))
         if f:
             try:
                 os.remove(self.upload_path(f['filename']))
@@ -156,7 +171,9 @@ class Store:
             db.execute(
                 'INSERT INTO edit_log (ts, username, facility_id, sheet, col, row, value) VALUES (?,?,?,?,?,?,?)',
                 (now, username, fid, sheet, col, row, json.dumps(value, ensure_ascii=False)))
+            # 編集があったら集計キャッシュとチェックレポートの両方を失効させる
             db.execute('DELETE FROM summaries WHERE facility_id=?', (fid,))
+            db.execute('DELETE FROM reports WHERE facility_id=?', (fid,))
 
     def overrides(self, fid):
         with self._db() as db:
@@ -190,6 +207,11 @@ class Store:
                     'SELECT facility_id FROM user_facilities WHERE user_id=?', (r['id'],))]
                 out.append(u)
             return out
+
+    def get_user(self, uid):
+        with self._db() as db:
+            r = db.execute('SELECT * FROM users WHERE id=?', (uid,)).fetchone()
+            return dict(r) if r else None
 
     def user_count(self):
         with self._db() as db:
@@ -232,9 +254,13 @@ class Store:
             r = db.execute('SELECT content FROM csv_files WHERE id=?', (csv_id,)).fetchone()
             return r['content'] if r else None
 
-    def delete_csv(self, csv_id):
+    def delete_csv(self, csv_id, fid=None):
         with self._db() as db:
-            db.execute('DELETE FROM csv_files WHERE id=?', (csv_id,))
+            if fid is None:
+                db.execute('DELETE FROM csv_files WHERE id=?', (csv_id,))
+            else:
+                # 所有施設の一致を必須にする(他施設のCSV削除を防ぐ)
+                db.execute('DELETE FROM csv_files WHERE id=? AND facility_id=?', (csv_id, fid))
 
     # --- settings(氏名エイリアス等) ---
     def get_setting(self, key, default=''):

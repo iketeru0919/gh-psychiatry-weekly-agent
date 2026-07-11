@@ -38,6 +38,9 @@ def create_app(data_root=None):
     manager = ModelManager(store)
     app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024
     app.json.sort_keys = False  # 表の列順を定義順のまま返す
+    # CSRF緩和: クロスサイトからのPOSTにCookieを付けさせない
+    app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+    app.config['SESSION_COOKIE_HTTPONLY'] = True
 
     # セッション鍵はデータディレクトリに永続化
     secret_path = os.path.join(store.root, 'secret_key')
@@ -68,9 +71,24 @@ def create_app(data_root=None):
 
     @app.before_request
     def _guard():
-        if not auth_enabled() or request.endpoint in (None, 'login', 'logout', 'static'):
+        if not auth_enabled():
+            # 認証なし(ローカルお試し)モードはローカルホスト以外を拒否する安全弁
+            if request.remote_addr not in ('127.0.0.1', '::1', None):
+                return ('このアプリは認証なしモードで動作中のため、ローカル以外からは利用できません。'
+                        'SHIFT_APP_ADMIN_PW を設定して再起動してください。'), 403
+            return None
+        if request.endpoint in (None, 'login', 'logout', 'static'):
             return None
         role = current_role()
+        if role is not None:
+            # 削除済みユーザーの古いセッションを無効化し、ロールは常にDBの現在値を使う
+            u = store.get_user(session.get('uid', -1))
+            if u is None:
+                session.clear()
+                role = None
+            else:
+                role = u['role']
+                session['role'] = role
         if role is None:
             if request.path.startswith('/api/'):
                 return jsonify({'ok': False, 'error': 'ログインが必要です'}), 401
@@ -91,7 +109,11 @@ def create_app(data_root=None):
                 session['uid'] = u['id']
                 session['role'] = u['role']
                 session['username'] = u['username']
-                return redirect(request.args.get('next') or
+                nxt = request.args.get('next') or ''
+                # オープンリダイレクト防止: サイト内パスのみ許可
+                if not nxt.startswith('/') or nxt.startswith('//'):
+                    nxt = ''
+                return redirect(nxt or
                                 (url_for('overview') if u['role'] in ('admin', 'area') else url_for('index')))
             error = 'ユーザー名またはパスワードが違います'
         return render_template('login.html', error=error)
@@ -141,15 +163,23 @@ def create_app(data_root=None):
         if request.method == 'POST':
             act = request.form.get('action')
             if act == 'create':
-                try:
-                    fids = [int(x) for x in request.form.getlist('facilities')]
-                    store.create_user(request.form['username'].strip(),
-                                      request.form['password'],
-                                      request.form['role'],
-                                      name=request.form.get('name') or None,
-                                      facility_ids=fids)
-                except Exception as e:
-                    error = f'作成できません: {e}'
+                username = (request.form.get('username') or '').strip()
+                password = request.form.get('password') or ''
+                role = request.form.get('role') or ''
+                if not username:
+                    error = 'ユーザー名を入力してください'
+                elif len(password) < 8:
+                    error = 'パスワードは8文字以上にしてください'
+                elif role not in ROLE_LABELS:
+                    error = '不正なロールです'
+                else:
+                    try:
+                        fids = [int(x) for x in request.form.getlist('facilities')]
+                        store.create_user(username, password, role,
+                                          name=request.form.get('name') or None,
+                                          facility_ids=fids)
+                    except Exception as e:
+                        error = f'作成できません: {e}'
             elif act == 'delete':
                 uid = int(request.form['uid'])
                 if uid != session.get('uid'):
@@ -198,11 +228,19 @@ def create_app(data_root=None):
 
     @app.post('/api/f/<int:fid>/grid')
     def api_grid_set(fid):
+        from .model_manager import GRID_FIRST_ROW, GRID_LAST_ROW
+        model = manager.get(fid)
+        days = model.days_in_month()
         payload = request.get_json(force=True)
         for edit in payload.get('edits', []):
             row = int(edit['row'])
             day = int(edit['day'])
-            value = (edit.get('value') or '').strip() or None
+            value = (str(edit.get('value') or '')).strip() or None
+            # サーバ側でも編集可能範囲を強制(数式・集計セルの破壊防止)
+            if not (GRID_FIRST_ROW <= row <= GRID_LAST_ROW and 1 <= day <= days):
+                return jsonify({'ok': False, 'error': f'編集不可セル(行{row}, 日{day})'}), 400
+            if value is not None and len(value) > 20:
+                return jsonify({'ok': False, 'error': 'シフト記号が長すぎます'}), 400
             manager.set_cell(fid, INPUT_SHEET, 5 + day, row, value,
                              username=session.get('username'))
         return jsonify({'ok': True})
@@ -284,7 +322,7 @@ def create_app(data_root=None):
 
     @app.post('/f/<int:fid>/csv/<int:csv_id>/delete')
     def csv_delete(fid, csv_id):
-        store.delete_csv(csv_id)
+        store.delete_csv(csv_id, fid=fid)  # 所有施設一致を必須にする
         return jsonify({'ok': True})
 
     @app.get('/api/f/<int:fid>/csv')
@@ -366,6 +404,9 @@ def create_app(data_root=None):
     @app.route('/api/aliases', methods=['GET', 'POST'])
     def api_aliases():
         if request.method == 'POST':
+            # 全社共通設定のため、変更は本部管理者とエリアマネージャーに限定
+            if auth_enabled() and current_role() not in ('admin', 'area'):
+                return jsonify({'ok': False, 'error': '同一人物名設定の変更は管理者のみ可能です'}), 403
             store.set_setting('name_aliases', request.get_json(force=True).get('text', ''))
             return jsonify({'ok': True})
         return jsonify({'text': store.get_setting('name_aliases')})

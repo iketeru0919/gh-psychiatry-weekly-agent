@@ -37,7 +37,7 @@
 <div class="wrap"><table id="t"></table></div>
 <script>
 const $ = s => document.querySelector(s);
-function esc(s){return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;');}
+function esc(s){return String(s ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
 let DATA = [];
 
 function isNG(s) {

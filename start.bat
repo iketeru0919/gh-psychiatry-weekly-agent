@@ -1,5 +1,9 @@
 @echo off
 cd /d %~dp0
-pip install -r requirements.txt
+if not exist venv (
+  python -m venv venv
+)
+call venv\Scripts\activate.bat
+python -m pip install -q -r requirements.txt
 python -m shift_app.web
 pause

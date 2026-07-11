@@ -1,4 +1,6 @@
 #!/bin/sh
 cd "$(dirname "$0")"
-pip install -r requirements.txt
-python3 -m shift_app.web
+[ -d venv ] || python3 -m venv venv
+. venv/bin/activate
+python -m pip install -q -r requirements.txt
+python -m shift_app.web
