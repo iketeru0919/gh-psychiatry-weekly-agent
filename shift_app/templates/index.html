@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>シフト管理 - 施設一覧</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { font-family: "Hiragino Sans", "Noto Sans JP", sans-serif; margin: 2rem auto; max-width: 860px; color: #223; }
+  h1 { font-size: 1.4rem; }
+  table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
+  th, td { border: 1px solid #ccd; padding: .5rem .7rem; text-align: left; }
+  th { background: #eef2f8; }
+  .import { margin-top: 2rem; padding: 1rem; border: 2px dashed #aac; border-radius: 8px; background: #f7f9fc; }
+  a.btn, button { display: inline-block; padding: .35rem .9rem; border-radius: 6px; border: 1px solid #467; background: #467; color: #fff; text-decoration: none; cursor: pointer; font-size: .9rem; }
+  form.inline { display: inline; }
+  button.danger { background: #fff; color: #a33; border-color: #a33; }
+  .note { color: #667; font-size: .85rem; margin-top: .5rem; }
+</style>
+</head>
+<body>
+<h1>障害者GH シフト管理 — 施設一覧</h1>
+<table>
+  <tr><th>施設名</th><th>対象年月</th><th></th><th></th></tr>
+  {% for f in facilities %}
+  <tr>
+    <td>{{ f.name }}</td>
+    <td>{{ f.year }}年{{ f.month }}月</td>
+    <td><a class="btn" href="{{ url_for('facility', fid=f.id) }}">開く</a></td>
+    <td>
+      <form class="inline" method="post" action="{{ url_for('delete_facility', fid=f.id) }}"
+            onsubmit="return confirm('{{ f.name }} を削除しますか?')">
+        <button class="danger">削除</button>
+      </form>
+    </td>
+  </tr>
+  {% else %}
+  <tr><td colspan="4">まだ施設がありません。下からシフトExcelを取り込んでください。</td></tr>
+  {% endfor %}
+</table>
+
+<div class="import">
+  <h2 style="font-size:1.1rem; margin-top:0">Excel取り込み</h2>
+  <form method="post" action="{{ url_for('import_xlsx') }}" enctype="multipart/form-data">
+    <input type="file" name="file" accept=".xlsx" required>
+    <button type="submit">取り込む</button>
+  </form>
+  <p class="note">既存様式のシフトブック(.xlsx)をそのままアップロードしてください。
+  マスタ設定・シフト入力・管理用の計算がブック内の数式どおりに再現されます。</p>
+</div>
+</body>
+</html>
