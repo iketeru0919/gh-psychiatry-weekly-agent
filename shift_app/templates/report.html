@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>{{ f.name }} - 取り込みチェック</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { font-family: "Hiragino Sans", "Noto Sans JP", sans-serif; margin: 1.2rem auto; max-width: 1100px; color: #223; }
+  h1 { font-size: 1.2rem; } h2 { font-size: 1rem; margin: 1.2rem 0 .4rem; }
+  a { color: #467; }
+  .kpis { display: flex; flex-wrap: wrap; gap: .7rem; margin: .8rem 0; }
+  .kpi { border: 1px solid #ccd; border-radius: 8px; padding: .5rem .9rem; background: #f7f9fc; min-width: 8rem; }
+  .kpi .label { font-size: .75rem; color: #556; } .kpi .value { font-size: 1.3rem; font-weight: 700; }
+  .kpi.warn .value { color: #b3261e; } .kpi.ok .value { color: #1a7d3c; }
+  table { border-collapse: collapse; font-size: .85rem; }
+  th, td { border: 1px solid #ccd; padding: .3rem .5rem; }
+  th { background: #eef2f8; }
+  .ok { color: #1a7d3c; font-weight: 700; } .ng { color: #b3261e; font-weight: 700; }
+  .warnbox { background: #fff4d6; border: 1px solid #d9a800; border-radius: 8px; padding: .6rem .9rem; margin: .4rem 0; }
+  .okbox { background: #e7f5ea; border: 1px solid #1a7d3c; border-radius: 8px; padding: .6rem .9rem; margin: .4rem 0; }
+  #spinner { padding: 2rem; color: #556; }
+  .gridwrap { overflow: auto; max-height: 45vh; border: 1px solid #ccd; }
+</style>
+</head>
+<body>
+<a href="/">&larr; 施設一覧</a> | <a href="/f/{{ f.id }}">この施設を開く</a>
+<h1>取り込みチェック結果 — {{ f.name }} {{ f.year }}年{{ f.month }}月
+  <button onclick="load(true)" style="font-size:.75rem">再チェック</button>
+</h1>
+<div id="spinner">チェック実行中です…(初回はブックの解析に1〜2分かかります)</div>
+<div id="body" style="display:none">
+  <div class="kpis" id="kpis"></div>
+  <h2>ブック健全性</h2><div id="format"></div>
+  <h2>業務チェック</h2><div id="biz"></div>
+  <h2>前月比較</h2><div id="prev"></div>
+  <h2>職員別月次集計</h2><div class="gridwrap"><table id="staff"></table></div>
+</div>
+<script>
+const FID = {{ f.id }};
+const $ = s => document.querySelector(s);
+function esc(s){return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;');}
+function table(rows){
+  if (!rows || !rows.length) return '<p style="color:#667">なし</p>';
+  const cols = Object.keys(rows[0]);
+  return '<div class="gridwrap"><table><tr>'+cols.map(c=>`<th>${esc(c)}</th>`).join('')+'</tr>'+
+    rows.map(r=>'<tr>'+cols.map(c=>`<td>${esc(typeof r[c]==='object'&&r[c]!==null?JSON.stringify(r[c]):r[c])}</td>`).join('')+'</tr>').join('')+'</table></div>';
+}
+async function load(refresh){
+  $('#spinner').style.display=''; $('#body').style.display='none';
+  const r = await (await fetch(`/api/f/${FID}/report${refresh?'?refresh=1':''}`)).json();
+  const s = r.summary;
+  $('#kpis').innerHTML = Object.entries(s).map(([k,v])=>{
+    const cls = k==='警告件数' ? (v>0?'warn':'ok') : '';
+    return `<div class="kpi ${cls}"><div class="label">${esc(k)}</div><div class="value">${esc(v)}${k==='シフト入力率'?'%':''}</div></div>`;
+  }).join('');
+
+  const fm = r.format;
+  let fh = '';
+  if (fm.duplicate_import) fh += `<div class="warnbox">⚠ 同じ施設・同じ月のデータが既に取り込まれています(二重取り込みの可能性)</div>`;
+  if (fm.broken_formulas) fh += `<div class="warnbox">⚠ 壊れた数式(#REF!)が ${fm.broken_formulas} 個あります(元Excel由来)</div>`;
+  if (fm.masters_warnings.length) fh += `<div class="warnbox">⚠ マスタ警告<br>${fm.masters_warnings.map(esc).join('<br>')}</div>`;
+  if (fm.unknown_codes.length) fh += `<div class="warnbox">⚠ マスタ未登録のシフト記号</div>` + table(fm.unknown_codes);
+  $('#format').innerHTML = fh || '<div class="okbox">✓ 問題なし</div>';
+
+  const b = r.business;
+  let bh = '';
+  const ha = b.haichi;
+  const hcls = v => String(v).includes('未達')?'ng':String(v).includes('到達')?'ok':'';
+  bh += `<p>人員配置: <span class="${hcls(ha['基準判定'])}">${esc(ha['基準判定'])}</span>(過不足 ${esc(ha['人員超過・過不足数'])}) / ` +
+        `④: <span class="${hcls(ha['④判定'])}">${esc(ha['④判定'])}</span>(過不足 ${esc(ha['④過不足'])})</p>`;
+  if (b['夜勤0名の日'].length) bh += `<div class="warnbox">⚠ 夜勤0名の日: ${b['夜勤0名の日'].join('、')}日</div>`;
+  if (b['夜勤1名の日'].length) bh += `<div class="warnbox">△ 夜勤1名の日: ${b['夜勤1名の日'].join('、')}日</div>`;
+  if (b['法定休日NG'].length) bh += `<div class="warnbox">⚠ 法定休日NG(割増金発生): ${b['法定休日NG'].map(esc).join('、')}</div>`;
+  if (b['異常値'].length) bh += `<div class="warnbox">⚠ 異常値: ${b['異常値'].map(esc).join(' / ')}</div>`;
+  if (!b['夜勤0名の日'].length && !b['法定休日NG'].length && !b['異常値'].length) bh += '<div class="okbox">✓ 重大な警告はありません</div>';
+  $('#biz').innerHTML = bh;
+
+  $('#prev').innerHTML = r.prev ?
+    table(Object.entries(r.prev).filter(([k])=>k!=='年月').map(([k,v])=>({項目:k, 前月:v.前月, 今月:v.今月, 増減:v.増減}))) :
+    '<p style="color:#667">前月データがまだ取り込まれていないため比較できません</p>';
+
+  const cols = Object.keys(r.staff_monthly[0] || {});
+  $('#staff').innerHTML = '<tr>'+cols.map(c=>`<th>${esc(c)}</th>`).join('')+'</tr>'+
+    r.staff_monthly.map(x=>'<tr>'+cols.map(c=>`<td>${esc(x[c])}</td>`).join('')+'</tr>').join('');
+
+  $('#spinner').style.display='none'; $('#body').style.display='';
+}
+load(false);
+</script>
+</body>
+</html>

@@ -24,7 +24,8 @@ _FACILITY = _STAFF | {'api_dashboard', 'api_users', 'api_users_set',
                       'api_masters', 'export_xlsx', 'next_month',
                       'csv_upload', 'csv_delete', 'api_csv_list', 'api_rodo',
                       'api_night', 'api_timee', 'api_aliases',
-                      'api_snapshot', 'api_snapshot_diff'}
+                      'api_snapshot', 'api_snapshot_diff',
+                      'report_page', 'api_report', 'api_staff_monthly'}
 _AREA = _FACILITY | {'overview', 'api_overview'}
 ROLE_ENDPOINTS = {'staff': _STAFF, 'facility': _FACILITY, 'area': _AREA}
 ROLE_LABELS = {'admin': '本部管理者', 'area': 'エリアマネージャー',
@@ -36,6 +37,7 @@ def create_app(data_root=None):
     store = Store(data_root or DATA_ROOT)
     manager = ModelManager(store)
     app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024
+    app.json.sort_keys = False  # 表の列順を定義順のまま返す
 
     # セッション鍵はデータディレクトリに永続化
     secret_path = os.path.join(store.root, 'secret_key')
@@ -173,7 +175,8 @@ def create_app(data_root=None):
         finally:
             os.unlink(tmp_path)
         fid = store.add_facility(m.facility_name or f.filename, m.year, m.month, data)
-        return redirect(url_for('facility', fid=fid))
+        store.set_setting(f'import_warnings_{fid}', '\n'.join(m.warnings))
+        return redirect(url_for('report_page', fid=fid))
 
     @app.post('/f/<int:fid>/delete')
     def delete_facility(fid):
@@ -406,6 +409,35 @@ def create_app(data_root=None):
         import datetime
         return jsonify({'taken_at': datetime.datetime.fromtimestamp(snap['ts']).strftime('%Y/%m/%d %H:%M'),
                         'taken_by': snap['username'], 'changes': changes})
+
+    # ---- 取り込みチェックレポート ----
+    @app.get('/f/<int:fid>/report')
+    def report_page(fid):
+        f = store.facility(fid)
+        if f is None:
+            return redirect(url_for('index'))
+        return render_template('report.html', f=f)
+
+    @app.get('/api/f/<int:fid>/report')
+    def api_report(fid):
+        if request.args.get('refresh') != '1':
+            saved = store.get_report(fid)
+            if saved:
+                return jsonify(saved)
+        from .checks import build_report
+        model = manager.get(fid)
+        warnings = [w for w in store.get_setting(f'import_warnings_{fid}', '').splitlines() if w]
+        report = build_report(model, store, fid, masters_warnings=warnings)
+        store.save_report(fid, report)
+        return jsonify(report)
+
+    @app.get('/api/f/<int:fid>/staff-monthly')
+    def api_staff_monthly(fid):
+        from . import rodo as _rodo
+        from .checks import staff_monthly
+        model = manager.get(fid)
+        aliases = _rodo.parse_aliases(store.get_setting('name_aliases'))
+        return jsonify({'rows': staff_monthly(model, aliases)})
 
     @app.get('/api/f/<int:fid>/masters')
     def api_masters(fid):

@@ -112,6 +112,11 @@
   </form>
   <div id="csvlist" style="font-size:.85rem;margin-bottom:1rem"></div>
 
+  <p><a href="/f/{{ f.id }}/report">▶ 取り込みチェック結果を表示</a></p>
+
+  <h2>職員別月次集計 <button onclick="loadStaffMonthly()" style="font-size:.8rem">表示</button></h2>
+  <div id="smbox"></div>
+
   <h2>夜勤体制チェック <button onclick="loadNight()" style="font-size:.8rem">表示</button></h2>
   <div id="nightbox"></div>
 
@@ -413,6 +418,12 @@ async function saveAliases() {
   await fetch('/api/aliases', {method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({text: $('#aliases').value})});
   $('#rodo-status').textContent = '同一人物名設定を保存しました';
+}
+async function loadStaffMonthly() {
+  $('#rodo-status').textContent = '集計中…';
+  const r = await (await fetch(`/api/f/${FID}/staff-monthly`)).json();
+  $('#smbox').innerHTML = tableOf(r.rows);
+  $('#rodo-status').textContent = '';
 }
 async function loadNight() {
   $('#rodo-status').textContent = '計算中…';

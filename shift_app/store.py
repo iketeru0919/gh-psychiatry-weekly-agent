@@ -59,6 +59,11 @@ CREATE TABLE IF NOT EXISTS snapshots (
     username TEXT,
     data TEXT NOT NULL           -- グリッドのJSON
 );
+CREATE TABLE IF NOT EXISTS reports (
+    facility_id INTEGER PRIMARY KEY,
+    data TEXT NOT NULL,
+    created REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS edit_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ts REAL NOT NULL,
@@ -254,6 +259,18 @@ class Store:
             if not r:
                 return None
             return {'ts': r['ts'], 'username': r['username'], 'data': json.loads(r['data'])}
+
+    # --- 取り込みチェックレポート ---
+    def save_report(self, fid, data):
+        with self._db() as db:
+            db.execute('INSERT INTO reports (facility_id, data, created) VALUES (?,?,?) '
+                       'ON CONFLICT(facility_id) DO UPDATE SET data=excluded.data, created=excluded.created',
+                       (fid, json.dumps(data, ensure_ascii=False), time.time()))
+
+    def get_report(self, fid):
+        with self._db() as db:
+            r = db.execute('SELECT data FROM reports WHERE facility_id=?', (fid,)).fetchone()
+            return json.loads(r['data']) if r else None
 
     # --- summaries ---
     def save_summary(self, fid, data):

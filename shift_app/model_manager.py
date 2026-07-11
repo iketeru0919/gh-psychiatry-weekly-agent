@@ -325,6 +325,22 @@ class FacilityModel:
                 out[key] = (sm, em, overnight)
         return out
 
+    def code_hours(self):
+        """略記号 → (日中h, 全体h)。マスタ設定のY列/AF列から。"""
+        from .rodo import norm_shift
+        out = {}
+        for r in range(11, 116):
+            code = self._raw(MASTER_SHEET, 1, r)
+            if not isinstance(code, str) or not code.strip():
+                continue
+            day_h = self._raw(MASTER_SHEET, 25, r)    # Y列
+            total_h = self._raw(MASTER_SHEET, 32, r)  # AF列
+            key = norm_shift(code)
+            if key and key not in out:
+                out[key] = (day_h if isinstance(day_h, (int, float)) else None,
+                            total_h if isinstance(total_h, (int, float)) else None)
+        return out
+
     def _lookup_times(self, code, ctimes):
         """照合用: 記号から(開始分,終了分)。前方一致のフォールバック付き。"""
         from .rodo import norm_shift
@@ -386,7 +402,7 @@ class FacilityModel:
             if not name:
                 continue
             role = self.v(ADMIN_SHEET, 'B%d' % r)
-            if is_dispatch(name, role) or 'タイミー' in str(name):
+            if is_dispatch(name, role) or 'タイミー' in str(name) or '月間営業活動時間' in str(name):
                 continue
             key = norm_name(name, aliases)
             cu = self.v(ADMIN_SHEET, 'CU%d' % r)
