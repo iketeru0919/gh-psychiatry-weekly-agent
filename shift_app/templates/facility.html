@@ -30,6 +30,11 @@
   .ok { color: #1a7d3c; } .ng { color: #b3261e; }
   .haichi td:first-child { text-align: left; background: #f7f9fc; }
   h2 { font-size: 1.05rem; margin: 1.2rem 0 .4rem; }
+  details.sec { border: 1px solid #ccd; border-radius: 8px; margin: .6rem 0; background: #fff; }
+  details.sec > summary { cursor: pointer; padding: .55rem .9rem; font-weight: 700; font-size: 1rem;
+                          background: #eef2f8; border-radius: 8px; user-select: none; }
+  details.sec[open] > summary { border-bottom: 1px solid #ccd; border-radius: 8px 8px 0 0; }
+  details.sec > .secbody { padding: .7rem .9rem; }
   @media print {
     .tabs, .status, #daypick, a { display: none !important; }
     .gridwrap { max-height: none !important; overflow: visible !important; border: none; }
@@ -103,42 +108,61 @@
 
 <div id="panel-rodo" class="panel">
   <div class="status" id="rodo-status"></div>
-
-  <h2>CSV管理(勤怠・タイミー明細)</h2>
-  <form method="post" action="/f/{{ f.id }}/csv" enctype="multipart/form-data" style="margin-bottom:.4rem">
-    <select name="kind"><option value="kintai">勤怠CSV</option><option value="timee">タイミー明細CSV</option></select>
-    <input type="file" name="file" accept=".csv" multiple required>
-    <button type="submit">アップロード</button>
-  </form>
-  <div id="csvlist" style="font-size:.85rem;margin-bottom:1rem"></div>
-
   <p><a href="/f/{{ f.id }}/report">▶ 取り込みチェック結果を表示</a></p>
 
-  <h2>職員別月次集計 <button onclick="loadStaffMonthly()" style="font-size:.8rem">表示</button></h2>
-  <div id="smbox"></div>
+  <details class="sec" id="sec-csv" open>
+    <summary>CSV管理(勤怠・タイミー明細)</summary>
+    <div class="secbody">
+      <form method="post" action="/f/{{ f.id }}/csv" enctype="multipart/form-data" style="margin-bottom:.4rem">
+        <select name="kind"><option value="kintai">勤怠CSV</option><option value="timee">タイミー明細CSV</option></select>
+        <input type="file" name="file" accept=".csv" multiple required>
+        <button type="submit">アップロード</button>
+      </form>
+      <div id="csvlist" style="font-size:.85rem"></div>
+    </div>
+  </details>
 
-  <h2>夜勤体制チェック <button onclick="loadNight()" style="font-size:.8rem">表示</button></h2>
-  <div id="nightbox"></div>
+  <details class="sec" data-load="loadStaffMonthly">
+    <summary>職員別月次集計</summary>
+    <div class="secbody" id="smbox"></div>
+  </details>
 
-  <h2>勤怠CSV照合
-    <label style="font-weight:400;font-size:.8rem">許容ズレ(分) <input id="rtol" value="15" style="width:3rem"></label>
-    <button onclick="loadRodo()" style="font-size:.8rem">照合実行</button>
-  </h2>
-  <div id="rodobox"></div>
+  <details class="sec" data-load="loadNight">
+    <summary>夜勤体制チェック</summary>
+    <div class="secbody" id="nightbox"></div>
+  </details>
 
-  <h2>タイミー明細 集計・照合 <button onclick="loadTimee()" style="font-size:.8rem">表示</button></h2>
-  <div id="timeebox"></div>
+  <details class="sec" data-load="loadRodo">
+    <summary>勤怠CSV照合</summary>
+    <div class="secbody">
+      <p style="font-size:.8rem">許容ズレ(分) <input id="rtol" value="15" style="width:3rem">
+        <button onclick="loadRodo()" style="font-size:.8rem">再照合</button></p>
+      <div id="rodobox"></div>
+    </div>
+  </details>
 
-  <h2>シフト変更チェック
-    <button onclick="takeSnapshot()" style="font-size:.8rem">現在のシフトを基準として保存</button>
-    <button onclick="loadDiff()" style="font-size:.8rem">基準との差分を表示</button>
-  </h2>
-  <div id="diffbox"></div>
+  <details class="sec" data-load="loadTimee">
+    <summary>タイミー明細 集計・照合</summary>
+    <div class="secbody" id="timeebox"></div>
+  </details>
 
-  <h2>同一人物名設定(全社共通)</h2>
-  <p class="small" style="font-size:.8rem;color:#667">1行に「基準名=別名1,別名2」。勤怠CSVとシフトの氏名表記が違う場合に使用。</p>
-  <textarea id="aliases" style="width:100%;max-width:40rem;min-height:5rem"></textarea><br>
-  <button onclick="saveAliases()">保存</button>
+  <details class="sec" data-load="loadDiff">
+    <summary>シフト変更チェック</summary>
+    <div class="secbody">
+      <p><button onclick="takeSnapshot()" style="font-size:.8rem">現在のシフトを基準として保存</button>
+         <button onclick="loadDiff()" style="font-size:.8rem">差分を再表示</button></p>
+      <div id="diffbox"></div>
+    </div>
+  </details>
+
+  <details class="sec">
+    <summary>同一人物名設定(全社共通)</summary>
+    <div class="secbody">
+      <p class="small" style="font-size:.8rem;color:#667">1行に「基準名=別名1,別名2」。勤怠CSVとシフトの氏名表記が違う場合に使用。</p>
+      <textarea id="aliases" style="width:100%;max-width:40rem;min-height:5rem"></textarea><br>
+      <button onclick="saveAliases()">保存</button>
+    </div>
+  </details>
 </div>
 
 <div id="panel-masters" class="panel">
@@ -401,6 +425,15 @@ async function loadDaily(day) {
 }
 
 // ---- 労務チェック ----
+// 開いたときに一度だけ自動読み込みする折りたたみセクション
+document.querySelectorAll('details.sec[data-load]').forEach(d => {
+  d.addEventListener('toggle', () => {
+    if (d.open && !d.dataset.loaded) {
+      d.dataset.loaded = '1';
+      window[d.dataset.load]();
+    }
+  });
+});
 function tableOf(rows, judgeKey) {
   if (!rows || !rows.length) return '<p style="color:#667;font-size:.85rem">データなし</p>';
   const cols = Object.keys(rows[0]);
