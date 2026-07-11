@@ -242,8 +242,8 @@ class Parser:
                         args.append(self.expr_cmp())
                 self.expect('OP', ')')
                 name = v.upper()
-                if name.startswith('_XLFN.'):
-                    name = name[6:]
+                while name.startswith(('_XLFN.', '_XLWS.')):
+                    name = name.split('.', 1)[1]
                 return ('call', name, args)
             raise ValueError(f'unknown name {v!r}')
         raise ValueError(f'unexpected token {k} {v}')

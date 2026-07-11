@@ -5,9 +5,10 @@
 計算は常にブック内の数式そのもので行うため、Excel との完全一致が保たれる。
 """
 import calendar
+import re
 
-from .xlcalc.evaluator import Workbook, XLErr, serial_to_date
-from .xlcalc.parser import col_to_num, num_to_col
+from .xlcalc.evaluator import RangeVal, Workbook, XLErr, serial_to_date
+from .xlcalc.parser import col_to_num, num_to_col, parse_formula
 
 INPUT_SHEET = '入力シート【現場配布用】'
 ADMIN_SHEET = '管理用シート'
@@ -223,6 +224,89 @@ class FacilityModel:
         return {'placement': placement, 'months': months, 'monthly_rows': monthly_rows,
                 'sheets': {'placement': P, 'monthly': M}}
 
+    # ---- 日次(勤怠実績+チェックリスト) ----
+    def daily_sheet_names(self):
+        """日番号 → (勤怠シート名, 日次チェックシート名)。全角数字も正規化する。"""
+        kintai, checklist = {}, {}
+        for name in self.wb.cells:
+            n = name.translate(_FW)
+            m = re.fullmatch(r'\((\d+)\)', n.strip())
+            if m:
+                kintai[int(m.group(1))] = name
+                continue
+            m = re.fullmatch(r'日次\s*\((\d+)\)', n.strip())
+            if m:
+                checklist[int(m.group(1))] = name
+        return kintai, checklist
+
+    @staticmethod
+    def _fmt_serial_time(v):
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            mins = round((v % 1 if v >= 1 else v) * 24 * 60)
+            if v >= 1:  # 日またぎ(翌日)
+                mins = round(v * 24 * 60) if v < 2 else mins
+            return f'{mins // 60}:{mins % 60:02d}'
+        return _disp(v)
+
+    def daily(self, day):
+        kintai_map, check_map = self.daily_sheet_names()
+        K = kintai_map.get(day)
+        C = check_map.get(day)
+        out = {'day': day, 'kintai_sheet': K, 'checklist_sheet': C,
+               'days_in_month': self.days_in_month()}
+        if K:
+            date_serial = self.wb.value(K, 10, 1)  # J1
+            if isinstance(date_serial, (int, float)):
+                d = serial_to_date(date_serial)
+                out['date_label'] = f'{d.year}年{d.month}月{d.day}日 {self.v(K, "N1")}'
+            # 出勤者リスト(W5 の UNIQUE/FILTER をライブ評価)
+            workers = []
+            w5 = self.wb.formulas.get(K, {}).get((23, 5))
+            if w5:
+                from .xlcalc.evaluator import _Ctx
+                try:
+                    res = self.wb.eval_node(parse_formula(w5), _Ctx(K, 23, 5))
+                    if isinstance(res, RangeVal):
+                        workers = [r[0] for r in res.rows if r[0]]
+                except Exception:
+                    workers = []
+            out['workers'] = workers
+            rows = []
+            for i, r in enumerate(KINTAI_ROWS):
+                worker = workers[i] if i < len(workers) else ''
+                rows.append({
+                    'row': r, 'no': i + 1, 'worker': worker,
+                    'plan_start': self._fmt_serial_time(self.wb.value(K, 3, r)) if worker else '',
+                    'plan_end': self._fmt_serial_time(self.wb.value(K, 5, r)) if worker else '',
+                    'actual_start': self._raw(K, 6, r), 'actual_end': self._raw(K, 8, r),
+                    'break_start': self._raw(K, 9, r), 'break_end': self._raw(K, 11, r),
+                    'no_change': self._raw(K, 13, r), 'changed': self._raw(K, 14, r),
+                    'sign': self._raw(K, 15, r),
+                })
+            out['kintai'] = rows
+            out['note'] = self._raw(K, *KINTAI_NOTE_CELL)
+        if C:
+            items = []
+            for r in CHECKLIST_ROWS:
+                label = self._raw(C, 2, r) or self.v(C, 2, r)
+                cells = [self._raw(C, col, r) for col in CHECKLIST_COLS]
+                items.append({'row': r, 'label': label, 'cells': cells})
+            out['checklist'] = {
+                'headers': [self._raw(C, col, 4) or self.v(C, col, 4) for col in CHECKLIST_COLS],
+                'items': items,
+            }
+        return out
+
+
+# 日次シート: 勤怠実績(N) の編集可能列と、日次チェックリストの範囲
+KINTAI_ROWS = range(5, 20)
+KINTAI_EDIT_COLS = {6, 8, 9, 11, 13, 14, 15}   # F,H,I,K(実績/休憩) M,N(変更) O(署名)
+KINTAI_NOTE_CELL = (2, 22)                      # 特記事項欄
+CHECKLIST_ROWS = range(5, 24)
+CHECKLIST_COLS = range(3, 18)                   # 出勤者①〜⑮
+
+_FW = str.maketrans('０１２３４５６７８９', '0123456789')
+
 
 # 管理用シート上の手入力セル(④区分別利用者数・他施設兼務)
 ADMIN_INPUT_CELLS = {
@@ -230,6 +314,18 @@ ADMIN_INPUT_CELLS = {
     '区分4': (_C('CW'), 70), '区分5': (_C('DA'), 70), '区分6': (_C('DE'), 70),
     'サビ管 他施設兼務': (_C('DO'), 71), '管理者 他施設兼務': (_C('DO'), 75),
 }
+
+
+def editable_daily_cell(sheet, col, row):
+    """日次タブから編集を許可するセルか判定する。シート名は日別シートに限る。"""
+    n = sheet.translate(_FW).strip()
+    if re.fullmatch(r'\(\d+\)', n):
+        if row in KINTAI_ROWS and col in KINTAI_EDIT_COLS:
+            return True
+        return (col, row) == KINTAI_NOTE_CELL
+    if re.fullmatch(r'日次\s*\(\d+\)', n):
+        return row in CHECKLIST_ROWS and col in CHECKLIST_COLS
+    return False
 
 
 def editable_user_cell(sheet, col, row):

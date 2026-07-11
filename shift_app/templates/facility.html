@@ -30,6 +30,13 @@
   .ok { color: #1a7d3c; } .ng { color: #b3261e; }
   .haichi td:first-child { text-align: left; background: #f7f9fc; }
   h2 { font-size: 1.05rem; margin: 1.2rem 0 .4rem; }
+  @media print {
+    .tabs, .status, #daypick, a { display: none !important; }
+    .gridwrap { max-height: none !important; overflow: visible !important; border: none; }
+    input { border: none !important; }
+    body { margin: 0; font-size: 9pt; }
+    table { font-size: 7.5pt; }
+  }
 </style>
 </head>
 <body>
@@ -39,6 +46,7 @@
   <button data-tab="grid" class="active">シフト入力</button>
   <button data-tab="dash">管理ダッシュボード</button>
   <button data-tab="users">利用者稼働</button>
+  <button data-tab="daily">日次</button>
   <button data-tab="masters">マスタ</button>
 </div>
 
@@ -71,6 +79,19 @@
   <div class="gridwrap" style="max-height:45vh"><table id="mtable"></table></div>
 </div>
 
+<div id="panel-daily" class="panel">
+  <div class="status" id="daily-status"></div>
+  <div id="daypick" style="margin-bottom:.6rem; display:flex; flex-wrap:wrap; gap:.2rem"></div>
+  <h2 id="daily-date"></h2>
+  <h2>勤怠実績(退勤時に記入・署名)</h2>
+  <div class="gridwrap" style="max-height:45vh"><table id="ktable"></table></div>
+  <div style="margin:.5rem 0">特記事項:
+    <input id="knote" style="width:40rem" class="dailycell" data-col="2" data-row="22">
+  </div>
+  <h2>日次チェックリスト</h2>
+  <div class="gridwrap" style="max-height:50vh"><table id="ctable"></table></div>
+</div>
+
 <div id="panel-masters" class="panel">
   <div class="status"></div>
   <h2>シフト略記号</h2>
@@ -90,6 +111,7 @@ document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
   $('#panel-' + b.dataset.tab).classList.add('active');
   if (b.dataset.tab === 'dash') loadDash();
   if (b.dataset.tab === 'users') loadUsers();
+  if (b.dataset.tab === 'daily') loadDaily(CURRENT_DAY);
   if (b.dataset.tab === 'masters') loadMasters();
 });
 
@@ -252,6 +274,64 @@ async function saveUserCell(inp) {
   const needRow = document.querySelectorAll('#mtable tr.summary')[1];
   if (needRow) u.months.forEach((x, i) => { needRow.children[i + 2].textContent = x.need; });
   $('#users-status').textContent = '保存しました(人員配置判定に反映されます)';
+}
+
+let CURRENT_DAY = new Date().getDate();
+let DAILY = null;
+async function loadDaily(day) {
+  $('#daily-status').textContent = '読み込み中…';
+  const d = await (await fetch(`/api/f/${FID}/daily/${day}`)).json();
+  DAILY = d;
+  if (day > d.days_in_month) { CURRENT_DAY = 1; return loadDaily(1); }
+  CURRENT_DAY = day;
+  $('#daypick').innerHTML = Array.from({length: d.days_in_month}, (_, i) =>
+    `<button style="padding:.25rem .55rem;border:1px solid #99b;border-radius:5px;cursor:pointer;` +
+    `background:${i+1===day?'#467':'#eef'};color:${i+1===day?'#fff':'#223'}" onclick="loadDaily(${i+1})">${i+1}</button>`).join('');
+  $('#daily-date').textContent = d.date_label || `${day}日`;
+
+  const din = (sheet, col, row, v, w) =>
+    `<input class="kcell" style="width:${w||'4.5rem'}" data-sheet="${esc(sheet)}" data-col="${col}" data-row="${row}" value="${esc(v)}">`;
+  let h = '<tr><th>No.</th><th>氏名/略記号</th><th>予定</th><th>実績 開始</th><th>実績 終了</th>' +
+          '<th>休憩 開始</th><th>休憩 終了</th><th>変更なし</th><th>変更あり</th><th>本人署名</th></tr>';
+  for (const r of (d.kintai || [])) {
+    h += `<tr><td>${r.no}</td><td class="name">${esc(r.worker)}</td>` +
+         `<td>${esc(r.plan_start)}${r.plan_start?'〜':''}${esc(r.plan_end)}</td>` +
+         `<td>${din(d.kintai_sheet, 6, r.row, r.actual_start)}</td>` +
+         `<td>${din(d.kintai_sheet, 8, r.row, r.actual_end)}</td>` +
+         `<td>${din(d.kintai_sheet, 9, r.row, r.break_start)}</td>` +
+         `<td>${din(d.kintai_sheet, 11, r.row, r.break_end)}</td>` +
+         `<td>${din(d.kintai_sheet, 13, r.row, r.no_change, '3rem')}</td>` +
+         `<td>${din(d.kintai_sheet, 14, r.row, r.changed, '3rem')}</td>` +
+         `<td>${din(d.kintai_sheet, 15, r.row, r.sign, '7rem')}</td></tr>`;
+  }
+  $('#ktable').innerHTML = h;
+  $('#knote').value = d.note || '';
+  $('#knote').dataset.sheet = d.kintai_sheet;
+
+  if (d.checklist) {
+    let ch = '<tr><th class="name">項目</th>' +
+             d.checklist.headers.map(x => `<th>${esc(x)}</th>`).join('') + '</tr>';
+    for (const it of d.checklist.items) {
+      ch += `<tr><td class="name">${esc(it.label)}</td>` +
+            it.cells.map((v, i) =>
+              `<td>${din(d.checklist_sheet, 3 + i, it.row, v, '4rem')}</td>`).join('') + '</tr>';
+    }
+    $('#ctable').innerHTML = ch;
+  }
+  $('#daily-status').textContent = '';
+  document.querySelectorAll('input.kcell, #knote').forEach(inp => {
+    inp.dataset.orig = inp.value;
+    inp.onchange = async () => {
+      if (inp.value === inp.dataset.orig) return;
+      $('#daily-status').textContent = '保存中…';
+      const r = await fetch(`/api/f/${FID}/daily`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({edits: [{sheet: inp.dataset.sheet, col: +inp.dataset.col, row: +inp.dataset.row, value: inp.value}]})
+      });
+      $('#daily-status').textContent = r.ok ? '保存しました' : '保存エラー';
+      if (r.ok) inp.dataset.orig = inp.value;
+    };
+  });
 }
 
 loadGrid();

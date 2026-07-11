@@ -425,7 +425,30 @@ class Workbook:
         a = self.eval_node(node[2], ctx)
         b = self.eval_node(node[3], ctx)
         if isinstance(a, RangeVal) or isinstance(b, RangeVal):
-            return ERR_VALUE
+            # 配列数式: 要素ごとに演算し配列を返す(FILTER の条件式などで使用)
+            return self._binop_array(op, a, b, ctx)
+        return self._binop_scalar(op, a, b, ctx)
+
+    def _binop_array(self, op, a, b, ctx):
+        rows_a = a.rows if isinstance(a, RangeVal) else None
+        rows_b = b.rows if isinstance(b, RangeVal) else None
+        base = a if rows_a is not None else b
+        nr = len(base.rows)
+        nc = len(base.rows[0]) if nr else 0
+        if rows_a is not None and rows_b is not None:
+            if len(rows_b) != nr or (nr and len(rows_b[0]) != nc):
+                return ERR_VALUE
+        out = []
+        for i in range(nr):
+            row = []
+            for j in range(nc):
+                va = rows_a[i][j] if rows_a is not None else a
+                vb = rows_b[i][j] if rows_b is not None else b
+                row.append(self._binop_scalar(op, va, vb, ctx))
+            out.append(row)
+        return RangeVal(base.sheet, base.c1, base.r1, base.c2, base.r2, out)
+
+    def _binop_scalar(self, op, a, b, ctx):
         if op in ('=', '<>', '<', '<=', '>', '>='):
             return _cmp(op, a, b, ctx.transition)
         if op == '&':
@@ -447,9 +470,7 @@ class Workbook:
         if op == '*':
             return fa * fb
         if op == '/':
-            if fb == 0:
-                return ERR_DIV0
-            return fa / fb
+            return ERR_DIV0 if fb == 0 else fa / fb
         if op == '^':
             try:
                 return float(fa ** fb)

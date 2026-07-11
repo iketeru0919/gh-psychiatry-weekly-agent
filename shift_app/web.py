@@ -8,7 +8,8 @@ import os
 from flask import Flask, jsonify, redirect, render_template, request, url_for
 
 from .masters import extract_masters
-from .model_manager import INPUT_SHEET, ModelManager, editable_user_cell
+from .model_manager import (INPUT_SHEET, ModelManager, editable_daily_cell,
+                            editable_user_cell)
 from .store import Store
 
 DATA_ROOT = os.environ.get('SHIFT_APP_DATA', os.path.join(os.getcwd(), 'shift_app_data'))
@@ -88,6 +89,23 @@ def create_app(data_root=None):
                     value = float(value)
                 except ValueError:
                     pass
+            manager.set_cell(fid, sheet, col, row, value)
+        return jsonify({'ok': True})
+
+    @app.get('/api/f/<int:fid>/daily/<int:day>')
+    def api_daily(fid, day):
+        model = manager.get(fid)
+        return jsonify(model.daily(day))
+
+    @app.post('/api/f/<int:fid>/daily')
+    def api_daily_set(fid):
+        payload = request.get_json(force=True)
+        for edit in payload.get('edits', []):
+            sheet = edit['sheet']
+            col, row = int(edit['col']), int(edit['row'])
+            if not editable_daily_cell(sheet, col, row):
+                return jsonify({'ok': False, 'error': f'編集不可セル {sheet}!{col},{row}'}), 400
+            value = (str(edit.get('value') or '')).strip() or None
             manager.set_cell(fid, sheet, col, row, value)
         return jsonify({'ok': True})
 
