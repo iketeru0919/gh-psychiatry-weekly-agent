@@ -142,7 +142,7 @@
 </div>
 
 <div id="panel-masters" class="panel">
-  <div class="status"></div>
+  <div class="status" id="masters-status"></div>
   <h2>シフト略記号</h2>
   <div class="gridwrap" style="max-height:40vh"><table id="mcodes"></table></div>
   <h2>職員</h2>
@@ -255,7 +255,23 @@ async function loadDash() {
 }
 
 async function loadMasters() {
-  const m = await (await fetch(`/api/f/${FID}/masters`)).json();
+  $('#masters-status').textContent = 'マスタを読み込み中…(初回は最大1分程度かかります)';
+  let m;
+  try {
+    m = await (await fetch(`/api/f/${FID}/masters`)).json();
+  } catch (e) {
+    $('#masters-status').innerHTML = `<span class="ng">読み込みに失敗しました: ${esc(e)}</span>`;
+    return;
+  }
+  if (m.error) {
+    $('#masters-status').innerHTML = `<span class="ng">${esc(m.error)}</span>`;
+    return;
+  }
+  $('#masters-status').innerHTML = (m.warnings || []).length
+    ? `<span class="ng">⚠ ${m.warnings.map(esc).join(' / ')}</span>` : '';
+  if (!(m.shift_codes || []).length && !(m.staff || []).length) {
+    $('#masters-status').innerHTML += '<span class="ng"> マスタを読み取れませんでした(様式をご確認ください)</span>';
+  }
   $('#mcodes').innerHTML = '<tr><th>記号</th><th>開始</th><th>終了</th><th>休憩</th><th>日中h</th><th>全体h</th></tr>' +
     m.shift_codes.map(c => `<tr><td>${esc(c.code)}</td><td>${esc(c.start)}</td><td>${esc(c.end)}</td>` +
       `<td>${esc(c.break_start ? c.break_start + '〜' + c.break_end : '')}</td>` +

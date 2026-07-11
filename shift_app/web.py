@@ -498,10 +498,20 @@ def create_app(data_root=None):
 
     @app.get('/api/f/<int:fid>/masters')
     def api_masters(fid):
+        import json as _json
         from dataclasses import asdict
+        # 取り込み時に保存したマスタを優先(Excel再解析を避けて即表示)
+        cached = store.get_setting(f'masters_{fid}')
+        if cached and request.args.get('refresh') != '1':
+            return jsonify(_json.loads(cached))
         f = store.facility(fid)
-        m = extract_masters(store.upload_path(f['filename']))
-        return jsonify(asdict(m))
+        try:
+            m = asdict(extract_masters(store.upload_path(f['filename'])))
+        except Exception as e:
+            return jsonify({'error': f'マスタを読み取れません: {e}',
+                            'shift_codes': [], 'staff': [], 'warnings': []})
+        store.set_setting(f'masters_{fid}', _json.dumps(m, ensure_ascii=False))
+        return jsonify(m)
 
     return app
 
