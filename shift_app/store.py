@@ -40,6 +40,25 @@ CREATE TABLE IF NOT EXISTS summaries (
     data TEXT NOT NULL,         -- JSON
     computed_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS csv_files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    facility_id INTEGER NOT NULL,
+    kind TEXT NOT NULL,          -- kintai / timee
+    filename TEXT NOT NULL,
+    content BLOB NOT NULL,
+    uploaded REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
+CREATE TABLE IF NOT EXISTS snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    facility_id INTEGER NOT NULL,
+    ts REAL NOT NULL,
+    username TEXT,
+    data TEXT NOT NULL           -- グリッドのJSON
+);
 CREATE TABLE IF NOT EXISTS edit_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ts REAL NOT NULL,
@@ -186,6 +205,55 @@ class Store:
             db.execute('DELETE FROM user_facilities WHERE user_id=?', (uid,))
             for fid in facility_ids:
                 db.execute('INSERT OR IGNORE INTO user_facilities VALUES (?,?)', (uid, fid))
+
+    # --- CSV(勤怠/タイミー) ---
+    def add_csv(self, fid, kind, filename, content):
+        with self._db() as db:
+            cur = db.execute('INSERT INTO csv_files (facility_id, kind, filename, content, uploaded) VALUES (?,?,?,?,?)',
+                             (fid, kind, filename, content, time.time()))
+            return cur.lastrowid
+
+    def csv_list(self, fid, kind=None):
+        q = 'SELECT id, facility_id, kind, filename, uploaded, LENGTH(content) size FROM csv_files WHERE facility_id=?'
+        args = [fid]
+        if kind:
+            q += ' AND kind=?'
+            args.append(kind)
+        with self._db() as db:
+            return [dict(r) for r in db.execute(q + ' ORDER BY uploaded', args)]
+
+    def csv_content(self, csv_id):
+        with self._db() as db:
+            r = db.execute('SELECT content FROM csv_files WHERE id=?', (csv_id,)).fetchone()
+            return r['content'] if r else None
+
+    def delete_csv(self, csv_id):
+        with self._db() as db:
+            db.execute('DELETE FROM csv_files WHERE id=?', (csv_id,))
+
+    # --- settings(氏名エイリアス等) ---
+    def get_setting(self, key, default=''):
+        with self._db() as db:
+            r = db.execute('SELECT value FROM settings WHERE key=?', (key,)).fetchone()
+            return r['value'] if r else default
+
+    def set_setting(self, key, value):
+        with self._db() as db:
+            db.execute('INSERT INTO settings (key, value) VALUES (?,?) '
+                       'ON CONFLICT(key) DO UPDATE SET value=excluded.value', (key, value))
+
+    # --- snapshots(シフトの版) ---
+    def add_snapshot(self, fid, data, username=None):
+        with self._db() as db:
+            db.execute('INSERT INTO snapshots (facility_id, ts, username, data) VALUES (?,?,?,?)',
+                       (fid, time.time(), username, json.dumps(data, ensure_ascii=False)))
+
+    def latest_snapshot(self, fid):
+        with self._db() as db:
+            r = db.execute('SELECT * FROM snapshots WHERE facility_id=? ORDER BY ts DESC LIMIT 1', (fid,)).fetchone()
+            if not r:
+                return None
+            return {'ts': r['ts'], 'username': r['username'], 'data': json.loads(r['data'])}
 
     # --- summaries ---
     def save_summary(self, fid, data):

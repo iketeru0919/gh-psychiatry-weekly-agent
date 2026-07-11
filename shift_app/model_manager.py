@@ -298,6 +298,105 @@ class FacilityModel:
         return out
 
 
+    # ---- 労務チェック用のシフト側データ ----
+    def code_times(self):
+        """略記号 → (開始分, 終了分, 日またぎか)。マスタ設定の時刻欄から。"""
+        from .rodo import norm_shift
+        out = {}
+        for r in range(11, 116):
+            code = self._raw(MASTER_SHEET, 1, r)
+            if not isinstance(code, str) or not code.strip():
+                continue
+            start = self._raw(MASTER_SHEET, 5, r)    # E列
+            end = self._raw(MASTER_SHEET, 11, r)     # K列
+            sm = round(start * 1440) if isinstance(start, (int, float)) else None
+            overnight = False
+            em = None
+            if isinstance(end, (int, float)):
+                if end >= 1:
+                    overnight = True
+                    em = round((end - 1) * 1440) or 1440
+                else:
+                    em = round(end * 1440)
+                    if sm is not None and em < sm:
+                        overnight = True
+            key = norm_shift(code)
+            if key and key not in out:
+                out[key] = (sm, em, overnight)
+        return out
+
+    def _lookup_times(self, code, ctimes):
+        """照合用: 記号から(開始分,終了分)。前方一致のフォールバック付き。"""
+        from .rodo import norm_shift
+        s = norm_shift(code)
+        hit = ctimes.get(s)
+        if hit is None:
+            for k, v in ctimes.items():
+                if k.startswith(s) or s.startswith(k):
+                    hit = v
+                    break
+        if hit is None:
+            return None
+        sm, em, overnight = hit
+        if sm is None and em is None:
+            return None
+        if overnight and (em is None or em == 0):
+            em = 1440
+        return (sm, em)
+
+    def schedule_maps(self, aliases=None):
+        """グリッドから照合・夜勤チェック用の構造を作る。"""
+        from .rodo import is_dispatch, norm_name
+        grid = self.grid()
+        ctimes = self.code_times()
+        y, m = grid['year'], grid['month']
+        schedule, by_day, timee_slots, excluded = {}, {}, {}, set()
+        for row in grid['rows']:
+            name = str(row['name'] or '').strip()
+            if not name:
+                continue
+            key = norm_name(name, aliases)
+            if is_dispatch(name, row.get('role')):
+                excluded.add(key)
+                continue
+            is_timee = 'タイミー' in name
+            for i, code in enumerate(row['cells']):
+                code = str(code or '').strip()
+                if not code or code == '0':
+                    continue
+                d = f'{y}/{m}/{i + 1}'
+                if is_timee:
+                    timee_slots[d] = timee_slots.get(d, 0) + 1
+                    continue
+                times = self._lookup_times(code, ctimes)
+                schedule.setdefault(key, {}).setdefault(d, []).append(
+                    {'code': code, 'name': name, 'times': times})
+                by_day.setdefault(d, []).append({'name': name, 'code': code})
+        return {'schedule': schedule, 'by_day': by_day, 'timee_slots': timee_slots,
+                'excluded': excluded, 'year': y, 'month': m, 'code_times': ctimes}
+
+    def planned_hours(self, aliases=None):
+        """職員別の月間予定時間(管理用シートCU列)。重複ブロック(15-16行)は除外。"""
+        from .rodo import is_dispatch, norm_name
+        planned, meta = {}, {}
+        for r in ADMIN_STAFF_ROWS:
+            if r in (15, 16):
+                continue
+            name = self.v(ADMIN_SHEET, 'M%d' % r)
+            if not name:
+                continue
+            role = self.v(ADMIN_SHEET, 'B%d' % r)
+            if is_dispatch(name, role) or 'タイミー' in str(name):
+                continue
+            key = norm_name(name, aliases)
+            cu = self.v(ADMIN_SHEET, 'CU%d' % r)
+            if isinstance(cu, (int, float)):
+                planned[key] = planned.get(key, 0) + cu
+            meta.setdefault(key, {'name': name, 'role': role,
+                                  'pay': self.v(ADMIN_SHEET, 'CT%d' % r)})
+        return planned, meta
+
+
 # 日次シート: 勤怠実績(N) の編集可能列と、日次チェックリストの範囲
 KINTAI_ROWS = range(5, 20)
 KINTAI_EDIT_COLS = {6, 8, 9, 11, 13, 14, 15}   # F,H,I,K(実績/休憩) M,N(変更) O(署名)

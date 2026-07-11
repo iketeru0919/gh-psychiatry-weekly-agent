@@ -21,7 +21,10 @@ DATA_ROOT = os.environ.get('SHIFT_APP_DATA', os.path.join(os.getcwd(), 'shift_ap
 _STAFF = {'index', 'facility', 'api_grid', 'api_grid_set',
           'api_daily', 'api_daily_set', 'login', 'logout', 'static'}
 _FACILITY = _STAFF | {'api_dashboard', 'api_users', 'api_users_set',
-                      'api_masters', 'export_xlsx', 'next_month'}
+                      'api_masters', 'export_xlsx', 'next_month',
+                      'csv_upload', 'csv_delete', 'api_csv_list', 'api_rodo',
+                      'api_night', 'api_timee', 'api_aliases',
+                      'api_snapshot', 'api_snapshot_diff'}
 _AREA = _FACILITY | {'overview', 'api_overview'}
 ROLE_ENDPOINTS = {'staff': _STAFF, 'facility': _FACILITY, 'area': _AREA}
 ROLE_LABELS = {'admin': '本部管理者', 'area': 'エリアマネージャー',
@@ -261,6 +264,148 @@ def create_app(data_root=None):
         data, y, m = next_month_bytes(store.upload_path(f['filename']), store.overrides(fid))
         new_id = store.add_facility(f['name'], y, m, data)
         return redirect(url_for('facility', fid=new_id))
+
+    # ---- 労務チェック(勤怠CSV照合・タイミー・夜勤体制) ----
+    from . import rodo
+
+    def _aliases():
+        return rodo.parse_aliases(store.get_setting('name_aliases'))
+
+    @app.post('/f/<int:fid>/csv')
+    def csv_upload(fid):
+        kind = request.form.get('kind', 'kintai')
+        for f in request.files.getlist('file'):
+            if f and f.filename.lower().endswith('.csv'):
+                store.add_csv(fid, kind, f.filename, f.read())
+        return redirect(url_for('facility', fid=fid) + '#rodo')
+
+    @app.post('/f/<int:fid>/csv/<int:csv_id>/delete')
+    def csv_delete(fid, csv_id):
+        store.delete_csv(csv_id)
+        return jsonify({'ok': True})
+
+    @app.get('/api/f/<int:fid>/csv')
+    def api_csv_list(fid):
+        return jsonify({'files': store.csv_list(fid)})
+
+    @app.get('/api/f/<int:fid>/rodo')
+    def api_rodo(fid):
+        tol = int(request.args.get('tol', 15))
+        hour_tol = float(request.args.get('hourtol', 0.25))
+        model = manager.get(fid)
+        aliases = _aliases()
+        maps = model.schedule_maps(aliases)
+        files = store.csv_list(fid, 'kintai')
+        if not files:
+            return jsonify({'error': '勤怠CSVが未アップロードです', 'daily': [], 'monthly': []})
+        merged = {'by_day': {}, 'by_name': {}, 'names': {}}
+        for f in files:
+            k = rodo.parse_kintai(store.csv_content(f['id']), aliases, maps['excluded'])
+            for key, byd in k['by_day'].items():
+                for d, lst in byd.items():
+                    merged['by_day'].setdefault(key, {}).setdefault(d, []).extend(lst)
+            for key, lst in k['by_name'].items():
+                merged['by_name'].setdefault(key, []).extend(lst)
+            merged['names'].update(k['names'])
+        daily = rodo.compare_daily(maps['schedule'], merged, tol)
+        planned, meta = model.planned_hours(aliases)
+        monthly = rodo.compare_monthly(planned, meta, merged, hour_tol)
+        return jsonify({'daily': daily, 'monthly': monthly,
+                        'csv_names': sorted(merged['names'].values()),
+                        'files': [f['filename'] for f in files]})
+
+    @app.get('/api/f/<int:fid>/night')
+    def api_night(fid):
+        model = manager.get(fid)
+        maps = model.schedule_maps(_aliases())
+        ncodes = rodo.night_codes_from_master(maps['code_times'])
+        cal = rodo.night_calendar(maps['by_day'], ncodes)
+        y, m = maps['year'], maps['month']
+        import calendar as _cal
+        days = []
+        counts = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0}
+        for d in range(1, model.days_in_month() + 1):
+            key = f'{y}/{m}/{d}'
+            entries = cal.get(key, [])
+            n = len(entries)
+            counts[min(n, 4)] += 1
+            days.append({'day': d,
+                         'weekday': ['月', '火', '水', '木', '金', '土', '日'][_cal.weekday(y, m, d)],
+                         'count': n,
+                         'staff': [{'name': e['name'], 'code': e['code']} for e in entries]})
+        return jsonify({'days': days, 'counts': counts,
+                        'night_codes': sorted(ncodes.keys()), 'year': y, 'month': m})
+
+    @app.get('/api/f/<int:fid>/timee')
+    def api_timee(fid):
+        model = manager.get(fid)
+        maps = model.schedule_maps(_aliases())
+        files = store.csv_list(fid, 'timee')
+        details = []
+        for f in files:
+            details.extend(rodo.parse_timee(store.csv_content(f['id'])))
+        summary = rodo.timee_summary(details)
+        # シフト上のタイミー枠と明細件数の日別照合
+        by_date = {}
+        for x in details:
+            by_date[x['求人日']] = by_date.get(x['求人日'], 0) + 1
+        recon = []
+        for d in sorted(set(maps['timee_slots']) | set(by_date), key=rodo._dord):
+            slots = maps['timee_slots'].get(d, 0)
+            actual = by_date.get(d, 0)
+            if slots != actual:
+                recon.append({'日付': d, 'シフト上の枠': slots, '明細件数': actual,
+                              '判定': '要確認',
+                              '内容': '明細なし' if actual == 0 else 'シフト枠なし' if slots == 0 else '件数不一致'})
+        return jsonify({'summary': summary, 'recon': recon,
+                        'files': [f['filename'] for f in files]})
+
+    @app.route('/api/aliases', methods=['GET', 'POST'])
+    def api_aliases():
+        if request.method == 'POST':
+            store.set_setting('name_aliases', request.get_json(force=True).get('text', ''))
+            return jsonify({'ok': True})
+        return jsonify({'text': store.get_setting('name_aliases')})
+
+    # ---- スナップショット(週次チェック) ----
+    @app.post('/api/f/<int:fid>/snapshot')
+    def api_snapshot(fid):
+        model = manager.get(fid)
+        grid = model.grid()
+        data = {str(r['row']): {'name': r['name'], 'cells': r['cells']} for r in grid['rows']}
+        store.add_snapshot(fid, data, username=session.get('username'))
+        return jsonify({'ok': True})
+
+    @app.get('/api/f/<int:fid>/snapshot/diff')
+    def api_snapshot_diff(fid):
+        snap = store.latest_snapshot(fid)
+        if snap is None:
+            return jsonify({'error': 'スナップショットがありません'})
+        model = manager.get(fid)
+        grid = model.grid()
+        cur = {str(r['row']): {'name': r['name'], 'cells': r['cells']} for r in grid['rows']}
+        changes = []
+        for rk in sorted(set(snap['data']) | set(cur), key=int):
+            before = snap['data'].get(rk)
+            after = cur.get(rk)
+            if before is None or after is None:
+                changes.append({'職員': (after or before)['name'], '日': '',
+                                '前': '' if before is None else '(行あり)',
+                                '後': '' if after is None else '(行あり)',
+                                '種別': '職員追加' if before is None else '職員削除'})
+                continue
+            if str(before['name']) != str(after['name']):
+                changes.append({'職員': f"{before['name']} → {after['name']}", '日': '',
+                                '前': before['name'], '後': after['name'], '種別': '氏名変更'})
+            for i in range(max(len(before['cells']), len(after['cells']))):
+                b = str(before['cells'][i]) if i < len(before['cells']) else ''
+                a = str(after['cells'][i]) if i < len(after['cells']) else ''
+                if b != a:
+                    changes.append({'職員': after['name'] or before['name'], '日': i + 1,
+                                    '前': b or '(空欄)', '後': a or '(空欄)', '種別': '勤務変更'})
+        import datetime
+        return jsonify({'taken_at': datetime.datetime.fromtimestamp(snap['ts']).strftime('%Y/%m/%d %H:%M'),
+                        'taken_by': snap['username'], 'changes': changes})
 
     @app.get('/api/f/<int:fid>/masters')
     def api_masters(fid):

@@ -55,6 +55,7 @@
   <button data-tab="dash">管理ダッシュボード</button>
   <button data-tab="users">利用者稼働</button>
   <button data-tab="daily">日次</button>
+  <button data-tab="rodo">労務チェック</button>
   <button data-tab="masters">マスタ</button>
 </div>
 
@@ -100,6 +101,41 @@
   <div class="gridwrap" style="max-height:50vh"><table id="ctable"></table></div>
 </div>
 
+<div id="panel-rodo" class="panel">
+  <div class="status" id="rodo-status"></div>
+
+  <h2>CSV管理(勤怠・タイミー明細)</h2>
+  <form method="post" action="/f/{{ f.id }}/csv" enctype="multipart/form-data" style="margin-bottom:.4rem">
+    <select name="kind"><option value="kintai">勤怠CSV</option><option value="timee">タイミー明細CSV</option></select>
+    <input type="file" name="file" accept=".csv" multiple required>
+    <button type="submit">アップロード</button>
+  </form>
+  <div id="csvlist" style="font-size:.85rem;margin-bottom:1rem"></div>
+
+  <h2>夜勤体制チェック <button onclick="loadNight()" style="font-size:.8rem">表示</button></h2>
+  <div id="nightbox"></div>
+
+  <h2>勤怠CSV照合
+    <label style="font-weight:400;font-size:.8rem">許容ズレ(分) <input id="rtol" value="15" style="width:3rem"></label>
+    <button onclick="loadRodo()" style="font-size:.8rem">照合実行</button>
+  </h2>
+  <div id="rodobox"></div>
+
+  <h2>タイミー明細 集計・照合 <button onclick="loadTimee()" style="font-size:.8rem">表示</button></h2>
+  <div id="timeebox"></div>
+
+  <h2>シフト変更チェック
+    <button onclick="takeSnapshot()" style="font-size:.8rem">現在のシフトを基準として保存</button>
+    <button onclick="loadDiff()" style="font-size:.8rem">基準との差分を表示</button>
+  </h2>
+  <div id="diffbox"></div>
+
+  <h2>同一人物名設定(全社共通)</h2>
+  <p class="small" style="font-size:.8rem;color:#667">1行に「基準名=別名1,別名2」。勤怠CSVとシフトの氏名表記が違う場合に使用。</p>
+  <textarea id="aliases" style="width:100%;max-width:40rem;min-height:5rem"></textarea><br>
+  <button onclick="saveAliases()">保存</button>
+</div>
+
 <div id="panel-masters" class="panel">
   <div class="status"></div>
   <h2>シフト略記号</h2>
@@ -120,6 +156,7 @@ document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
   if (b.dataset.tab === 'dash') loadDash();
   if (b.dataset.tab === 'users') loadUsers();
   if (b.dataset.tab === 'daily') loadDaily(CURRENT_DAY);
+  if (b.dataset.tab === 'rodo') initRodo();
   if (b.dataset.tab === 'masters') loadMasters();
 });
 
@@ -340,6 +377,91 @@ async function loadDaily(day) {
       if (r.ok) inp.dataset.orig = inp.value;
     };
   });
+}
+
+// ---- 労務チェック ----
+function tableOf(rows, judgeKey) {
+  if (!rows || !rows.length) return '<p style="color:#667;font-size:.85rem">データなし</p>';
+  const cols = Object.keys(rows[0]);
+  let h = '<div class="gridwrap" style="max-height:40vh"><table><tr>' +
+          cols.map(c => `<th>${esc(c)}</th>`).join('') + '</tr>';
+  for (const r of rows) {
+    h += '<tr>' + cols.map(c => {
+      const v = r[c];
+      const cls = (c === (judgeKey || '判定')) ?
+        (String(v) === 'OK' ? 'ok' : 'ng') : '';
+      return `<td class="${cls}" style="text-align:left">${esc(v)}</td>`;
+    }).join('') + '</tr>';
+  }
+  return h + '</table></div>';
+}
+
+async function initRodo() {
+  const files = (await (await fetch(`/api/f/${FID}/csv`)).json()).files;
+  $('#csvlist').innerHTML = files.length ? files.map(f =>
+    `<div>[${f.kind === 'kintai' ? '勤怠' : 'タイミー'}] ${esc(f.filename)} (${Math.round(f.size/1024)}KB) ` +
+    `<button onclick="delCsv(${f.id})" style="font-size:.75rem;color:#a33">削除</button></div>`).join('') :
+    'アップロード済みCSVはありません';
+  const a = await (await fetch('/api/aliases')).json();
+  $('#aliases').value = a.text || '';
+}
+async function delCsv(id) {
+  await fetch(`/f/${FID}/csv/${id}/delete`, {method: 'POST'});
+  initRodo();
+}
+async function saveAliases() {
+  await fetch('/api/aliases', {method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({text: $('#aliases').value})});
+  $('#rodo-status').textContent = '同一人物名設定を保存しました';
+}
+async function loadNight() {
+  $('#rodo-status').textContent = '計算中…';
+  const n = await (await fetch(`/api/f/${FID}/night`)).json();
+  const color = c => c === 0 ? '#ffdddd' : c === 1 ? '#fff2cc' : c >= 4 ? '#e8dbfa' : '#e2f4e5';
+  let h = `<p style="font-size:.85rem">夜勤コード: ${n.night_codes.map(esc).join(' / ')} ` +
+    `| 0名:${n.counts[0]}日 1名:${n.counts[1]}日 2名:${n.counts[2]}日 3名:${n.counts[3]}日 4名以上:${n.counts[4]}日</p>` +
+    '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;max-width:900px">';
+  for (const d of n.days) {
+    h += `<div style="border:1px solid #ccd;border-radius:6px;padding:.3rem;background:${color(d.count)}" ` +
+         `title="${d.staff.map(s => s.name + '/' + s.code).map(esc).join('\n')}">` +
+         `<div style="font-size:.7rem;color:#556">${d.day}(${d.weekday})</div>` +
+         `<div style="font-size:1.2rem;font-weight:700;text-align:center">${d.count}名</div>` +
+         `<div style="font-size:.65rem">${d.staff.map(s => esc(s.name.split(/[\s　]/)[0])).join('、')}</div></div>`;
+  }
+  $('#nightbox').innerHTML = h + '</div>';
+  $('#rodo-status').textContent = '';
+}
+async function loadRodo() {
+  $('#rodo-status').textContent = '照合中…';
+  const r = await (await fetch(`/api/f/${FID}/rodo?tol=${+$('#rtol').value || 15}`)).json();
+  if (r.error) { $('#rodobox').innerHTML = `<p class="ng">${esc(r.error)}</p>`; $('#rodo-status').textContent = ''; return; }
+  $('#rodobox').innerHTML =
+    `<h3 style="font-size:.9rem">日別ズレ(${r.daily.length}件)</h3>` + tableOf(r.daily) +
+    `<h3 style="font-size:.9rem">月間集計(勤務表CU時間 vs 打刻実績)</h3>` + tableOf(r.monthly);
+  $('#rodo-status').textContent = '';
+}
+async function loadTimee() {
+  $('#rodo-status').textContent = '集計中…';
+  const t = await (await fetch(`/api/f/${FID}/timee`)).json();
+  $('#timeebox').innerHTML =
+    `<h3 style="font-size:.9rem">月別集計</h3>` + tableOf(t.summary.monthly) +
+    `<h3 style="font-size:.9rem">日別</h3>` + tableOf(t.summary.daily) +
+    `<h3 style="font-size:.9rem">日勤・夜勤両方勤務者</h3>` + tableOf(t.summary.both) +
+    `<h3 style="font-size:.9rem">シフト枠との照合(${t.recon.length}件)</h3>` + tableOf(t.recon);
+  $('#rodo-status').textContent = '';
+}
+async function takeSnapshot() {
+  await fetch(`/api/f/${FID}/snapshot`, {method: 'POST'});
+  $('#rodo-status').textContent = '基準を保存しました';
+}
+async function loadDiff() {
+  $('#rodo-status').textContent = '差分計算中…';
+  const d = await (await fetch(`/api/f/${FID}/snapshot/diff`)).json();
+  if (d.error) { $('#diffbox').innerHTML = `<p class="ng">${esc(d.error)}</p>`; $('#rodo-status').textContent = ''; return; }
+  $('#diffbox').innerHTML =
+    `<p style="font-size:.85rem">基準: ${esc(d.taken_at)} (${esc(d.taken_by || '-')}) / 変更 ${d.changes.length}件</p>` +
+    tableOf(d.changes, '種別');
+  $('#rodo-status').textContent = '';
 }
 
 loadGrid();
