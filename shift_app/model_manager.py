@@ -12,6 +12,11 @@ from .xlcalc.parser import col_to_num, num_to_col
 INPUT_SHEET = '入力シート【現場配布用】'
 ADMIN_SHEET = '管理用シート'
 MASTER_SHEET = 'マスタ設定'
+PLACEMENT_SHEET = '人員配置【入力用】'
+MONTHLY_SHEET = '★毎月利用日数入力'
+
+USER_ROWS = range(13, 48)          # 利用者行(両シート共通)
+MONTH_BASE_COLS = [5 + 5 * k for k in range(12)]  # E,J,O,... 12か月分の先頭列
 
 GRID_FIRST_ROW = 6
 GRID_LAST_ROW = 55
@@ -166,7 +171,80 @@ class FacilityModel:
             '④判定': self.v(A, 'EV78'),
             '④過不足': self.v(A, 'EV81'),
         }
-        return {'staff': staff, 'kpi': kpi, 'haichi': haichi}
+        inputs = {}
+        for label, (col, row) in ADMIN_INPUT_CELLS.items():
+            inputs[label] = {'sheet': A, 'col': col, 'row': row, 'value': self._raw(A, col, row)}
+        return {'staff': staff, 'kpi': kpi, 'haichi': haichi, 'inputs': inputs}
+
+    # ---- 利用者稼働実態 ----
+    def _raw(self, sheet, col, row):
+        cell = self.wb.cells.get(sheet, {}).get((col, row))
+        if cell and cell[0] == 'v':
+            return _disp(cell[1])
+        return ''
+
+    def users(self):
+        P, M = PLACEMENT_SHEET, MONTHLY_SHEET
+        placement = {
+            'month_days': self._raw(P, 5, 5),
+            'rows': [],
+            'need': {
+                '生活支援必要数': self.v(P, 'E7'),
+                '区分3': self.v(P, 'F7'), '区分4': self.v(P, 'G7'),
+                '区分5': self.v(P, 'H7'), '区分6': self.v(P, 'I7'),
+            },
+            'totals': {
+                '区分3': self.v(P, 'F48'), '区分4': self.v(P, 'G48'),
+                '区分5': self.v(P, 'H48'), '区分6': self.v(P, 'I48'),
+                '延べ利用回数': self.v(P, 'F49'),
+            },
+        }
+        for r in USER_ROWS:
+            name = self._raw(P, 3, r)
+            kubun = self._raw(P, 4, r)
+            days = self._raw(P, 5, r)
+            placement['rows'].append({'row': r, 'name': name, 'kubun': kubun, 'days': days})
+
+        months = []
+        for i, base in enumerate(MONTH_BASE_COLS):
+            months.append({
+                'index': i + 1,
+                'col': base,
+                'label': self.v(M, base, 4) or f'{i + 1}か月目',
+                'month_days': self._raw(M, base, 5),
+                'need': self.v(M, base, 7),
+            })
+        monthly_rows = []
+        for r in USER_ROWS:
+            name = self._raw(M, 3, r)
+            kubun = self._raw(M, 4, r)
+            cells = [self._raw(M, base, r) for base in MONTH_BASE_COLS]
+            monthly_rows.append({'row': r, 'name': name, 'kubun': kubun, 'cells': cells})
+        return {'placement': placement, 'months': months, 'monthly_rows': monthly_rows,
+                'sheets': {'placement': P, 'monthly': M}}
+
+
+# 管理用シート上の手入力セル(④区分別利用者数・他施設兼務)
+ADMIN_INPUT_CELLS = {
+    '区分1': (_C('CK'), 70), '区分2': (_C('CO'), 70), '区分3': (_C('CS'), 70),
+    '区分4': (_C('CW'), 70), '区分5': (_C('DA'), 70), '区分6': (_C('DE'), 70),
+    'サビ管 他施設兼務': (_C('DO'), 71), '管理者 他施設兼務': (_C('DO'), 75),
+}
+
+
+def editable_user_cell(sheet, col, row):
+    """利用者稼働タブから編集を許可するセルか判定する。"""
+    if sheet == ADMIN_SHEET:
+        return (col, row) in ADMIN_INPUT_CELLS.values()
+    if sheet == PLACEMENT_SHEET:
+        if row in USER_ROWS and col in (3, 4, 5):        # 氏名/区分/延べ日数
+            return True
+        return (col, row) == (5, 5)                       # 月の日数
+    if sheet == MONTHLY_SHEET:
+        if row in USER_ROWS and (col in (3, 4) or col in MONTH_BASE_COLS):
+            return True
+        return row == 5 and col in MONTH_BASE_COLS        # 各月の日数
+    return False
 
 
 class ModelManager:

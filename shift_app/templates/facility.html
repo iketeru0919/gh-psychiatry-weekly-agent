@@ -38,6 +38,7 @@
 <div class="tabs">
   <button data-tab="grid" class="active">シフト入力</button>
   <button data-tab="dash">管理ダッシュボード</button>
+  <button data-tab="users">利用者稼働</button>
   <button data-tab="masters">マスタ</button>
 </div>
 
@@ -49,12 +50,25 @@
 
 <div id="panel-dash" class="panel">
   <div class="status" id="dash-status"></div>
+  <h2>④区分別利用者数ほか(手入力)</h2>
+  <div class="kpis" id="dinputs"></div>
   <h2>人員配置判定</h2>
   <table class="haichi" id="haichi"></table>
   <h2>月間指標</h2>
   <div class="kpis" id="kpis"></div>
   <h2>職員別 勤務集計</h2>
   <div class="gridwrap"><table id="staff"></table></div>
+</div>
+
+<div id="panel-users" class="panel">
+  <div class="status" id="users-status"></div>
+  <h2>当月の利用実態(④現利用者数の根拠)</h2>
+  <div style="margin-bottom:.4rem">月の日数:
+    <input id="pdays" style="width:4rem" data-sheet="placement" data-col="5" data-row="5">
+  </div>
+  <div class="gridwrap" style="max-height:45vh"><table id="ptable"></table></div>
+  <h2>月別利用日数(障害支援区分別平均利用者数の算定)</h2>
+  <div class="gridwrap" style="max-height:45vh"><table id="mtable"></table></div>
 </div>
 
 <div id="panel-masters" class="panel">
@@ -75,6 +89,7 @@ document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
   b.classList.add('active');
   $('#panel-' + b.dataset.tab).classList.add('active');
   if (b.dataset.tab === 'dash') loadDash();
+  if (b.dataset.tab === 'users') loadUsers();
   if (b.dataset.tab === 'masters') loadMasters();
 });
 
@@ -133,6 +148,23 @@ async function loadGridSummaryOnly() {
 async function loadDash() {
   $('#dash-status').textContent = '再計算中…';
   const d = await (await fetch(`/api/f/${FID}/dashboard`)).json();
+  $('#dinputs').innerHTML = Object.entries(d.inputs).map(([k, v]) =>
+    `<div class="kpi"><div class="label">${esc(k)}</div>` +
+    `<input class="dcell" style="width:5rem;font-size:1.1rem;font-weight:700" ` +
+    `data-sheet="${esc(v.sheet)}" data-col="${v.col}" data-row="${v.row}" value="${esc(v.value)}"></div>`).join('');
+  document.querySelectorAll('input.dcell').forEach(inp => {
+    inp.dataset.orig = inp.value;
+    inp.onchange = async () => {
+      if (inp.value === inp.dataset.orig) return;
+      $('#dash-status').textContent = '保存中…';
+      await fetch(`/api/f/${FID}/users`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({edits: [{sheet: inp.dataset.sheet, col: +inp.dataset.col, row: +inp.dataset.row, value: inp.value}]})
+      });
+      inp.dataset.orig = inp.value;
+      loadDash();
+    };
+  });
   $('#haichi').innerHTML = Object.entries(d.haichi).map(([k, v]) => {
     const cls = String(v).includes('未達') ? 'ng' : String(v).includes('到達') ? 'ok' : '';
     return `<tr><td>${esc(k)}</td><td class="${cls}">${esc(v)}</td></tr>`;
@@ -159,6 +191,67 @@ async function loadMasters() {
   $('#mstaff').innerHTML = '<tr><th>区分</th><th>氏名</th><th>職種</th><th>番号</th><th>資格</th><th>雇用</th></tr>' +
     m.staff.map(s => `<tr><td>${esc(s.category)}</td><td>${esc(s.name)}</td><td>${esc(s.role)}</td>` +
       `<td>${esc(s.employee_no)}</td><td>${esc(s.qualification)}</td><td>${esc(s.pay_type)}</td></tr>`).join('');
+}
+
+let SHEETS = null;
+async function loadUsers() {
+  $('#users-status').textContent = '読み込み中…';
+  const u = await (await fetch(`/api/f/${FID}/users`)).json();
+  SHEETS = u.sheets;
+  $('#pdays').value = u.placement.month_days;
+
+  const uin = (sheet, col, row, v, w) =>
+    `<input class="ucell" style="width:${w || '4rem'}" data-sheet="${sheet}" data-col="${col}" data-row="${row}" value="${esc(v)}">`;
+  let h = '<tr><th>利用者名</th><th>障害区分</th><th>延べ利用日数</th></tr>';
+  for (const r of u.placement.rows) {
+    h += `<tr><td>${uin('placement', 3, r.row, r.name, '10rem')}</td>` +
+         `<td>${uin('placement', 4, r.row, r.kubun)}</td>` +
+         `<td>${uin('placement', 5, r.row, r.days)}</td></tr>`;
+  }
+  h += `<tr class="summary"><td>区分別合計</td><td colspan="2" id="ptotals"></td></tr>` +
+       `<tr class="summary"><td>必要数</td><td colspan="2" id="pneed"></td></tr>`;
+  $('#ptable').innerHTML = h;
+  renderPlacementSummary(u.placement);
+
+  let m = '<tr><th>利用者名</th><th>区分</th>' +
+          u.months.map(x => `<th>${esc(x.label)}</th>`).join('') + '</tr>';
+  m += '<tr class="summary"><td>月の日数</td><td></td>' +
+       u.months.map(x => `<td>${uin('monthly', x.col, 5, x.month_days)}</td>`).join('') + '</tr>';
+  for (const r of u.monthly_rows) {
+    m += `<tr><td>${uin('monthly', 3, r.row, r.name, '10rem')}</td>` +
+         `<td>${uin('monthly', 4, r.row, r.kubun)}</td>` +
+         r.cells.map((v, i) => `<td>${uin('monthly', u.months[i].col, r.row, v)}</td>`).join('') + '</tr>';
+  }
+  m += '<tr class="summary"><td>生活支援必要数</td><td></td>' +
+       u.months.map(x => `<td>${esc(x.need)}</td>`).join('') + '</tr>';
+  $('#mtable').innerHTML = m;
+  $('#users-status').textContent = '';
+  document.querySelectorAll('input.ucell, #pdays').forEach(inp => {
+    inp.dataset.orig = inp.value;
+    inp.onchange = () => saveUserCell(inp);
+  });
+}
+
+function renderPlacementSummary(p) {
+  $('#ptotals').textContent = Object.entries(p.totals).map(([k, v]) => `${k}: ${v}`).join(' / ');
+  $('#pneed').textContent = Object.entries(p.need).map(([k, v]) => `${k}: ${v}`).join(' / ');
+}
+
+async function saveUserCell(inp) {
+  if (inp.value === inp.dataset.orig) return;
+  $('#users-status').textContent = '保存中…';
+  const r = await fetch(`/api/f/${FID}/users`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({edits: [{sheet: SHEETS[inp.dataset.sheet],
+      col: +inp.dataset.col, row: +inp.dataset.row, value: inp.value}]})
+  });
+  if (!r.ok) { $('#users-status').textContent = '保存エラー'; return; }
+  inp.dataset.orig = inp.value;
+  const u = await (await fetch(`/api/f/${FID}/users`)).json();
+  renderPlacementSummary(u.placement);
+  const needRow = document.querySelectorAll('#mtable tr.summary')[1];
+  if (needRow) u.months.forEach((x, i) => { needRow.children[i + 2].textContent = x.need; });
+  $('#users-status').textContent = '保存しました(人員配置判定に反映されます)';
 }
 
 loadGrid();
