@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>全施設ダッシュボード</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { font-family: "Hiragino Sans", "Noto Sans JP", sans-serif; margin: 1.2rem; color: #223; }
+  h1 { font-size: 1.25rem; margin: .2rem 0 .8rem; }
+  a { color: #467; }
+  table { border-collapse: collapse; font-size: .85rem; width: 100%; }
+  th, td { border: 1px solid #ccd; padding: .3rem .5rem; text-align: center; white-space: nowrap; }
+  th { background: #eef2f8; position: sticky; top: 0; cursor: pointer; }
+  td.name { text-align: left; font-weight: 600; }
+  .ok { color: #1a7d3c; font-weight: 700; } .ng { color: #b3261e; font-weight: 700; background: #ffecec; }
+  .warn { background: #fff4d6; }
+  .wrap { overflow: auto; max-height: 80vh; border: 1px solid #99b; }
+  .bar { display: flex; gap: .8rem; align-items: center; margin-bottom: .7rem; flex-wrap: wrap; }
+  button, .btn { padding: .35rem .8rem; border-radius: 6px; border: 1px solid #467; background: #467; color: #fff; cursor: pointer; text-decoration: none; font-size: .85rem; }
+  button.ghost { background: #fff; color: #467; }
+  .status { color: #275; min-height: 1.1em; }
+  label { font-size: .85rem; }
+</style>
+</head>
+<body>
+<h1>全施設ダッシュボード
+  <span style="font-size:.8rem;color:#667;font-weight:400">{{ username }} ({{ role }})</span>
+</h1>
+<div class="bar">
+  <a class="btn ghost" href="/">施設一覧</a>
+  {% if role == 'admin' %}<a class="btn ghost" href="/admin/users">ユーザー管理</a>{% endif %}
+  <label><input type="checkbox" id="only-ng"> 要対応のみ表示</label>
+  <button class="ghost" onclick="load(true)">全施設を再計算(時間がかかります)</button>
+  <a class="btn ghost" href="/logout">ログアウト</a>
+  <span class="status" id="status"></span>
+</div>
+<div class="wrap"><table id="t"></table></div>
+<script>
+const $ = s => document.querySelector(s);
+function esc(s){return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;');}
+let DATA = [];
+
+function isNG(s) {
+  if (!s) return false;
+  return String(s['基準判定']).includes('未達') || String(s['④判定']).includes('未達') ||
+         (s['割増金件数']||0) > 0 || (s['法定休日NG職員数']||0) > 0 ||
+         (s['勤怠署名漏れ日数']||0) > 0 || (s['日次未記入日数']||0) > 0;
+}
+
+function render() {
+  const onlyNg = $('#only-ng').checked;
+  let h = `<tr><th>施設</th><th>年月</th><th>基準判定</th><th>過不足</th><th>基準値</th>
+    <th>④判定</th><th>④過不足</th><th>割増金</th><th>法定休日NG</th>
+    <th>生支人工</th><th>世話人人工</th><th>シフト入力率</th>
+    <th>署名漏れ</th><th>日次未記入</th><th>更新</th></tr>`;
+  for (const f of DATA) {
+    const s = f.summary;
+    if (!s) { h += `<tr><td class="name"><a href="/f/${f.id}">${esc(f.name)}</a></td><td colspan="14">未計算</td></tr>`; continue; }
+    if (onlyNg && !isNG(s)) continue;
+    const cls = v => String(v).includes('未達') ? 'ng' : String(v).includes('到達') ? 'ok' : '';
+    const warn = (v, bad) => bad ? 'ng' : '';
+    const age = f.computed_at ? new Date(f.computed_at*1000).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
+    h += `<tr>
+      <td class="name"><a href="/f/${f.id}">${esc(f.name)}</a></td>
+      <td>${s.year}/${s.month}</td>
+      <td class="${cls(s['基準判定'])}">${esc(s['基準判定'])}</td>
+      <td class="${warn(0, (s['過不足']||0) < 0)}">${esc(s['過不足'])}</td>
+      <td>${esc(s['ラシエル基準値'])}</td>
+      <td class="${cls(s['④判定'])}">${esc(s['④判定'])}</td>
+      <td class="${warn(0, (s['④過不足']||0) < 0)}">${esc(s['④過不足'])}</td>
+      <td class="${warn(0, (s['割増金件数']||0) > 0)}">${esc(s['割増金件数'])}</td>
+      <td class="${warn(0, (s['法定休日NG職員数']||0) > 0)}">${esc(s['法定休日NG職員数'])}</td>
+      <td>${esc(s['生支人工'])}</td><td>${esc(s['世話人人工'])}</td>
+      <td class="${(s['シフト入力率']||0) < 50 ? 'warn' : ''}">${esc(s['シフト入力率'])}%</td>
+      <td class="${warn(0, (s['勤怠署名漏れ日数']||0) > 0)}">${esc(s['勤怠署名漏れ日数'])}/${esc(s['経過日数'])}日</td>
+      <td class="${warn(0, (s['日次未記入日数']||0) > 0)}">${esc(s['日次未記入日数'])}/${esc(s['経過日数'])}日</td>
+      <td style="color:#667">${age}</td></tr>`;
+  }
+  $('#t').innerHTML = h;
+}
+
+async function load(recompute) {
+  $('#status').textContent = recompute ? '全施設を再計算中…(施設数×数秒〜数十秒)' : '読み込み中…';
+  const r = await (await fetch('/api/overview' + (recompute ? '?recompute=1' : ''))).json();
+  DATA = r.facilities;
+  render();
+  $('#status').textContent = '';
+}
+$('#only-ng').onchange = render;
+load(false);
+</script>
+</body>
+</html>

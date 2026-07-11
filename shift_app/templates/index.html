@@ -18,7 +18,14 @@
 </style>
 </head>
 <body>
-<h1>障害者GH シフト管理 — 施設一覧</h1>
+<h1>障害者GH シフト管理 — 施設一覧
+  {% if username %}<span style="font-size:.8rem;color:#667;font-weight:400">{{ username }}</span>{% endif %}
+</h1>
+{% if role in ('admin', 'area') %}
+<p><a class="btn" href="/overview">全施設ダッシュボード</a>
+{% if role == 'admin' %} <a class="btn" href="/admin/users">ユーザー管理</a>{% endif %}
+{% if username %} <a class="btn" style="background:#fff;color:#467" href="/logout">ログアウト</a>{% endif %}</p>
+{% endif %}
 <table>
   <tr><th>施設名</th><th>対象年月</th><th></th><th></th></tr>
   {% for f in facilities %}

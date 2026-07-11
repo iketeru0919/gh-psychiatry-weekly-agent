@@ -17,11 +17,12 @@
 <div class="box">
   <h1 style="font-size:1.2rem">障害者GH シフト管理</h1>
   <form method="post">
-    <input type="password" name="password" placeholder="パスワード" autofocus required>
+    <p><input type="text" name="username" placeholder="ユーザー名" autofocus required></p>
+    <p><input type="password" name="password" placeholder="パスワード" required></p>
     <button type="submit">ログイン</button>
   </form>
   {% if error %}<div class="err">{{ error }}</div>{% endif %}
-  <p class="note">管理者用・現場用のパスワードはシステム管理者にご確認ください。</p>
+  <p class="note">アカウントは本部管理者にご確認ください。</p>
 </div>
 </body>
 </html>

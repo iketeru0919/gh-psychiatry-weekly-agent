@@ -343,6 +343,51 @@ def editable_user_cell(sheet, col, row):
     return False
 
 
+def _facility_summary(model):
+    """横断ダッシュボード用のサマリ(1施設分)。"""
+    import datetime
+    d = model.dashboard()
+    y, m = model.year_month()
+    today = datetime.date.today()
+    days = model.days_in_month()
+    # 入力状況
+    grid = model.grid()
+    named_rows = [r for r in grid['rows'] if r['name']]
+    filled = sum(1 for r in named_rows for c in r['cells'] if c)
+    # 経過日数(対象月が当月なら今日まで、過去月なら全日、未来月なら0)
+    if y and (y, m) < (today.year, today.month):
+        elapsed = days
+    elif y and (y, m) == (today.year, today.month):
+        elapsed = today.day
+    else:
+        elapsed = 0
+    kintai_map, check_map = model.daily_sheet_names()
+    kintai_missing = check_missing = 0
+    for day in range(1, elapsed + 1):
+        K, C = kintai_map.get(day), check_map.get(day)
+        if K and not any(model._raw(K, 15, r) for r in KINTAI_ROWS):
+            kintai_missing += 1
+        if C and not any(model._raw(C, col, 5) for col in CHECKLIST_COLS):
+            check_missing += 1
+    legal_ng = sum(1 for s in d['staff'] if '割増' in str(s['legal_holiday']))
+    return {
+        'year': y, 'month': m,
+        '基準判定': d['haichi']['基準判定'],
+        '過不足': d['haichi']['人員超過・過不足数'],
+        'ラシエル基準値': d['haichi']['現在のラシエル基準値'],
+        '④判定': d['haichi']['④判定'],
+        '④過不足': d['haichi']['④過不足'],
+        '割増金件数': d['kpi']['割増金発生 件数'],
+        '法定休日NG職員数': legal_ng,
+        '生支人工': d['kpi']['生活支援員 人工(換算)'],
+        '世話人人工': d['kpi']['世話人 人工(換算)'],
+        'シフト入力率': round(filled / max(1, len(named_rows) * days) * 100),
+        '勤怠署名漏れ日数': kintai_missing,
+        '日次未記入日数': check_missing,
+        '経過日数': elapsed,
+    }
+
+
 class ModelManager:
     """facility_id → FacilityModel のプロセス内キャッシュ。"""
 
@@ -361,11 +406,25 @@ class ModelManager:
                 cache_dir=self.store.cache_dir)
         return self._models[fid]
 
-    def set_cell(self, fid, sheet, col, row, value):
-        self.store.set_override(fid, sheet, col, row, value)
+    def set_cell(self, fid, sheet, col, row, value, username=None):
+        self.store.set_override(fid, sheet, col, row, value, username=username)
         model = self.get(fid)
         if model:
             model.set_cell(sheet, col, row, value)
 
     def drop(self, fid):
         self._models.pop(fid, None)
+
+    def summary(self, fid, force=False):
+        """サマリを取得(キャッシュ優先。編集があるとキャッシュは自動失効)。"""
+        if not force:
+            cached = self.store.summaries().get(fid)
+            if cached:
+                return cached['data'], cached['computed_at']
+        model = self.get(fid)
+        if model is None:
+            return None, None
+        data = _facility_summary(model)
+        self.store.save_summary(fid, data)
+        import time
+        return data, time.time()

@@ -17,9 +17,15 @@ from .store import Store
 
 DATA_ROOT = os.environ.get('SHIFT_APP_DATA', os.path.join(os.getcwd(), 'shift_app_data'))
 
-# 現場(staff)ロールでも使える操作。それ以外は管理者(admin)のみ。
-STAFF_ENDPOINTS = {'index', 'facility', 'api_grid', 'api_grid_set',
-                   'api_daily', 'api_daily_set', 'login', 'logout', 'static'}
+# ロール別に許可するエンドポイント(admin は全部)
+_STAFF = {'index', 'facility', 'api_grid', 'api_grid_set',
+          'api_daily', 'api_daily_set', 'login', 'logout', 'static'}
+_FACILITY = _STAFF | {'api_dashboard', 'api_users', 'api_users_set',
+                      'api_masters', 'export_xlsx', 'next_month'}
+_AREA = _FACILITY | {'overview', 'api_overview'}
+ROLE_ENDPOINTS = {'staff': _STAFF, 'facility': _FACILITY, 'area': _AREA}
+ROLE_LABELS = {'admin': '本部管理者', 'area': 'エリアマネージャー',
+               'facility': '施設管理者', 'staff': '現場'}
 
 
 def create_app(data_root=None):
@@ -35,46 +41,119 @@ def create_app(data_root=None):
             fh.write(os.urandom(32))
     app.secret_key = open(secret_path, 'rb').read()
 
-    admin_pw = os.environ.get('SHIFT_APP_ADMIN_PW')
-    staff_pw = os.environ.get('SHIFT_APP_STAFF_PW')
-    auth_enabled = bool(admin_pw)
+    # 初回起動時: ユーザーが1人もいなければ環境変数から admin を作成
+    if store.user_count() == 0 and os.environ.get('SHIFT_APP_ADMIN_PW'):
+        store.create_user('admin', os.environ['SHIFT_APP_ADMIN_PW'], 'admin', name='本部管理者')
+
+    def auth_enabled():
+        return store.user_count() > 0
+
+    def current_role():
+        return session.get('role')
+
+    def allowed_fids():
+        """このユーザーが触れる施設ID集合(None=全施設)。"""
+        if not auth_enabled() or current_role() == 'admin':
+            return None
+        return store.user_facility_ids(session.get('uid', -1))
+
+    def fid_allowed(fid):
+        fids = allowed_fids()
+        return fids is None or fid in fids
 
     @app.before_request
     def _guard():
-        if not auth_enabled or request.endpoint in (None, 'login', 'logout', 'static'):
+        if not auth_enabled() or request.endpoint in (None, 'login', 'logout', 'static'):
             return None
-        role = session.get('role')
+        role = current_role()
         if role is None:
             if request.path.startswith('/api/'):
                 return jsonify({'ok': False, 'error': 'ログインが必要です'}), 401
             return redirect(url_for('login', next=request.path))
-        if role != 'admin' and request.endpoint not in STAFF_ENDPOINTS:
-            return jsonify({'ok': False, 'error': 'この操作は管理者のみ可能です'}), 403
+        if role != 'admin' and request.endpoint not in ROLE_ENDPOINTS.get(role, set()):
+            return jsonify({'ok': False, 'error': 'この操作の権限がありません'}), 403
+        fid = (request.view_args or {}).get('fid')
+        if fid is not None and not fid_allowed(fid):
+            return jsonify({'ok': False, 'error': 'この施設へのアクセス権がありません'}), 403
         return None
 
     @app.route('/login', methods=['GET', 'POST'])
     def login():
         error = None
         if request.method == 'POST':
-            pw = request.form.get('password', '')
-            if admin_pw and pw == admin_pw:
-                session['role'] = 'admin'
-            elif staff_pw and pw == staff_pw:
-                session['role'] = 'staff'
-            else:
-                error = 'パスワードが違います'
-            if session.get('role'):
-                return redirect(request.args.get('next') or url_for('index'))
+            u = store.verify_user(request.form.get('username', ''), request.form.get('password', ''))
+            if u:
+                session['uid'] = u['id']
+                session['role'] = u['role']
+                session['username'] = u['username']
+                return redirect(request.args.get('next') or
+                                (url_for('overview') if u['role'] in ('admin', 'area') else url_for('index')))
+            error = 'ユーザー名またはパスワードが違います'
         return render_template('login.html', error=error)
 
     @app.get('/logout')
     def logout():
         session.clear()
-        return redirect(url_for('login') if auth_enabled else url_for('index'))
+        return redirect(url_for('login') if auth_enabled() else url_for('index'))
 
     @app.get('/')
     def index():
-        return render_template('index.html', facilities=store.facilities())
+        facs = store.facilities()
+        fids = allowed_fids()
+        if fids is not None:
+            facs = [f for f in facs if f['id'] in fids]
+        return render_template('index.html', facilities=facs,
+                               role=current_role() or 'admin',
+                               username=session.get('username'))
+
+    # ---- 横断ダッシュボード ----
+    @app.get('/overview')
+    def overview():
+        return render_template('overview.html', username=session.get('username'),
+                               role=current_role() or 'admin')
+
+    @app.get('/api/overview')
+    def api_overview():
+        facs = store.facilities()
+        fids = allowed_fids()
+        if fids is not None:
+            facs = [f for f in facs if f['id'] in fids]
+        cached = store.summaries()
+        force = request.args.get('recompute') == '1'
+        out = []
+        for f in facs:
+            if force or f['id'] not in cached:
+                data, ts = manager.summary(f['id'], force=force)
+            else:
+                data, ts = cached[f['id']]['data'], cached[f['id']]['computed_at']
+            out.append({'id': f['id'], 'name': f['name'], 'summary': data, 'computed_at': ts})
+        return jsonify({'facilities': out})
+
+    # ---- ユーザー管理(admin) ----
+    @app.route('/admin/users', methods=['GET', 'POST'])
+    def admin_users():
+        error = None
+        if request.method == 'POST':
+            act = request.form.get('action')
+            if act == 'create':
+                try:
+                    fids = [int(x) for x in request.form.getlist('facilities')]
+                    store.create_user(request.form['username'].strip(),
+                                      request.form['password'],
+                                      request.form['role'],
+                                      name=request.form.get('name') or None,
+                                      facility_ids=fids)
+                except Exception as e:
+                    error = f'作成できません: {e}'
+            elif act == 'delete':
+                uid = int(request.form['uid'])
+                if uid != session.get('uid'):
+                    store.delete_user(uid)
+                else:
+                    error = '自分自身は削除できません'
+        return render_template('users_admin.html', users=store.users(),
+                               facilities=store.facilities(), error=error,
+                               role_labels=ROLE_LABELS, username=session.get('username'))
 
     @app.post('/import')
     def import_xlsx():
@@ -118,7 +197,8 @@ def create_app(data_root=None):
             row = int(edit['row'])
             day = int(edit['day'])
             value = (edit.get('value') or '').strip() or None
-            manager.set_cell(fid, INPUT_SHEET, 5 + day, row, value)
+            manager.set_cell(fid, INPUT_SHEET, 5 + day, row, value,
+                             username=session.get('username'))
         return jsonify({'ok': True})
 
     @app.get('/api/f/<int:fid>/users')
@@ -140,7 +220,8 @@ def create_app(data_root=None):
                     value = float(value)
                 except ValueError:
                     pass
-            manager.set_cell(fid, sheet, col, row, value)
+            manager.set_cell(fid, sheet, col, row, value,
+                             username=session.get('username'))
         return jsonify({'ok': True})
 
     @app.get('/api/f/<int:fid>/daily/<int:day>')
@@ -157,7 +238,8 @@ def create_app(data_root=None):
             if not editable_daily_cell(sheet, col, row):
                 return jsonify({'ok': False, 'error': f'編集不可セル {sheet}!{col},{row}'}), 400
             value = (str(edit.get('value') or '')).strip() or None
-            manager.set_cell(fid, sheet, col, row, value)
+            manager.set_cell(fid, sheet, col, row, value,
+                             username=session.get('username'))
         return jsonify({'ok': True})
 
     @app.get('/api/f/<int:fid>/dashboard')

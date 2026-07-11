@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>ユーザー管理</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { font-family: "Hiragino Sans", "Noto Sans JP", sans-serif; margin: 1.5rem auto; max-width: 980px; color: #223; }
+  h1 { font-size: 1.25rem; } h2 { font-size: 1.05rem; margin-top: 1.6rem; }
+  a { color: #467; }
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+  th, td { border: 1px solid #ccd; padding: .4rem .6rem; text-align: left; }
+  th { background: #eef2f8; }
+  input, select { padding: .3rem; border: 1px solid #99b; border-radius: 5px; }
+  button { padding: .35rem .9rem; border-radius: 6px; border: 1px solid #467; background: #467; color: #fff; cursor: pointer; }
+  button.danger { background: #fff; color: #a33; border-color: #a33; }
+  .err { color: #b3261e; margin: .5rem 0; }
+  .box { border: 1px solid #ccd; border-radius: 8px; padding: 1rem; background: #f7f9fc; margin-top: .6rem; }
+  .facs { max-height: 10rem; overflow: auto; border: 1px solid #ccd; padding: .4rem; background: #fff; border-radius: 5px; }
+</style>
+</head>
+<body>
+<a href="/overview">&larr; 全施設ダッシュボード</a>
+<h1>ユーザー管理</h1>
+{% if error %}<div class="err">{{ error }}</div>{% endif %}
+
+<table>
+  <tr><th>ユーザー名</th><th>氏名</th><th>ロール</th><th>担当施設</th><th></th></tr>
+  {% for u in users %}
+  <tr>
+    <td>{{ u.username }}</td>
+    <td>{{ u.name or '' }}</td>
+    <td>{{ role_labels.get(u.role, u.role) }}</td>
+    <td>
+      {% if u.role == 'admin' %}全施設{% else %}
+        {% for f in facilities if f.id in u.facility_ids %}{{ f.name }}({{ f.year }}/{{ f.month }}) {% endfor %}
+      {% endif %}
+    </td>
+    <td>
+      <form method="post" style="display:inline" onsubmit="return confirm('{{ u.username }} を削除しますか?')">
+        <input type="hidden" name="action" value="delete">
+        <input type="hidden" name="uid" value="{{ u.id }}">
+        <button class="danger">削除</button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+
+<h2>ユーザーを追加</h2>
+<div class="box">
+<form method="post">
+  <input type="hidden" name="action" value="create">
+  <p>
+    ユーザー名 <input name="username" required>
+    氏名 <input name="name">
+    パスワード <input name="password" type="password" required>
+    ロール
+    <select name="role">
+      <option value="area">エリアマネージャー</option>
+      <option value="facility">施設管理者</option>
+      <option value="staff">現場</option>
+      <option value="admin">本部管理者</option>
+    </select>
+  </p>
+  <p>担当施設(エリアM・施設管理者・現場は必須。Ctrl+クリックで複数選択):</p>
+  <div class="facs">
+    {% for f in facilities %}
+    <label style="display:block"><input type="checkbox" name="facilities" value="{{ f.id }}"> {{ f.name }}({{ f.year }}年{{ f.month }}月)</label>
+    {% endfor %}
+  </div>
+  <p><button type="submit">作成</button></p>
+</form>
+</div>
+</body>
+</html>

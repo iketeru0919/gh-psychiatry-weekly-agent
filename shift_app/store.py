@@ -22,7 +22,48 @@ CREATE TABLE IF NOT EXISTS overrides (
     updated REAL NOT NULL,
     PRIMARY KEY (facility_id, sheet, col, row)
 );
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE,
+    pw_hash TEXT NOT NULL,      -- salt$hash (pbkdf2-sha256)
+    role TEXT NOT NULL,         -- admin / area / facility / staff
+    name TEXT,
+    created REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS user_facilities (
+    user_id INTEGER NOT NULL,
+    facility_id INTEGER NOT NULL,
+    PRIMARY KEY (user_id, facility_id)
+);
+CREATE TABLE IF NOT EXISTS summaries (
+    facility_id INTEGER PRIMARY KEY,
+    data TEXT NOT NULL,         -- JSON
+    computed_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS edit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts REAL NOT NULL,
+    username TEXT,
+    facility_id INTEGER NOT NULL,
+    sheet TEXT NOT NULL,
+    col INTEGER NOT NULL,
+    row INTEGER NOT NULL,
+    value TEXT
+);
 """
+
+
+def _hash_pw(password, salt=None):
+    import hashlib
+    import os as _os
+    salt = salt or _os.urandom(16).hex()
+    h = hashlib.pbkdf2_hmac('sha256', password.encode(), bytes.fromhex(salt), 200_000).hex()
+    return f'{salt}${h}'
+
+
+def _verify_pw(password, stored):
+    salt = stored.split('$', 1)[0]
+    return _hash_pw(password, salt) == stored
 
 
 class Store:
@@ -80,15 +121,80 @@ class Store:
                 pass
 
     # --- overrides ---
-    def set_override(self, fid, sheet, col, row, value):
+    def set_override(self, fid, sheet, col, row, value, username=None):
+        now = time.time()
         with self._db() as db:
             db.execute(
                 'INSERT INTO overrides (facility_id, sheet, col, row, value, updated) '
                 'VALUES (?,?,?,?,?,?) '
                 'ON CONFLICT(facility_id, sheet, col, row) DO UPDATE SET value=excluded.value, updated=excluded.updated',
-                (fid, sheet, col, row, json.dumps(value, ensure_ascii=False), time.time()))
+                (fid, sheet, col, row, json.dumps(value, ensure_ascii=False), now))
+            db.execute(
+                'INSERT INTO edit_log (ts, username, facility_id, sheet, col, row, value) VALUES (?,?,?,?,?,?,?)',
+                (now, username, fid, sheet, col, row, json.dumps(value, ensure_ascii=False)))
+            db.execute('DELETE FROM summaries WHERE facility_id=?', (fid,))
 
     def overrides(self, fid):
         with self._db() as db:
             return [(r['sheet'], r['col'], r['row'], json.loads(r['value']))
                     for r in db.execute('SELECT * FROM overrides WHERE facility_id=?', (fid,))]
+
+    # --- users ---
+    def create_user(self, username, password, role, name=None, facility_ids=()):
+        with self._db() as db:
+            cur = db.execute(
+                'INSERT INTO users (username, pw_hash, role, name, created) VALUES (?,?,?,?,?)',
+                (username, _hash_pw(password), role, name, time.time()))
+            uid = cur.lastrowid
+            for fid in facility_ids:
+                db.execute('INSERT OR IGNORE INTO user_facilities VALUES (?,?)', (uid, fid))
+            return uid
+
+    def verify_user(self, username, password):
+        with self._db() as db:
+            r = db.execute('SELECT * FROM users WHERE username=?', (username,)).fetchone()
+            if r and _verify_pw(password, r['pw_hash']):
+                return dict(r)
+            return None
+
+    def users(self):
+        with self._db() as db:
+            out = []
+            for r in db.execute('SELECT * FROM users ORDER BY role, username'):
+                u = dict(r)
+                u['facility_ids'] = [x['facility_id'] for x in db.execute(
+                    'SELECT facility_id FROM user_facilities WHERE user_id=?', (r['id'],))]
+                out.append(u)
+            return out
+
+    def user_count(self):
+        with self._db() as db:
+            return db.execute('SELECT COUNT(*) c FROM users').fetchone()['c']
+
+    def delete_user(self, uid):
+        with self._db() as db:
+            db.execute('DELETE FROM user_facilities WHERE user_id=?', (uid,))
+            db.execute('DELETE FROM users WHERE id=?', (uid,))
+
+    def user_facility_ids(self, uid):
+        with self._db() as db:
+            return {r['facility_id'] for r in db.execute(
+                'SELECT facility_id FROM user_facilities WHERE user_id=?', (uid,))}
+
+    def set_user_facilities(self, uid, facility_ids):
+        with self._db() as db:
+            db.execute('DELETE FROM user_facilities WHERE user_id=?', (uid,))
+            for fid in facility_ids:
+                db.execute('INSERT OR IGNORE INTO user_facilities VALUES (?,?)', (uid, fid))
+
+    # --- summaries ---
+    def save_summary(self, fid, data):
+        with self._db() as db:
+            db.execute('INSERT INTO summaries (facility_id, data, computed_at) VALUES (?,?,?) '
+                       'ON CONFLICT(facility_id) DO UPDATE SET data=excluded.data, computed_at=excluded.computed_at',
+                       (fid, json.dumps(data, ensure_ascii=False), time.time()))
+
+    def summaries(self):
+        with self._db() as db:
+            return {r['facility_id']: {'data': json.loads(r['data']), 'computed_at': r['computed_at']}
+                    for r in db.execute('SELECT * FROM summaries')}
