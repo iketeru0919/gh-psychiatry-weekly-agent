@@ -12,6 +12,7 @@ import re
 _ERR_RE = re.compile(r'#(REF!|DIV/0!|VALUE!|NAME\?|N/A|NULL!|NUM!|SPILL!)')
 _NUM_RE = re.compile(r'\d+(?:\.\d+)?(?:[eE][+-]?\d+)?')
 _CELL_RE = re.compile(r'^\$?([A-Za-z]{1,3})\$?(\d+)$')
+_COL_RE = re.compile(r'^\$?[A-Za-z]{1,3}$')
 # ident の終端になる文字
 _IDENT_END = set('()+-*/^&=<>,:%! \t\n"\'')
 
@@ -218,11 +219,15 @@ class Parser:
             k2, v2 = self.next()
             if k2 == 'ERR':  # 例: 入力シート!#REF!
                 return ('err', v2)
+            if k2 == 'NAME' and _COL_RE.match(v2):
+                return self._col_range(sheet, v2)
             if k2 != 'CELL':
                 raise ValueError(f'expected cell after sheet, got {k2} {v2}')
             return self._maybe_range(sheet, v2)
         if k == 'CELL':
             return self._maybe_range(None, v)
+        if k == 'NAME' and _COL_RE.match(v) and self.peek() == ('OP', ':'):
+            return self._col_range(None, v)
         if k == 'NAME':
             if self.peek() == ('OP', '('):
                 self.next()
@@ -242,6 +247,18 @@ class Parser:
                 return ('call', name, args)
             raise ValueError(f'unknown name {v!r}')
         raise ValueError(f'unexpected token {k} {v}')
+
+    def _col_range(self, sheet, col1):
+        """列全体参照: C:C / $E:$BH / シート!$B:$B"""
+        self.expect('OP', ':')
+        k, v = self.next()
+        if k == 'SHEET':
+            k, v = self.next()
+        if k != 'NAME' or not _COL_RE.match(v):
+            raise ValueError(f'bad column range end: {k} {v}')
+        c1 = col_to_num(col1.replace('$', ''))
+        c2 = col_to_num(v.replace('$', ''))
+        return ('crange', sheet, min(c1, c2), max(c1, c2))
 
     def _maybe_range(self, sheet, cell):
         if self.peek() == ('OP', ':'):

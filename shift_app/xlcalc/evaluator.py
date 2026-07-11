@@ -245,19 +245,22 @@ class Workbook:
         self.volatile_cells = set()  # TODAY 等に依存したセル
 
         self.transition_sheets = set()
+        self.extent = {}  # sheet -> (max_row, max_col) 使用範囲(列全体参照の評価境界)
         if cache_dir:
             import hashlib
             import os
             import pickle
             h = hashlib.sha256(open(path, 'rb').read()).hexdigest()[:16]
-            pkl = os.path.join(cache_dir, f'xlmodel-v2-{h}.pkl')
+            pkl = os.path.join(cache_dir, f'xlmodel-v3-{h}.pkl')
             if os.path.exists(pkl):
                 with open(pkl, 'rb') as fh:
-                    self.cells, self.cached, self.formulas, self.transition_sheets = pickle.load(fh)
+                    (self.cells, self.cached, self.formulas,
+                     self.transition_sheets, self.extent) = pickle.load(fh)
                 return
             self._load(path, keep_sheets)
             with open(pkl, 'wb') as fh:
-                pickle.dump((self.cells, self.cached, self.formulas, self.transition_sheets), fh)
+                pickle.dump((self.cells, self.cached, self.formulas,
+                             self.transition_sheets, self.extent), fh)
             return
         self._load(path, keep_sheets)
 
@@ -309,6 +312,10 @@ class Workbook:
             self.cells[name] = cmap
             self.formulas[name] = fmap
             self.cached[name] = cachemap
+            self.extent[name] = (
+                max((k[1] for k in cmap), default=1),
+                max((k[0] for k in cmap), default=1),
+            )
         wbf.close()
         wbv.close()
 
@@ -377,6 +384,10 @@ class Workbook:
             return v
         if tag == 'range':
             return self._range(node, ctx)
+        if tag == 'crange':
+            sheet = node[1] or ctx.sheet
+            maxr = self.extent.get(sheet, (1, 1))[0]
+            return self._range(('range', node[1], node[2], 1, node[3], maxr), ctx)
         if tag == 'un':
             v = _num(self.eval_node(node[2], ctx), ctx.transition)
             if isinstance(v, XLErr):
@@ -592,6 +603,31 @@ class Workbook:
                 n += 1
         return float(n)
 
+    def _fn_SUMIFS(self, vals, ctx):
+        if isinstance(vals[0], XLErr):
+            return vals[0]
+        sumrng = vals[0]
+        tgt = list(sumrng.flat())
+        pairs = [(list(vals[i].flat()), _Criteria(vals[i + 1])) for i in range(1, len(vals), 2)]
+        t = 0.0
+        for i, s in enumerate(tgt):
+            if all(crit.match(cells[i]) for cells, crit in pairs):
+                if isinstance(s, (int, float)) and not isinstance(s, bool):
+                    t += s
+        return t
+
+    def _fn_ROWS(self, vals, ctx):
+        rng = vals[0]
+        if not isinstance(rng, RangeVal):
+            return 1.0
+        return float(len(rng.rows))
+
+    def _fn_COLUMNS(self, vals, ctx):
+        rng = vals[0]
+        if not isinstance(rng, RangeVal):
+            return 1.0
+        return float(len(rng.rows[0]) if rng.rows else 0)
+
     def _fn_SUMIF(self, vals, ctx):
         if isinstance(vals[0], XLErr):
             return vals[0]
@@ -728,6 +764,13 @@ class Workbook:
             r, c = 1, int(_num(vals[1]))
         if len(rows[0]) == 1 and len(vals) == 2:
             c = 1
+        if r == 0 and 1 <= c <= len(rows[0]):  # INDEX(範囲, 0, 列) → 列全体
+            col = [[row[c - 1]] for row in rows]
+            cc = rng.c1 + c - 1
+            return RangeVal(rng.sheet, cc, rng.r1, cc, rng.r2, col)
+        if c == 0 and 1 <= r <= len(rows):     # INDEX(範囲, 行, 0) → 行全体
+            rr = rng.r1 + r - 1
+            return RangeVal(rng.sheet, rng.c1, rr, rng.c2, rr, [list(rows[r - 1])])
         if r < 1 or r > len(rows) or c < 1 or c > len(rows[0]):
             return ERR_REF
         return rows[r - 1][c - 1]
