@@ -497,6 +497,32 @@ class Workbook:
         if name in ('TODAY', 'NOW'):
             ctx.volatile = True
             return date_to_serial(self.today)
+        if name == 'INDEX' and args and args[0][0] in ('range', 'crange'):
+            # 参照形式の INDEX は選択された行/列だけを評価する(Excel と同じ遅延性)。
+            # 範囲全体を先に評価すると、選ばれない列の逆参照で疑似循環になる。
+            a0 = args[0]
+            sheet = a0[1] or ctx.sheet
+            if a0[0] == 'crange':
+                c1, r1, c2 = a0[2], 1, a0[3]
+                r2 = self.extent.get(sheet, (1, 1))[0]
+            else:
+                c1, r1, c2, r2 = a0[2], a0[3], a0[4], a0[5]
+            r = int(_num(self.eval_node(args[1], ctx))) if len(args) > 1 else 1
+            c = int(_num(self.eval_node(args[2], ctx))) if len(args) > 2 else 1
+            nrows, ncols = r2 - r1 + 1, c2 - c1 + 1
+            if nrows == 1 and len(args) == 2:
+                r, c = 1, r
+            if ncols == 1 and len(args) == 2:
+                c = 1
+            if r == 0 and 1 <= c <= ncols:
+                cc = c1 + c - 1
+                return self._range(('range', a0[1], cc, r1, cc, r2), ctx)
+            if c == 0 and 1 <= r <= nrows:
+                rr = r1 + r - 1
+                return self._range(('range', a0[1], c1, rr, c2, rr), ctx)
+            if r < 1 or r > nrows or c < 1 or c > ncols:
+                return ERR_REF
+            return self.value(sheet, c1 + c - 1, r1 + r - 1)
 
         vals = [self.eval_node(a, ctx) for a in args]
         fn = getattr(self, '_fn_' + name.replace('.', '_'), None)
