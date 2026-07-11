@@ -497,6 +497,20 @@ class Workbook:
         if name in ('TODAY', 'NOW'):
             ctx.volatile = True
             return date_to_serial(self.today)
+        if name in ('ROWS', 'COLUMNS'):
+            # 構造関数: 範囲の形だけを見る。セル値は評価しない
+            # (評価すると ROWS($S$13:S13) 型の数式が自己循環になる)
+            a = args[0]
+            if a[0] == 'range':
+                return float(a[5] - a[3] + 1) if name == 'ROWS' else float(a[4] - a[2] + 1)
+            if a[0] == 'crange':
+                sheet = a[1] or ctx.sheet
+                if name == 'ROWS':
+                    return float(self.extent.get(sheet, (1, 1))[0])
+                return float(a[3] - a[2] + 1)
+            if a[0] == 'ref':
+                return 1.0
+            return ERR_VALUE
         if name == 'INDEX' and args and args[0][0] in ('range', 'crange'):
             # 参照形式の INDEX は選択された行/列だけを評価する(Excel と同じ遅延性)。
             # 範囲全体を先に評価すると、選ばれない列の逆参照で疑似循環になる。
@@ -641,18 +655,6 @@ class Workbook:
                 if isinstance(s, (int, float)) and not isinstance(s, bool):
                     t += s
         return t
-
-    def _fn_ROWS(self, vals, ctx):
-        rng = vals[0]
-        if not isinstance(rng, RangeVal):
-            return 1.0
-        return float(len(rng.rows))
-
-    def _fn_COLUMNS(self, vals, ctx):
-        rng = vals[0]
-        if not isinstance(rng, RangeVal):
-            return 1.0
-        return float(len(rng.rows[0]) if rng.rows else 0)
 
     def _fn_SUMIF(self, vals, ctx):
         if isinstance(vals[0], XLErr):
