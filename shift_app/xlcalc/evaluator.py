@@ -624,6 +624,16 @@ class Workbook:
                     best = v
         return best if best is not None else 0.0
 
+    def _fn_AVERAGE(self, vals, ctx):
+        t, n = 0.0, 0
+        for v in self._iter_scalars(vals):
+            if isinstance(v, XLErr):
+                return v
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                t += v
+                n += 1
+        return ERR_DIV0 if n == 0 else t / n
+
     def _fn_COUNTIF(self, vals, ctx):
         rng, crit = vals
         if isinstance(rng, XLErr):
@@ -839,11 +849,14 @@ class Workbook:
     # -- 文字列 --
     def _fn_TEXT(self, vals, ctx):
         v, fmt = vals[0], vals[1]
-        n = _num(v)
         if fmt == '@':
             t = _text(v)
             return t if not isinstance(t, XLErr) else t
+        n = _num(v)
         if isinstance(n, XLErr):
+            # 数値化できない文字列はそのまま返す(Excel の TEXT の仕様)
+            if isinstance(v, str):
+                return v
             return n
         if fmt in ('aaa', 'aaaa'):
             wd = _JP_WEEKDAYS[int(n) % 7]
