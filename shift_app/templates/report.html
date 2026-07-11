@@ -20,6 +20,14 @@
   .okbox { background: #e7f5ea; border: 1px solid #1a7d3c; border-radius: 8px; padding: .6rem .9rem; margin: .4rem 0; }
   #spinner { padding: 2rem; color: #556; }
   .gridwrap { overflow: auto; max-height: 45vh; border: 1px solid #ccd; }
+  .btn { display: inline-block; padding: .3rem .8rem; border: 1px solid #467; border-radius: 6px;
+         background: #467; color: #fff; text-decoration: none; font-size: .85rem; cursor: pointer; }
+  .btn.ghost { background: #fff; color: #467; }
+  @media print {
+    a, button, .btn, #spinner { display: none !important; }
+    .gridwrap { max-height: none; overflow: visible; border: none; }
+    body { margin: 0; font-size: 9pt; } table { font-size: 8pt; }
+  }
 </style>
 </head>
 <body>
@@ -27,6 +35,11 @@
 <h1>取り込みチェック結果 — {{ f.name }} {{ f.year }}年{{ f.month }}月
   <button onclick="load(true)" style="font-size:.75rem">再チェック</button>
 </h1>
+<p>
+  <a class="btn" href="/f/{{ f.id }}/report.xlsx">Excelダウンロード</a>
+  <button class="btn ghost" onclick="downloadStaffCsv()">職員別集計CSV</button>
+  <button class="btn ghost" onclick="window.print()">印刷</button>
+</p>
 <div id="spinner">チェック実行中です…(初回はブックの解析に1〜2分かかります)</div>
 <div id="body" style="display:none">
   <div class="kpis" id="kpis"></div>
@@ -48,6 +61,7 @@ function table(rows){
 async function load(refresh){
   $('#spinner').style.display=''; $('#body').style.display='none';
   const r = await (await fetch(`/api/f/${FID}/report${refresh?'?refresh=1':''}`)).json();
+  REPORT = r;
   const s = r.summary;
   $('#kpis').innerHTML = Object.entries(s).map(([k,v])=>{
     const cls = k==='警告件数' ? (v>0?'warn':'ok') : '';
@@ -84,6 +98,21 @@ async function load(refresh){
     r.staff_monthly.map(x=>'<tr>'+cols.map(c=>`<td>${esc(x[c])}</td>`).join('')+'</tr>').join('');
 
   $('#spinner').style.display='none'; $('#body').style.display='';
+}
+let REPORT = null;
+function downloadStaffCsv(){
+  const rows = REPORT?.staff_monthly || [];
+  if (!rows.length) { alert('データがありません'); return; }
+  const cols = Object.keys(rows[0]);
+  const cell = v => '"' + String(v ?? '').replace(/"/g,'""') + '"';
+  const csv = cols.map(cell).join(',') + '\r\n' +
+    rows.map(r => cols.map(c => cell(r[c])).join(',')).join('\r\n');
+  const blob = new Blob(['﻿' + csv], {type: 'text/csv;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `職員別月次集計_{{ f.name }}_{{ f.year }}年{{ f.month }}月.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 load(false);
 </script>

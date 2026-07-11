@@ -25,7 +25,7 @@ _FACILITY = _STAFF | {'api_dashboard', 'api_users', 'api_users_set',
                       'csv_upload', 'csv_delete', 'api_csv_list', 'api_rodo',
                       'api_night', 'api_timee', 'api_aliases',
                       'api_snapshot', 'api_snapshot_diff',
-                      'report_page', 'api_report', 'api_staff_monthly'}
+                      'report_page', 'api_report', 'api_staff_monthly', 'report_xlsx'}
 _AREA = _FACILITY | {'overview', 'api_overview'}
 ROLE_ENDPOINTS = {'staff': _STAFF, 'facility': _FACILITY, 'area': _AREA}
 ROLE_LABELS = {'admin': '本部管理者', 'area': 'エリアマネージャー',
@@ -430,6 +430,22 @@ def create_app(data_root=None):
         report = build_report(model, store, fid, masters_warnings=warnings)
         store.save_report(fid, report)
         return jsonify(report)
+
+    @app.get('/f/<int:fid>/report.xlsx')
+    def report_xlsx(fid):
+        report = store.get_report(fid)
+        if report is None:
+            from .checks import build_report
+            model = manager.get(fid)
+            warnings = [w for w in store.get_setting(f'import_warnings_{fid}', '').splitlines() if w]
+            report = build_report(model, store, fid, masters_warnings=warnings)
+            store.save_report(fid, report)
+        from .report_xlsx import report_to_xlsx
+        f = store.facility(fid)
+        data = report_to_xlsx(f['name'], report)
+        name = f'チェック結果_{f["name"]}_{report["year"]}年{report["month"]}月.xlsx'
+        return send_file(io.BytesIO(data), as_attachment=True, download_name=name,
+                         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
     @app.get('/api/f/<int:fid>/staff-monthly')
     def api_staff_monthly(fid):
