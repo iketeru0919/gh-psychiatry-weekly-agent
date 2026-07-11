@@ -3,10 +3,13 @@
 起動:  python -m shift_app.web  →  http://127.0.0.1:5000
 データ: ./shift_app_data/ (SQLite + アップロードした Excel)
 """
+import io
 import os
 
-from flask import Flask, jsonify, redirect, render_template, request, url_for
+from flask import (Flask, jsonify, redirect, render_template, request,
+                   send_file, session, url_for)
 
+from .export import export_bytes, next_month_bytes
 from .masters import extract_masters
 from .model_manager import (INPUT_SHEET, ModelManager, editable_daily_cell,
                             editable_user_cell)
@@ -14,12 +17,60 @@ from .store import Store
 
 DATA_ROOT = os.environ.get('SHIFT_APP_DATA', os.path.join(os.getcwd(), 'shift_app_data'))
 
+# 現場(staff)ロールでも使える操作。それ以外は管理者(admin)のみ。
+STAFF_ENDPOINTS = {'index', 'facility', 'api_grid', 'api_grid_set',
+                   'api_daily', 'api_daily_set', 'login', 'logout', 'static'}
+
 
 def create_app(data_root=None):
     app = Flask(__name__)
     store = Store(data_root or DATA_ROOT)
     manager = ModelManager(store)
     app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024
+
+    # セッション鍵はデータディレクトリに永続化
+    secret_path = os.path.join(store.root, 'secret_key')
+    if not os.path.exists(secret_path):
+        with open(secret_path, 'wb') as fh:
+            fh.write(os.urandom(32))
+    app.secret_key = open(secret_path, 'rb').read()
+
+    admin_pw = os.environ.get('SHIFT_APP_ADMIN_PW')
+    staff_pw = os.environ.get('SHIFT_APP_STAFF_PW')
+    auth_enabled = bool(admin_pw)
+
+    @app.before_request
+    def _guard():
+        if not auth_enabled or request.endpoint in (None, 'login', 'logout', 'static'):
+            return None
+        role = session.get('role')
+        if role is None:
+            if request.path.startswith('/api/'):
+                return jsonify({'ok': False, 'error': 'ログインが必要です'}), 401
+            return redirect(url_for('login', next=request.path))
+        if role != 'admin' and request.endpoint not in STAFF_ENDPOINTS:
+            return jsonify({'ok': False, 'error': 'この操作は管理者のみ可能です'}), 403
+        return None
+
+    @app.route('/login', methods=['GET', 'POST'])
+    def login():
+        error = None
+        if request.method == 'POST':
+            pw = request.form.get('password', '')
+            if admin_pw and pw == admin_pw:
+                session['role'] = 'admin'
+            elif staff_pw and pw == staff_pw:
+                session['role'] = 'staff'
+            else:
+                error = 'パスワードが違います'
+            if session.get('role'):
+                return redirect(request.args.get('next') or url_for('index'))
+        return render_template('login.html', error=error)
+
+    @app.get('/logout')
+    def logout():
+        session.clear()
+        return redirect(url_for('login') if auth_enabled else url_for('index'))
 
     @app.get('/')
     def index():
@@ -113,6 +164,21 @@ def create_app(data_root=None):
     def api_dashboard(fid):
         model = manager.get(fid)
         return jsonify(model.dashboard())
+
+    @app.get('/f/<int:fid>/export.xlsx')
+    def export_xlsx(fid):
+        f = store.facility(fid)
+        data = export_bytes(store.upload_path(f['filename']), store.overrides(fid))
+        name = f'{f["name"]}_{f["year"]}年{f["month"]}月.xlsx'
+        return send_file(io.BytesIO(data), as_attachment=True, download_name=name,
+                         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+    @app.post('/f/<int:fid>/next-month')
+    def next_month(fid):
+        f = store.facility(fid)
+        data, y, m = next_month_bytes(store.upload_path(f['filename']), store.overrides(fid))
+        new_id = store.add_facility(f['name'], y, m, data)
+        return redirect(url_for('facility', fid=new_id))
 
     @app.get('/api/f/<int:fid>/masters')
     def api_masters(fid):

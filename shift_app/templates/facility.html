@@ -41,6 +41,14 @@
 </head>
 <body>
 <a href="/">&larr; 施設一覧</a>
+<span style="float:right">
+  <a class="btn" style="padding:.3rem .8rem;border:1px solid #467;border-radius:6px;text-decoration:none"
+     href="{{ url_for('export_xlsx', fid=f.id) }}">Excelエクスポート</a>
+  <form method="post" action="{{ url_for('next_month', fid=f.id) }}" style="display:inline"
+        onsubmit="return confirm('翌月のブックを作成しますか?(マスタ・利用者は引き継ぎ、シフトと日次はクリアされます)')">
+    <button style="padding:.3rem .8rem;border:1px solid #275;background:#275;color:#fff;border-radius:6px;cursor:pointer">翌月を作成</button>
+  </form>
+</span>
 <h1>{{ f.name }} <span id="ym"></span></h1>
 <div class="tabs">
   <button data-tab="grid" class="active">シフト入力</button>
