@@ -16,9 +16,12 @@
 # 感染対策向上加算は入力しません。
 #
 # 出力:
-# - 施設別に入力済みの原本コピー（障がいGH_<施設名>.xlsx）
+# - 施設別に入力済みの原本コピー（障がいGH_<元ファイル名>.xlsx）
 # - 処理結果一覧.xlsx
 # - 上記すべてを1つにまとめたzipファイル（障がいGH_出力一式_YYYYMMDD_HHMMSS.zip）
+#
+# このファイル1本でColabの1セルにそのまま貼り付けて実行できます
+# （Driveマウント→フォルダ確認→処理実行まで一括で行います）。
 
 import os
 import re
@@ -45,11 +48,25 @@ if drive is not None:
 # ============================================================
 # 2. 設定
 # ============================================================
-FOLDER_PATH = Path(os.environ.get("FOLDER_PATH", "/content/drive/MyDrive/施設実績データ"))
-TEMPLATE_FILE = Path(
-    os.environ.get("TEMPLATE_FILE", "/content/drive/MyDrive/障がいGH_事業所名(原本).xlsx")
+FOLDER_PATH = Path(
+    os.environ.get(
+        "FOLDER_PATH", "/content/drive/MyDrive/施設実績データ(施設別加算状況)/入力"
+    )
 )
-OUTPUT_FOLDER = Path(os.environ.get("OUTPUT_FOLDER", "/content/drive/MyDrive/障がいGH_入力済"))
+TEMPLATE_FILE = Path(
+    os.environ.get(
+        "TEMPLATE_FILE",
+        "/content/drive/MyDrive/施設実績データ(施設別加算状況)/原本/障がいGH_事業所名(原本).xlsx",
+    )
+)
+OUTPUT_FOLDER = Path(
+    os.environ.get(
+        "OUTPUT_FOLDER", "/content/drive/MyDrive/施設実績データ(施設別加算状況)/出力"
+    )
+)
+
+# xlsxのシート名に使えない文字（\ / ? * [ ] :）
+INVALID_SHEET_CHARS = re.compile(r'[\\/?*\[\]:]')
 
 # 原本の年度ブロックに対応するシートだけ処理します。
 # R8.4=2026年4月、R8.5=2026年5月、...、R9.3=2027年3月
@@ -165,8 +182,8 @@ def fill_template(template_file, facility_name, extracted_by_month):
     wb = openpyxl.load_workbook(template_file)
     ws = wb["障がいGH"] if "障がいGH" in wb.sheetnames else wb.active
 
-    # シート名とA1は施設名にしておく
-    ws.title = facility_name[:31]
+    # シート名は施設名にしておく（xlsxで使えない文字は除去し、31文字までに収める）
+    ws.title = INVALID_SHEET_CHARS.sub("", facility_name)[:31]
 
     for sheet_name, data in extracted_by_month.items():
         if sheet_name not in MONTH_ROW_MAP:
@@ -215,7 +232,10 @@ def process_facility_file(file_path):
 
     out_wb = fill_template(TEMPLATE_FILE, facility_name, extracted_by_month)
     OUTPUT_FOLDER.mkdir(parents=True, exist_ok=True)
-    output_file = OUTPUT_FOLDER / f"障がいGH_{facility_name}.xlsx"
+    # 出力ファイル名は元ファイル名（号数などの接尾辞込み）をそのまま使う。
+    # facility_name（接尾辞を削った表示名）を使うと、「宇都宮①」「宇都宮②」のように
+    # 号数違いの別施設が同じファイル名になり、後勝ちで上書きされてしまうため。
+    output_file = OUTPUT_FOLDER / f"障がいGH_{file_path.stem}.xlsx"
     out_wb.save(output_file)
 
     return output_file, {
@@ -280,7 +300,28 @@ def main():
 
 
 # ============================================================
-# 4. 実行
+# 4. フォルダ・原本ファイルの事前確認
+# ============================================================
+def check_paths():
+    print("入力フォルダ存在:", FOLDER_PATH.exists())
+    print("原本ファイル存在:", TEMPLATE_FILE.exists())
+
+    if not FOLDER_PATH.exists() or not TEMPLATE_FILE.exists():
+        print("入力フォルダまたは原本ファイルが見つかりません。パスを確認してください。")
+        return False
+
+    print("入力フォルダ内:")
+    for f in sorted(FOLDER_PATH.glob("*")):
+        print(" -", f.name)
+
+    xlsx_files = [f for f in FOLDER_PATH.glob("*.xlsx") if not f.name.startswith("~$")]
+    print("xlsx件数:", len(xlsx_files))
+    return True
+
+
+# ============================================================
+# 5. 実行
 # ============================================================
 if __name__ == "__main__":
-    main()
+    if check_paths():
+        main()
