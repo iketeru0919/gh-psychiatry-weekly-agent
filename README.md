@@ -84,3 +84,14 @@ PYTHONPATH=src python -m psychiatry_weekly_agent --today 2026-05-06
 ## 注意事項
 
 このプロジェクトが生成するレポートは、PubMed掲載情報とabstractをもとにした教育・研修用の整理資料です。診断、治療、処方変更、服薬中止、緊急対応等の医学的判断を代替しません。利用者の症状悪化、副作用疑い、自傷他害リスク、急変がある場合は、主治医、薬剤師、訪問看護、救急、行政等の専門職・機関へ相談してください。
+
+## おまけ: RASIEL 営業活動報告チャットの拠点別集計ツール
+
+このリポジトリには、上記のPubMedレポート機能とは別に、グループホーム各拠点のLINE営業活動報告
+チャットを拠点ごとに自動集計するツールも同梱しています。AI/外部APIを使わず、正規表現とラベル
+辞書によるルールベース処理のみで動作します。
+
+- `tools/rasiel_report_tool.html`: ブラウザで開いてログを貼り付けるだけで使える単一HTMLツール
+- `src/rasiel_facility_reports/`: CSV集計・自動化用のPythonモジュール（`PYTHONPATH=src python -m rasiel_facility_reports --help`）
+
+詳細は [`docs/rasiel_facility_report_proposal.md`](docs/rasiel_facility_report_proposal.md) を参照してください。

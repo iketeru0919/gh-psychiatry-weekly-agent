@@ -1,0 +1,828 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RASIEL 営業日報 集計ツール</title>
+<style>
+  :root{
+    --bg:#f5f6f8; --panel:#ffffff; --text:#1f2430; --muted:#666f80;
+    --border:#dfe3ea; --accent:#2f6fed; --accent-weak:#e8f0fe;
+    --warn-bg:#fff4e5; --warn-border:#f0b429; --bad-bg:#fdecec; --bad-border:#e2554d;
+    --good-bg:#eaf7ee;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14161c; --panel:#1d2029; --text:#e7e9ee; --muted:#9aa2b1;
+      --border:#2c313d; --accent:#6ea1ff; --accent-weak:#22314f;
+      --warn-bg:#3a2f10; --warn-border:#caa23a; --bad-bg:#3a1f1f; --bad-border:#c9615c;
+      --good-bg:#173321;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#14161c; --panel:#1d2029; --text:#e7e9ee; --muted:#9aa2b1;
+    --border:#2c313d; --accent:#6ea1ff; --accent-weak:#22314f;
+    --warn-bg:#3a2f10; --warn-border:#caa23a; --bad-bg:#3a1f1f; --bad-border:#c9615c;
+    --good-bg:#173321;
+  }
+  :root[data-theme="light"]{
+    --bg:#f5f6f8; --panel:#ffffff; --text:#1f2430; --muted:#666f80;
+    --border:#dfe3ea; --accent:#2f6fed; --accent-weak:#e8f0fe;
+    --warn-bg:#fff4e5; --warn-border:#f0b429; --bad-bg:#fdecec; --bad-border:#e2554d;
+    --good-bg:#eaf7ee;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; padding:24px; background:var(--bg); color:var(--text);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic",system-ui,-apple-system,sans-serif;
+    line-height:1.5;
+  }
+  h1{font-size:1.3rem; margin:0 0 4px;}
+  .subtitle{color:var(--muted); font-size:0.85rem; margin-bottom:20px;}
+  .panel{
+    background:var(--panel); border:1px solid var(--border); border-radius:10px;
+    padding:16px 18px; margin-bottom:16px;
+  }
+  .panel h2{font-size:1rem; margin:0 0 10px;}
+  textarea{
+    width:100%; min-height:140px; background:var(--bg); color:var(--text);
+    border:1px solid var(--border); border-radius:8px; padding:10px; font-size:0.85rem;
+    font-family:ui-monospace,Menlo,Consolas,monospace; resize:vertical;
+  }
+  .row{display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:10px;}
+  button{
+    background:var(--accent); color:#fff; border:none; border-radius:6px;
+    padding:8px 14px; font-size:0.85rem; cursor:pointer;
+  }
+  button.secondary{background:transparent; color:var(--accent); border:1px solid var(--accent);}
+  button:disabled{opacity:0.5; cursor:not-allowed;}
+  input[type=text], input[type=number], input[type=date]{
+    background:var(--bg); color:var(--text); border:1px solid var(--border);
+    border-radius:6px; padding:6px 8px; font-size:0.85rem;
+  }
+  label.field{display:flex; flex-direction:column; gap:4px; font-size:0.8rem; color:var(--muted);}
+  .grid2{display:grid; grid-template-columns:1fr 1fr; gap:16px;}
+  @media (max-width:820px){.grid2{grid-template-columns:1fr;}}
+  .checkbox-list{display:flex; flex-wrap:wrap; gap:8px 16px; margin-top:8px;}
+  .checkbox-list label{display:flex; align-items:center; gap:5px; font-size:0.82rem;}
+  .tabs{display:flex; gap:6px; margin-bottom:12px; flex-wrap:wrap;}
+  .tab-btn{
+    background:var(--panel); color:var(--text); border:1px solid var(--border);
+    border-radius:20px; padding:7px 14px; font-size:0.82rem; cursor:pointer;
+  }
+  .tab-btn.active{background:var(--accent); color:#fff; border-color:var(--accent);}
+  .tab-panel{display:none;}
+  .tab-panel.active{display:block;}
+  table{border-collapse:collapse; width:100%; font-size:0.78rem;}
+  th,td{border:1px solid var(--border); padding:6px 8px; text-align:left; white-space:nowrap;}
+  th{background:var(--accent-weak); position:sticky; top:0;}
+  td.wrap, th.wrap{white-space:normal; min-width:160px;}
+  .table-scroll{overflow-x:auto; max-height:560px; overflow-y:auto; border:1px solid var(--border); border-radius:8px;}
+  .badge{display:inline-block; padding:2px 8px; border-radius:12px; font-size:0.72rem; margin-right:4px;}
+  .badge-warn{background:var(--warn-bg); border:1px solid var(--warn-border); color:var(--text);}
+  .badge-bad{background:var(--bad-bg); border:1px solid var(--bad-border); color:var(--text);}
+  tr.row-bad td{background:var(--bad-bg);}
+  tr.row-warn td{background:var(--warn-bg);}
+  .stat-cards{display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px;}
+  .stat-card{
+    background:var(--panel); border:1px solid var(--border); border-radius:10px;
+    padding:10px 16px; min-width:120px;
+  }
+  .stat-card .num{font-size:1.4rem; font-weight:700;}
+  .stat-card .label{font-size:0.72rem; color:var(--muted);}
+  .hint{font-size:0.78rem; color:var(--muted); margin-top:6px;}
+  .facility-pill{
+    display:inline-flex; align-items:center; gap:6px; background:var(--accent-weak);
+    border-radius:14px; padding:3px 10px; font-size:0.78rem; margin:2px;
+  }
+  .facility-pill button{background:none; border:none; color:var(--muted); padding:0; font-size:0.9rem; line-height:1; cursor:pointer;}
+  code{background:var(--accent-weak); padding:1px 5px; border-radius:4px;}
+  footer{color:var(--muted); font-size:0.75rem; margin-top:24px;}
+</style>
+</head>
+<body>
+
+<h1>RASIEL 営業日報 集計ツール</h1>
+<div class="subtitle">
+  LINE営業活動報告チャットのログを貼り付けると、ブラウザ内だけで（外部送信・AI利用なし）拠点ごとに集計します。単一HTMLファイルなのでオフラインでも動作します。
+</div>
+
+<div class="panel">
+  <h2>1. ログを貼り付けて解析</h2>
+  <textarea id="chatInput" placeholder="ここにLINEの営業活動報告チャットのログを貼り付けてください"></textarea>
+  <div class="row">
+    <button id="parseBtn">解析する</button>
+    <button class="secondary" id="sampleBtn">サンプルを読み込む</button>
+    <button class="secondary" id="clearBtn">クリア</button>
+    <label class="field">基準年（西暦。ログに年が無い日付に使います）
+      <input type="number" id="defaultYear" style="width:100px">
+    </label>
+  </div>
+  <div class="hint" id="parseSummary"></div>
+</div>
+
+<div class="panel">
+  <h2>2. 表示設定</h2>
+  <div class="grid2">
+    <div>
+      <label class="field">担当拠点リスト（1行1拠点名。空なら全拠点を表示）</label>
+      <textarea id="facilityList" style="min-height:80px" placeholder="例）&#10;宇都宮&#10;南中丸&#10;春日部&#10;高丘"></textarea>
+      <div class="row">
+        <button id="saveFacilityBtn">保存</button>
+        <label style="display:flex;align-items:center;gap:6px;font-size:0.82rem;">
+          <input type="checkbox" id="useFacilityFilter"> 登録拠点のみで絞り込む
+        </label>
+      </div>
+      <label class="field" style="margin-top:10px;">その場での絞り込み（拠点名の一部・保存はされません）
+        <input type="text" id="quickFilter" placeholder="例）宇都宮">
+      </label>
+    </div>
+    <div>
+      <label class="field">表示する項目</label>
+      <div class="checkbox-list" id="columnToggles"></div>
+    </div>
+  </div>
+</div>
+
+<div class="stat-cards" id="statCards"></div>
+
+<div class="tabs">
+  <button class="tab-btn active" data-tab="daily">① 日次サマリー</button>
+  <button class="tab-btn" data-tab="period">② 週次・月次サマリー</button>
+  <button class="tab-btn" data-tab="missing">③ 未報告拠点チェック</button>
+  <button class="tab-btn" data-tab="raw">④ 元メッセージ（検証用）</button>
+</div>
+
+<div class="tab-panel active" id="tab-daily">
+  <div class="panel">
+    <div class="row">
+      <button class="secondary" id="exportDailyBtn">CSV出力</button>
+      <span class="hint">同一拠点・同日の複数投稿（朝→夕方）は自動的に1行へマージしています。営業活動の動きが無い行、営業実績時間0の行はハイライトされます。</span>
+    </div>
+    <div class="table-scroll"><table id="dailyTable"><thead></thead><tbody></tbody></table></div>
+  </div>
+</div>
+
+<div class="tab-panel" id="tab-period">
+  <div class="panel">
+    <div class="row">
+      <label class="field">集計単位
+        <select id="periodGranularity">
+          <option value="week">週次（ISO週）</option>
+          <option value="month">月次</option>
+        </select>
+      </label>
+      <button class="secondary" id="exportPeriodBtn">CSV出力</button>
+    </div>
+    <div class="hint">
+      問合せ件数・案件発掘・見学・体験・仮申込・入居・営業予定時間・営業実績時間は期間内合計、入居者数・目標入居件数・短期稼働日数・営業累計時間・営業実績件数累計は期間内最終報告値を表示します（累計項目のため合算しません）。
+    </div>
+    <div class="table-scroll" style="margin-top:10px;"><table id="periodTable"><thead></thead><tbody></tbody></table></div>
+  </div>
+</div>
+
+<div class="tab-panel" id="tab-missing">
+  <div class="panel">
+    <div class="row">
+      <label class="field">確認する日付
+        <input type="date" id="missingDate">
+      </label>
+      <button id="checkMissingBtn">確認する</button>
+    </div>
+    <div class="hint">これまでに一度でも報告のあった拠点のうち、指定日に報告が見つからなかった拠点を一覧表示します。</div>
+    <div id="missingResult" style="margin-top:12px;"></div>
+  </div>
+</div>
+
+<div class="tab-panel" id="tab-raw">
+  <div class="panel">
+    <div class="hint">
+      抽出に失敗したラベル（丸数字の後ろの言葉が辞書に無かった項目）がある場合は「未認識ラベル」に表示します。フォーマットのブレを直す際の参考にしてください。
+    </div>
+    <div id="unknownLabels" style="margin:10px 0;"></div>
+    <div class="table-scroll"><table id="rawTable"><thead></thead><tbody></tbody></table></div>
+  </div>
+</div>
+
+<footer>
+  本ツールは正規表現とラベル辞書によるルールベース処理のみで動作し、AI/外部APIは使用していません。すべての処理はブラウザ内で完結し、貼り付けたログや設定はこの端末のlocalStorageにのみ保存されます。
+</footer>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ===================== 定数・ラベル辞書 ===================== */
+  const CIRCLED = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮➀➁➂➃➄➅➆➇➈➉";
+  const NEXT_DAY_MARKER = "【翌日の予定】";
+  const DATE_TOKEN_RE = /^(?:(\d{4})年)?(\d{1,2})月(\d{1,2})日/;
+  const TIME_TOKEN_RE = /^(\d{1,2}):(\d{2})/;
+  const HEADER_TO_RE = /\[To:(\d+)\]\s*([^\n]*?)さん\s*$/;
+  const COMPANY_MARKERS = ["株式会社","有限会社","（","(","【"];
+
+  const LABEL_TO_FIELD = {
+    "名前":"reporter_name","拠点名":"facility_name",
+    "当月目標入居件数":"target_move_ins","目標入居件数":"target_move_ins",
+    "当月短期稼働日数":"work_days","短期稼働日数":"work_days","短期入所利用日数":"work_days",
+    "営業予定時間":"hours_planned","営業実績時間":"hours_actual","営業累計時間":"hours_cumulative",
+    "営業実績件数累計":"cumulative_sales_count","営業実施件数":"cumulative_sales_count","営業件数":"cumulative_sales_count",
+    "入居総数":"occupancy","入居者数":"occupancy","入居数":"occupancy",
+    "営業内容":"sales_content","預り金管理":"deposit_management",
+    "カメラ録画確認":"camera_check","カメラ作動確認":"camera_check","カメラ動作確認":"camera_check","カメラ認":"camera_check",
+    "問合せ件数":"inquiries","案件発掘":"leads_found","見学":"tours","体験":"trial_stays",
+    "仮申込":"provisional_applications","入居":"move_ins",
+  };
+  const LABELS_BY_LEN_DESC = Object.keys(LABEL_TO_FIELD).sort((a,b)=>b.length-a.length);
+
+  const FIELD_DISPLAY_ORDER = [
+    ["date","日付"],["time","時刻"],["facility_key","拠点名(正規化)"],["facility_raw","拠点名(原文)"],
+    ["reporter_name","報告者"],["am_name","報告先(AM)"],
+    ["occupancy","入居者数"],["target_move_ins","目標入居件数"],["work_days","短期稼働日数"],
+    ["hours_planned","営業予定時間"],["hours_actual","営業実績時間"],["hours_cumulative","営業累計時間"],
+    ["sales_content","営業内容"],["inquiries","問合せ件数"],["leads_found","案件発掘"],
+    ["tours","見学"],["trial_stays","体験"],["provisional_applications","仮申込"],["move_ins","入居"],
+    ["cumulative_sales_count","営業実績件数累計"],["deposit_management","預り金管理"],
+    ["camera_check","カメラ録画確認"],["next_day_plan","翌日の予定"],
+  ];
+  const FIELD_LABELS = Object.fromEntries(FIELD_DISPLAY_ORDER);
+  const ALWAYS_ON = new Set(["date","time","facility_key","reporter_name"]);
+  const DEFAULT_ON = new Set(["date","time","facility_key","reporter_name","occupancy","target_move_ins",
+    "work_days","hours_actual","hours_cumulative","inquiries","leads_found","tours","trial_stays",
+    "provisional_applications","move_ins"]);
+
+  const SUM_FIELDS = ["hours_planned","hours_actual","inquiries","leads_found","tours","trial_stays","provisional_applications","move_ins"];
+  const LAST_FIELDS = ["occupancy","target_move_ins","work_days","hours_cumulative","cumulative_sales_count"];
+  const FUNNEL_FIELDS = ["inquiries","leads_found","tours","trial_stays","provisional_applications","move_ins"];
+
+  const FACILITY_NOISE_TOKENS = ["株式会社ラシエル","RASIEL","Rasiel","ラシエル","・管理者","管理者",
+    "兼サビ管","兼サビ官","サビ管","サビ官","拠点"," ","　"];
+
+  /* ===================== パーサー本体 ===================== */
+  function stripLeadingTimestamp(line){
+    let dateFound = null, timeFound = null;
+    while (true){
+      const m = DATE_TOKEN_RE.exec(line);
+      if (m){
+        dateFound = [m[1]||null, m[2], m[3]];
+        line = line.slice(m[0].length).replace(/^[ 　]+/, "");
+        continue;
+      }
+      const m2 = TIME_TOKEN_RE.exec(line);
+      if (m2 && !timeFound){
+        timeFound = [m2[1], m2[2]];
+        line = line.slice(m2[0].length);
+        continue;
+      }
+      break;
+    }
+    return {dateFound, timeFound, remainder: line};
+  }
+
+  function splitIntoMessages(text){
+    const lines = text.split("\n");
+    const messages = [];
+    let current = null;
+    for (const line of lines){
+      const {dateFound, timeFound, remainder} = stripLeadingTimestamp(line);
+      const isBoundary = (dateFound || timeFound) &&
+        (remainder.indexOf("[To:") !== -1 || remainder.replace(/\s+$/,"").endsWith("さん"));
+      if (isBoundary){
+        if (current) messages.push(current);
+        current = {date: dateFound, time: timeFound, header: remainder, bodyLines: []};
+      } else if (current === null){
+        current = {date: null, time: null, header: line, bodyLines: []};
+      } else {
+        current.bodyLines.push(line);
+      }
+    }
+    if (current) messages.push(current);
+    return messages;
+  }
+
+  function parseHeader(headerLine){
+    const m = HEADER_TO_RE.exec(headerLine);
+    let toId=null, toName=null, prePart=headerLine;
+    if (m){ toId=m[1]; toName=m[2].trim(); prePart = headerLine.slice(0,m.index); }
+    let splitIndex = -1;
+    for (const marker of COMPANY_MARKERS){
+      const idx = prePart.indexOf(marker);
+      if (idx !== -1 && (splitIndex===-1 || idx<splitIndex)) splitIndex = idx;
+    }
+    let senderName;
+    if (splitIndex <= 0){
+      senderName = splitIndex === 0 ? "" : prePart.trim();
+    } else {
+      senderName = prePart.slice(0, splitIndex).trim();
+    }
+    return {senderName, toId, toName};
+  }
+
+  function extractLabeledValue(region, start, nextMarkerStart){
+    for (const label of LABELS_BY_LEN_DESC){
+      if (region.startsWith(label, start)){
+        let valueStart = start + label.length;
+        while (valueStart < region.length && "：: 　".indexOf(region[valueStart]) !== -1) valueStart++;
+        let value = region.slice(valueStart, nextMarkerStart);
+        value = value.replace(/^[\s：:]+/, "").trim().replace(/\s+/g, " ");
+        return [label, value];
+      }
+    }
+    return null;
+  }
+
+  function extractFields(bodyText){
+    const values = {}, unknown = {};
+    const nextDayIdx = bodyText.indexOf(NEXT_DAY_MARKER);
+    let numberedRegion = bodyText;
+    if (nextDayIdx !== -1){
+      values.next_day_plan = bodyText.slice(nextDayIdx + NEXT_DAY_MARKER.length).trim();
+      numberedRegion = bodyText.slice(0, nextDayIdx);
+    }
+    const markerRe = new RegExp("[" + CIRCLED + "]", "g");
+    const positions = [];
+    let m;
+    while ((m = markerRe.exec(numberedRegion)) !== null) positions.push(m.index);
+
+    for (let i=0; i<positions.length; i++){
+      const labelStart = positions[i] + 1;
+      const nextMarkerStart = i+1 < positions.length ? positions[i+1] : numberedRegion.length;
+      const matched = extractLabeledValue(numberedRegion, labelStart, nextMarkerStart);
+      if (!matched){
+        const snippet = numberedRegion.slice(labelStart, nextMarkerStart).trim();
+        if (snippet) unknown["未認識_" + (i+1)] = snippet;
+        continue;
+      }
+      const [label, value] = matched;
+      const canonical = LABEL_TO_FIELD[label];
+      if (!canonical){ unknown[label] = value; continue; }
+      if (!values[canonical]) values[canonical] = value;
+    }
+    return {values, unknown};
+  }
+
+  function normalizeFacility(raw){
+    let n = raw;
+    for (const tok of FACILITY_NOISE_TOKENS) n = n.split(tok).join("");
+    n = n.replace(/^[\s　・()（）]+|[\s　・()（）]+$/g, "");
+    return n || raw.trim();
+  }
+
+  function formatDate(dateTok, defaultYear){
+    if (!dateTok) return null;
+    const [year, month, day] = dateTok;
+    const y = year || defaultYear;
+    const mm = String(parseInt(month,10)).padStart(2,"0");
+    const dd = String(parseInt(day,10)).padStart(2,"0");
+    if (!y) return "----" + "-" + mm + "-" + dd;
+    return y + "-" + mm + "-" + dd;
+  }
+  function formatTime(timeTok){
+    if (!timeTok) return null;
+    const [h, mi] = timeTok;
+    return String(parseInt(h,10)).padStart(2,"0") + ":" + mi;
+  }
+
+  function parseChatLog(text, defaultYear){
+    const rawMessages = splitIntoMessages(text);
+    const reports = [];
+    let lastDateTok = null;
+    for (const msg of rawMessages){
+      if (msg.date) lastDateTok = msg.date;
+      const dateStr = formatDate(lastDateTok, defaultYear ? String(defaultYear) : null);
+      const timeStr = formatTime(msg.time);
+      const {senderName, toId, toName} = parseHeader(msg.header);
+      const bodyText = msg.bodyLines.join("\n");
+      const {values, unknown} = extractFields(bodyText);
+      const facilityRaw = (values.facility_name || "").trim();
+      delete values.facility_name;
+      const facilityKey = facilityRaw ? normalizeFacility(facilityRaw) : "";
+      const reporterName = values.reporter_name || senderName;
+      delete values.reporter_name;
+      reports.push({
+        date: dateStr, time: timeStr, reporterName, facilityRaw, facilityKey,
+        amId: toId, amName: toName, values, unknown, rawHeader: msg.header, rawBody: bodyText,
+      });
+    }
+    return reports;
+  }
+
+  /* ===================== 数値正規化・集計 ===================== */
+  function toHalfWidthDigits(s){
+    return s.replace(/[０-９]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0));
+  }
+  function parseCountValue(raw){
+    if (raw === undefined || raw === null) return null;
+    const v = toHalfWidthDigits(String(raw)).trim();
+    if (v === "") return null;
+    if (/^(no\.?|なし|-|―|‐|未定)$/i.test(v)) return 0;
+    const m = v.match(/-?\d+(\.\d+)?/);
+    if (m) return parseFloat(m[0]);
+    // 数字はないが何らかのメモがある場合は「1件」とみなす（例:入居者名のみ記載）
+    return 1;
+  }
+
+  function buildDailySummary(reports){
+    const groups = new Map();
+    const order = [];
+    for (const r of reports){
+      if (!r.date || !r.facilityKey) continue;
+      const key = r.facilityKey + "|" + r.date;
+      if (!groups.has(key)){ groups.set(key, []); order.push(key); }
+      groups.get(key).push(r);
+    }
+    const summaries = [];
+    for (const key of order){
+      const msgs = groups.get(key).slice().sort((a,b)=> (a.time||"").localeCompare(b.time||""));
+      const merged = {};
+      let facilityRaw = "";
+      const reporterNames = [], amNames = [];
+      for (const r of msgs){
+        if (r.facilityRaw) facilityRaw = r.facilityRaw;
+        if (r.reporterName && reporterNames.indexOf(r.reporterName)===-1) reporterNames.push(r.reporterName);
+        if (r.amName && amNames.indexOf(r.amName)===-1) amNames.push(r.amName);
+        for (const k in r.values) if (r.values[k]) merged[k] = r.values[k];
+      }
+      const [facilityKey, date] = key.split("|");
+      summaries.push(Object.assign({
+        date, facility_key: facilityKey, facility_raw: facilityRaw,
+        reporter_name: reporterNames.join("・"), am_name: amNames.join("・"),
+        time: msgs[msgs.length-1].time || "", message_count: String(msgs.length),
+      }, merged));
+    }
+    return summaries;
+  }
+
+  function isoWeekKey(dateStr){
+    const d = new Date(dateStr + "T00:00:00");
+    const target = new Date(d.valueOf());
+    const dayNr = (d.getDay() + 6) % 7;
+    target.setDate(target.getDate() - dayNr + 3);
+    const firstThursday = new Date(target.getFullYear(), 0, 4);
+    const diff = (target - firstThursday) / 86400000;
+    const week = 1 + Math.floor(diff/7);
+    return target.getFullYear() + "-W" + String(week).padStart(2,"0");
+  }
+
+  function buildPeriodSummary(dailySummaries, granularity){
+    const groups = new Map();
+    for (const row of dailySummaries){
+      if (!row.date || row.date.indexOf("----") === 0) continue;
+      const periodKey = granularity === "month" ? row.date.slice(0,7) : isoWeekKey(row.date);
+      const key = row.facility_key + "|" + periodKey;
+      if (!groups.has(key)){
+        groups.set(key, {facility_key: row.facility_key, facility_raw: row.facility_raw,
+          period: periodKey, days: new Set(), sums: {}, lastVals: {}, lastDate: ""});
+      }
+      const g = groups.get(key);
+      g.days.add(row.date);
+      if (row.date >= g.lastDate){
+        g.lastDate = row.date;
+        for (const f of LAST_FIELDS) if (row[f]) g.lastVals[f] = row[f];
+        if (row.facility_raw) g.facility_raw = row.facility_raw;
+      }
+      for (const f of SUM_FIELDS){
+        const n = parseCountValue(row[f]);
+        if (n !== null) g.sums[f] = (g.sums[f]||0) + n;
+      }
+    }
+    return Array.from(groups.values()).map(g => Object.assign({
+      facility_key: g.facility_key, facility_raw: g.facility_raw, period: g.period,
+      report_days: String(g.days.size),
+    }, g.sums, g.lastVals));
+  }
+
+  function rowFunnelSum(row){
+    return FUNNEL_FIELDS.reduce((s,f)=> s + (parseCountValue(row[f]) || 0), 0);
+  }
+
+  /* ===================== 状態管理 ===================== */
+  const LS_KEYS = {facilities:"rasiel_tool_facilities", columns:"rasiel_tool_columns",
+    text:"rasiel_tool_last_text", year:"rasiel_tool_default_year", useFilter:"rasiel_tool_use_filter"};
+
+  let state = {reports: [], daily: []};
+
+  function loadLS(key, fallback){
+    try{ const v = localStorage.getItem(key); return v===null ? fallback : JSON.parse(v); }
+    catch(e){ return fallback; }
+  }
+  function saveLS(key, value){ try{ localStorage.setItem(key, JSON.stringify(value)); }catch(e){} }
+
+  /* ===================== レンダリング補助 ===================== */
+  function activeColumns(){
+    const enabled = loadLS(LS_KEYS.columns, Array.from(DEFAULT_ON));
+    return FIELD_DISPLAY_ORDER.filter(([key]) => ALWAYS_ON.has(key) || enabled.indexOf(key) !== -1);
+  }
+
+  function getFacilityQueries(){
+    const listText = document.getElementById("facilityList").value;
+    const list = listText.split("\n").map(s=>s.trim()).filter(Boolean).map(normalizeFacility);
+    const quick = document.getElementById("quickFilter").value.trim();
+    const useSaved = document.getElementById("useFacilityFilter").checked;
+    const queries = [];
+    if (useSaved) queries.push(...list);
+    if (quick) queries.push(normalizeFacility(quick));
+    return queries.map(q=>q.toLowerCase());
+  }
+
+  function filterByFacility(rows, facilityKeyField, facilityRawField){
+    const queries = getFacilityQueries();
+    if (queries.length === 0) return rows;
+    return rows.filter(row => {
+      const key = (row[facilityKeyField]||"").toLowerCase();
+      const raw = (row[facilityRawField]||"").toLowerCase();
+      return queries.some(q => key.indexOf(q)!==-1 || raw.indexOf(q)!==-1);
+    });
+  }
+
+  function renderTable(tableEl, columns, rows, rowClassifier){
+    const thead = tableEl.querySelector("thead");
+    const tbody = tableEl.querySelector("tbody");
+    thead.innerHTML = "<tr>" + columns.map(([,label])=>`<th>${escapeHtml(label)}</th>`).join("") + "</tr>";
+    tbody.innerHTML = rows.map(row => {
+      const cls = rowClassifier ? rowClassifier(row) : "";
+      const cells = columns.map(([key]) => `<td>${escapeHtml(row[key] ?? "")}</td>`).join("");
+      return `<tr class="${cls}">${cells}</tr>`;
+    }).join("");
+  }
+
+  function escapeHtml(v){
+    return String(v).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  }
+
+  function toCsv(columns, rows){
+    const escCsv = v => {
+      const s = String(v ?? "");
+      return /[",\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s;
+    };
+    const lines = [columns.map(([,label])=>escCsv(label)).join(",")];
+    for (const row of rows) lines.push(columns.map(([key])=>escCsv(row[key] ?? "")).join(","));
+    return "﻿" + lines.join("\r\n");
+  }
+
+  function downloadText(filename, content, mime){
+    const blob = new Blob([content], {type: mime || "text/plain"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  /* ===================== 各タブの描画 ===================== */
+  function renderStatCards(){
+    const el = document.getElementById("statCards");
+    const facilities = new Set(state.reports.filter(r=>r.facilityKey).map(r=>r.facilityKey));
+    const dates = state.reports.filter(r=>r.date && r.date.indexOf("----")!==0).map(r=>r.date);
+    const unknownCount = state.reports.reduce((s,r)=>s+Object.keys(r.unknown).length, 0);
+    const cards = [
+      ["メッセージ件数", state.reports.length],
+      ["拠点数", facilities.size],
+      ["日付範囲", dates.length ? (dates.reduce((a,b)=>a<b?a:b) + " ~ " + dates.reduce((a,b)=>a>b?a:b)) : "-"],
+      ["未認識ラベル件数", unknownCount],
+    ];
+    el.innerHTML = cards.map(([label,num])=>
+      `<div class="stat-card"><div class="num">${escapeHtml(num)}</div><div class="label">${escapeHtml(label)}</div></div>`
+    ).join("");
+  }
+
+  function renderDailyTab(){
+    const columns = activeColumns().filter(([key]) => key !== "next_day_plan" && key !== "am_name" || key==="am_name");
+    const rows = filterByFacility(state.daily, "facility_key", "facility_raw");
+    renderTable(document.getElementById("dailyTable"), columns, rows, row => {
+      if (!row.facility_key) return "row-bad";
+      const funnel = rowFunnelSum(row);
+      const actual = parseCountValue(row.hours_actual) || 0;
+      if (funnel === 0 && actual === 0) return "row-warn";
+      return "";
+    });
+  }
+
+  function renderPeriodTab(){
+    const granularity = document.getElementById("periodGranularity").value;
+    const period = buildPeriodSummary(state.daily, granularity);
+    const rows = filterByFacility(period, "facility_key", "facility_raw")
+      .sort((a,b)=> (a.period+a.facility_key).localeCompare(b.period+b.facility_key));
+    const columns = [["period","期間"],["facility_key","拠点名(正規化)"],["facility_raw","拠点名(原文)"],
+      ["report_days","報告日数"],["work_days","短期稼働日数(最終値)"],
+      ["hours_planned","営業予定時間(合計)"],["hours_actual","営業実績時間(合計)"],
+      ["hours_cumulative","営業累計時間(最終値)"],
+      ["inquiries","問合せ件数(合計)"],["leads_found","案件発掘(合計)"],["tours","見学(合計)"],
+      ["trial_stays","体験(合計)"],["provisional_applications","仮申込(合計)"],["move_ins","入居(合計)"],
+      ["occupancy","入居者数(最終値)"],["target_move_ins","目標入居件数(最終値)"]];
+    renderTable(document.getElementById("periodTable"), columns, rows, row => {
+      const funnel = FUNNEL_FIELDS.reduce((s,f)=> s + (parseFloat(row[f])||0), 0);
+      const actual = parseFloat(row.hours_actual)||0;
+      if (funnel === 0 && actual === 0) return "row-warn";
+      return "";
+    });
+    state._lastPeriodRows = rows; state._lastPeriodColumns = columns;
+  }
+
+  function renderRawTab(){
+    const columns = [["date","日付"],["time","時刻"],["facility_raw","拠点名(原文)"],["reporterName","報告者"],
+      ["amName","報告先(AM)"]];
+    const rows = filterByFacility(
+      state.reports.map(r => Object.assign({}, r, {facility_key: r.facilityKey})),
+      "facility_key", "facility_raw"
+    );
+    const thead = document.querySelector("#rawTable thead");
+    const tbody = document.querySelector("#rawTable tbody");
+    thead.innerHTML = "<tr>" + columns.map(([,l])=>`<th>${escapeHtml(l)}</th>`).join("") +
+      "<th class=\"wrap\">抽出項目(JSON)</th><th class=\"wrap\">未認識ラベル</th></tr>";
+    tbody.innerHTML = rows.map(r => {
+      const cls = r.facilityKey ? "" : "row-bad";
+      const cells = columns.map(([key])=>`<td>${escapeHtml(r[key] ?? "")}</td>`).join("");
+      const valuesJson = escapeHtml(JSON.stringify(r.values));
+      const unknownJson = Object.keys(r.unknown).length ? escapeHtml(JSON.stringify(r.unknown)) : "";
+      return `<tr class="${cls}">${cells}<td class="wrap"><code>${valuesJson}</code></td><td class="wrap">${unknownJson}</td></tr>`;
+    }).join("");
+
+    const counts = {};
+    for (const r of state.reports) for (const label in r.unknown) counts[label] = (counts[label]||0)+1;
+    const sorted = Object.entries(counts).sort((a,b)=>b[1]-a[1]);
+    const unknownEl = document.getElementById("unknownLabels");
+    unknownEl.innerHTML = sorted.length
+      ? "未認識ラベル: " + sorted.map(([l,c])=>`<span class="badge badge-warn">${escapeHtml(l)} ×${c}</span>`).join(" ")
+      : "<span class=\"badge\" style=\"background:var(--good-bg)\">未認識ラベルはありません</span>";
+  }
+
+  function renderMissing(){
+    const dateInput = document.getElementById("missingDate").value;
+    const resultEl = document.getElementById("missingResult");
+    if (!dateInput){ resultEl.innerHTML = ""; return; }
+    const all = new Set(state.reports.filter(r=>r.facilityKey).map(r=>r.facilityKey));
+    const reportedToday = new Set(state.reports.filter(r=>r.date===dateInput && r.facilityKey).map(r=>r.facilityKey));
+    const missing = Array.from(all).filter(f=>!reportedToday.has(f)).sort();
+    if (all.size === 0){ resultEl.innerHTML = "<span class=\"hint\">まずログを解析してください。</span>"; return; }
+    resultEl.innerHTML =
+      `<div class="hint">対象拠点数: ${all.size} / 報告あり: ${reportedToday.size} / 報告なし: ${missing.length}</div>` +
+      (missing.length
+        ? missing.map(f=>`<span class="badge badge-bad">${escapeHtml(f)}</span>`).join(" ")
+        : "<span class=\"badge\" style=\"background:var(--good-bg)\">全拠点、報告が確認できました</span>");
+  }
+
+  function renderColumnToggles(){
+    const enabled = new Set(loadLS(LS_KEYS.columns, Array.from(DEFAULT_ON)));
+    const el = document.getElementById("columnToggles");
+    el.innerHTML = FIELD_DISPLAY_ORDER
+      .filter(([key]) => !ALWAYS_ON.has(key))
+      .map(([key,label]) => {
+        const checked = enabled.has(key) ? "checked" : "";
+        return `<label><input type="checkbox" data-col="${key}" ${checked}> ${escapeHtml(label)}</label>`;
+      }).join("");
+    el.querySelectorAll("input[type=checkbox]").forEach(cb => {
+      cb.addEventListener("change", () => {
+        const on = new Set(loadLS(LS_KEYS.columns, Array.from(DEFAULT_ON)));
+        if (cb.checked) on.add(cb.dataset.col); else on.delete(cb.dataset.col);
+        saveLS(LS_KEYS.columns, Array.from(on));
+        renderAll();
+      });
+    });
+  }
+
+  function renderAll(){
+    renderStatCards();
+    renderDailyTab();
+    renderPeriodTab();
+    renderRawTab();
+    renderMissing();
+  }
+
+  /* ===================== イベント配線 ===================== */
+  const SAMPLE_TEXT = `生田  裕久株式会社ラシエル（RASIEL南志賀　管理者）[To:7422507]三澤　佑貴さん
+①名前：生田裕久
+➁拠点名：RASIEL南志賀
+➂入居者数：19名
+④目標入居件数：1
+⑤営業予定時間：
+⑥営業累計時間：4
+⑦営業内容：
+⑧預り金管理：生田　畠中
+⑨カメラ録画確認：〇1
+7月20日 7:27三畦　拓也株式会社ラシエル（御所・管理者）[To:7422507]三澤　佑貴さん
+①名前：三畦　拓也
+➁拠点名：RASIEL御所
+➂入居者数：20名
+④目標入居件数：名
+⑤営業予定時間：0.0h
+⑥営業累計時間：2.0h
+⑦営業内容：
+⑧預り金管理：三畦・浅野
+⑨カメラ録画確認：1F〇/2F◯1
+7月20日 15:49福田　美貴株式会社ラシエル(宇都宮・管理者兼サビ管)[To:9402021]高山　慶太さん
+①名前：福田美貴
+➁拠点名：宇都宮
+➂入居者数：19名
+④目標入居件数：1名
+⑤短期稼働日数：32
+⑥営業実績時間：
+⑦営業累計時間：3h
+⑧問合せ件数：
+⑨案件発掘：No.
+⑩見学：No.
+⑪体験：No.（無料・有料）
+⑫仮申込：No.
+⑬入居：No.
+【翌日の予定】
+　日勤1
+7月21日 9:36福田　美貴株式会社ラシエル(宇都宮・管理者兼サビ管)[To:9402021]高山　慶太さん
+①名前：福田美貴
+➁拠点名：宇都宮
+➂入居者数：19
+④目標入居件数：1
+⑤営業予定時間：1
+⑥営業累計時間：3
+⑦営業内容：13:30～SS見学対応
+⑧預り金管理：斎藤・福田
+⑨カメラ録画確認：1F/2F/○1
+7月21日 18:28福田　美貴株式会社ラシエル(宇都宮・管理者兼サビ管)[To:9402021]高山　慶太さん
+①名前：福田美貴
+➁拠点名：宇都宮
+➂入居者数：19
+④目標入居件数：1
+⑤短期稼働日数：34
+⑥営業実績時間
+⑦営業累計時間：３
+⑧問合せ件数：
+⑨案件発掘：No
+⑩見学：No
+⑪体験：No.
+⑫仮申込：No.
+⑬入居：No.
+【翌日の予定】
+　日勤1`;
+
+  function doParse(){
+    const text = document.getElementById("chatInput").value;
+    const defaultYear = document.getElementById("defaultYear").value;
+    state.reports = parseChatLog(text, defaultYear);
+    state.daily = buildDailySummary(state.reports);
+    saveLS(LS_KEYS.text, text);
+    saveLS(LS_KEYS.year, defaultYear);
+    document.getElementById("parseSummary").textContent =
+      `${state.reports.length} 件のメッセージを抽出しました。`;
+    renderAll();
+  }
+
+  document.getElementById("parseBtn").addEventListener("click", doParse);
+  document.getElementById("sampleBtn").addEventListener("click", () => {
+    document.getElementById("chatInput").value = SAMPLE_TEXT;
+    doParse();
+  });
+  document.getElementById("clearBtn").addEventListener("click", () => {
+    document.getElementById("chatInput").value = "";
+    state.reports = []; state.daily = [];
+    document.getElementById("parseSummary").textContent = "";
+    renderAll();
+  });
+  document.getElementById("saveFacilityBtn").addEventListener("click", () => {
+    saveLS(LS_KEYS.facilities, document.getElementById("facilityList").value);
+    saveLS(LS_KEYS.useFilter, document.getElementById("useFacilityFilter").checked);
+    renderAll();
+  });
+  document.getElementById("useFacilityFilter").addEventListener("change", () => {
+    saveLS(LS_KEYS.useFilter, document.getElementById("useFacilityFilter").checked);
+    renderAll();
+  });
+  document.getElementById("quickFilter").addEventListener("input", renderAll);
+  document.getElementById("periodGranularity").addEventListener("change", renderPeriodTab);
+  document.getElementById("checkMissingBtn").addEventListener("click", renderMissing);
+
+  document.getElementById("exportDailyBtn").addEventListener("click", () => {
+    const columns = activeColumns();
+    const rows = filterByFacility(state.daily, "facility_key", "facility_raw");
+    downloadText("rasiel_daily_summary.csv", toCsv(columns, rows), "text/csv");
+  });
+  document.getElementById("exportPeriodBtn").addEventListener("click", () => {
+    if (state._lastPeriodRows) downloadText("rasiel_period_summary.csv", toCsv(state._lastPeriodColumns, state._lastPeriodRows), "text/csv");
+  });
+
+  document.querySelectorAll(".tab-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".tab-btn").forEach(b=>b.classList.remove("active"));
+      document.querySelectorAll(".tab-panel").forEach(p=>p.classList.remove("active"));
+      btn.classList.add("active");
+      document.getElementById("tab-" + btn.dataset.tab).classList.add("active");
+    });
+  });
+
+  /* ===================== 初期化 ===================== */
+  function init(){
+    const savedFacilities = loadLS(LS_KEYS.facilities, "");
+    document.getElementById("facilityList").value = savedFacilities;
+    document.getElementById("useFacilityFilter").checked = !!loadLS(LS_KEYS.useFilter, false);
+    document.getElementById("defaultYear").value = loadLS(LS_KEYS.year, new Date().getFullYear());
+    document.getElementById("missingDate").valueAsDate = new Date();
+    renderColumnToggles();
+
+    const savedText = loadLS(LS_KEYS.text, "");
+    if (savedText){
+      document.getElementById("chatInput").value = savedText;
+      doParse();
+    }
+  }
+  init();
+})();
+</script>
+</body>
+</html>
