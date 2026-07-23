@@ -98,6 +98,14 @@
   .facility-pill button{background:none; border:none; color:var(--muted); padding:0; font-size:0.9rem; line-height:1; cursor:pointer;}
   code{background:var(--accent-weak); padding:1px 5px; border-radius:4px;}
   footer{color:var(--muted); font-size:0.75rem; margin-top:24px;}
+  .facility-pill input{margin:0;}
+  .chip-list{display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;}
+  .summary-box{
+    white-space:pre-wrap; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:0.8rem;
+    background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:14px; line-height:1.7;
+  }
+  .flag-badge{display:inline-block; padding:1px 7px; border-radius:10px; font-size:0.68rem; margin:1px 3px 1px 0; background:var(--warn-bg); border:1px solid var(--warn-border); white-space:normal;}
+  .flag-badge.danger{background:var(--bad-bg); border-color:var(--bad-border);}
 </style>
 </head>
 <body>
@@ -125,15 +133,12 @@
   <h2>2. 表示設定</h2>
   <div class="grid2">
     <div>
-      <label class="field">担当拠点リスト（1行1拠点名。空なら全拠点を表示）</label>
+      <label class="field">担当拠点リスト（1行1拠点名。解析時にチェック初期値として使われます）</label>
       <textarea id="facilityList" style="min-height:80px" placeholder="例）&#10;宇都宮&#10;南中丸&#10;春日部&#10;高丘"></textarea>
       <div class="row">
-        <button id="saveFacilityBtn">保存</button>
-        <label style="display:flex;align-items:center;gap:6px;font-size:0.82rem;">
-          <input type="checkbox" id="useFacilityFilter"> 登録拠点のみで絞り込む
-        </label>
+        <button id="saveFacilityBtn">保存して反映</button>
       </div>
-      <label class="field" style="margin-top:10px;">その場での絞り込み（拠点名の一部・保存はされません）
+      <label class="field" style="margin-top:10px;">表内検索（拠点名・報告者の一部。保存はされません）
         <input type="text" id="quickFilter" placeholder="例）宇都宮">
       </label>
     </div>
@@ -146,6 +151,25 @@
 
 <div class="stat-cards" id="statCards"></div>
 
+<div class="panel">
+  <h2>対象拠点（クリックでその場でも切替できます）</h2>
+  <div class="row">
+    <button class="secondary" id="selectAllFacilitiesBtn">すべて選択</button>
+    <button class="secondary" id="selectNoneFacilitiesBtn">すべて解除</button>
+    <span class="hint">初期状態は上の「担当拠点リスト」の登録内容から決まります（未登録なら全拠点）。ここでの変更は保存されません。</span>
+  </div>
+  <div class="chip-list" id="facilityChips"></div>
+</div>
+
+<div class="panel">
+  <h2>上司報告用サマリー（自動生成）</h2>
+  <div class="hint">要確認拠点・未報告拠点をテキストでまとめます。そのままコピーして報告に使えます。閾値は簡易ロジックのため、実データで精度を確認しながら参考値としてご利用ください。</div>
+  <div class="summary-box" id="bossSummary" style="margin-top:10px;">データを解析すると、ここにサマリーが生成されます。</div>
+  <div class="row">
+    <button class="secondary" id="copySummaryBtn">サマリーをコピー</button>
+  </div>
+</div>
+
 <div class="tabs">
   <button class="tab-btn active" data-tab="daily">① 日次サマリー</button>
   <button class="tab-btn" data-tab="period">② 週次・月次サマリー</button>
@@ -157,7 +181,7 @@
   <div class="panel">
     <div class="row">
       <button class="secondary" id="exportDailyBtn">CSV出力</button>
-      <span class="hint">同一拠点・同日の複数投稿（朝→夕方）は自動的に1行へマージしています。営業活動の動きが無い行、営業実績時間0の行はハイライトされます。</span>
+      <span class="hint">同一拠点・同日の複数投稿（朝→夕方）は自動的に1行へマージしています。活動停滞の行はハイライトされ、右端の「フラグ」列に理由（活動停滞・問合せ停滞・目標未達など）を表示します。</span>
     </div>
     <div class="table-scroll"><table id="dailyTable"><thead></thead><tbody></tbody></table></div>
   </div>
@@ -495,11 +519,63 @@
     return FUNNEL_FIELDS.reduce((s,f)=> s + (parseCountValue(row[f]) || 0), 0);
   }
 
+  /* ===================== 異常値・未報告フラグ ===================== */
+  function computeFlags(dailyRows, selectedSet){
+    const rowFlagsByKey = new Map();
+    dailyRows.forEach(row => {
+      const flags = [];
+      const actual = parseCountValue(row.hours_actual) || 0;
+      const inq = parseCountValue(row.inquiries) || 0;
+      const leads = parseCountValue(row.leads_found) || 0;
+      if (actual === 0 && inq === 0 && leads === 0){
+        flags.push("活動停滞(実績時間・問合せ・案件発掘すべて0)");
+      }
+      rowFlagsByKey.set(row, flags);
+    });
+
+    const byFacility = new Map();
+    dailyRows.forEach(row => {
+      if (!row.facility_key) return;
+      if (!byFacility.has(row.facility_key)) byFacility.set(row.facility_key, []);
+      byFacility.get(row.facility_key).push(row);
+    });
+
+    const facilityFlags = new Map();
+    byFacility.forEach((rows, facKey) => {
+      const sorted = rows.slice().sort((a,b)=>a.date.localeCompare(b.date));
+      let run = 0, maxRun = 0;
+      sorted.forEach(r => {
+        const inq = parseCountValue(r.inquiries);
+        if (inq === 0){ run++; maxRun = Math.max(maxRun, run); } else { run = 0; }
+      });
+      const flags = [];
+      if (maxRun >= 3) flags.push(`問合せ0件が${maxRun}日連続`);
+      const latestGoalRow = sorted.slice().reverse().find(r => r.target_move_ins);
+      const goalNum = latestGoalRow ? parseCountValue(latestGoalRow.target_move_ins) : null;
+      const hasMoveIn = sorted.some(r => (parseCountValue(r.move_ins) || 0) > 0);
+      if (goalNum && goalNum > 0 && !hasMoveIn){
+        flags.push(`入居目標${latestGoalRow.target_move_ins}に対し実績0(期間中)`);
+      }
+      if (flags.length) facilityFlags.set(facKey, flags);
+    });
+
+    const distinctDates = Array.from(new Set(dailyRows.map(r=>r.date)))
+      .filter(d => d && d.indexOf("----") !== 0).sort();
+    const missingByDate = new Map();
+    distinctDates.forEach(d => {
+      const reported = new Set(dailyRows.filter(r=>r.date===d).map(r=>r.facility_key));
+      const missing = Array.from(selectedSet).filter(f=>!reported.has(f)).sort();
+      if (missing.length) missingByDate.set(d, missing);
+    });
+
+    return {rowFlagsByKey, facilityFlags, missingByDate, distinctDates};
+  }
+
   /* ===================== 状態管理 ===================== */
   const LS_KEYS = {facilities:"rasiel_tool_facilities", columns:"rasiel_tool_columns",
-    text:"rasiel_tool_last_text", year:"rasiel_tool_default_year", useFilter:"rasiel_tool_use_filter"};
+    text:"rasiel_tool_last_text", year:"rasiel_tool_default_year"};
 
-  let state = {reports: [], daily: []};
+  let state = {reports: [], daily: [], selectedFacilities: null, flagResult: null};
 
   function loadLS(key, fallback){
     try{ const v = localStorage.getItem(key); return v===null ? fallback : JSON.parse(v); }
@@ -513,24 +589,23 @@
     return FIELD_DISPLAY_ORDER.filter(([key]) => ALWAYS_ON.has(key) || enabled.indexOf(key) !== -1);
   }
 
-  function getFacilityQueries(){
-    const listText = document.getElementById("facilityList").value;
-    const list = listText.split("\n").map(s=>s.trim()).filter(Boolean).map(normalizeFacility);
-    const quick = document.getElementById("quickFilter").value.trim();
-    const useSaved = document.getElementById("useFacilityFilter").checked;
-    const queries = [];
-    if (useSaved) queries.push(...list);
-    if (quick) queries.push(normalizeFacility(quick));
-    return queries.map(q=>q.toLowerCase());
+  function allDetectedFacilities(){
+    return Array.from(new Set(state.daily.map(r=>r.facility_key))).filter(Boolean).sort((a,b)=>a.localeCompare(b,"ja"));
   }
 
-  function filterByFacility(rows, facilityKeyField, facilityRawField){
-    const queries = getFacilityQueries();
-    if (queries.length === 0) return rows;
+  function textSearchMatch(row, facilityRawField, reporterField){
+    const q = document.getElementById("quickFilter").value.trim().toLowerCase();
+    if (!q) return true;
+    const facility = (row[facilityRawField]||"").toLowerCase();
+    const reporter = (row[reporterField]||"").toLowerCase();
+    return facility.indexOf(q)!==-1 || reporter.indexOf(q)!==-1;
+  }
+
+  // 「対象拠点」チップで選択された拠点だけに絞り込み、さらに表内検索ボックスの文字列で絞り込む。
+  function filterRows(rows, facilityKeyField, facilityRawField, reporterField){
     return rows.filter(row => {
-      const key = (row[facilityKeyField]||"").toLowerCase();
-      const raw = (row[facilityRawField]||"").toLowerCase();
-      return queries.some(q => key.indexOf(q)!==-1 || raw.indexOf(q)!==-1);
+      if (state.selectedFacilities && !state.selectedFacilities.has(row[facilityKeyField])) return false;
+      return textSearchMatch(row, facilityRawField, reporterField);
     });
   }
 
@@ -587,20 +662,31 @@
 
   function renderDailyTab(){
     const columns = activeColumns().filter(([key]) => key !== "next_day_plan" && key !== "am_name" || key==="am_name");
-    const rows = filterByFacility(state.daily, "facility_key", "facility_raw");
-    renderTable(document.getElementById("dailyTable"), columns, rows, row => {
-      if (!row.facility_key) return "row-bad";
-      const funnel = rowFunnelSum(row);
-      const actual = parseCountValue(row.hours_actual) || 0;
-      if (funnel === 0 && actual === 0) return "row-warn";
-      return "";
-    });
+    const rows = filterRows(state.daily, "facility_key", "facility_raw", "reporter_name");
+    const thead = document.querySelector("#dailyTable thead");
+    const tbody = document.querySelector("#dailyTable tbody");
+    thead.innerHTML = "<tr>" + columns.map(([,label])=>`<th>${escapeHtml(label)}</th>`).join("") + "<th class=\"wrap\">フラグ</th></tr>";
+    tbody.innerHTML = rows.map(row => {
+      let cls = "";
+      if (!row.facility_key){ cls = "row-bad"; }
+      else {
+        const funnel = rowFunnelSum(row);
+        const actual = parseCountValue(row.hours_actual) || 0;
+        if (funnel === 0 && actual === 0) cls = "row-warn";
+      }
+      const cells = columns.map(([key]) => `<td>${escapeHtml(row[key] ?? "")}</td>`).join("");
+      const rowFlags = (state.flagResult && state.flagResult.rowFlagsByKey.get(row)) || [];
+      const facFlags = (state.flagResult && state.flagResult.facilityFlags.get(row.facility_key)) || [];
+      const badges = rowFlags.map(t=>`<span class="flag-badge">${escapeHtml(t)}</span>`)
+        .concat(facFlags.map(t=>`<span class="flag-badge danger">${escapeHtml(t)}</span>`)).join("");
+      return `<tr class="${cls}">${cells}<td class="wrap">${badges}</td></tr>`;
+    }).join("");
   }
 
   function renderPeriodTab(){
     const granularity = document.getElementById("periodGranularity").value;
     const period = buildPeriodSummary(state.daily, granularity);
-    const rows = filterByFacility(period, "facility_key", "facility_raw")
+    const rows = filterRows(period, "facility_key", "facility_raw", "facility_raw")
       .sort((a,b)=> (a.period+a.facility_key).localeCompare(b.period+b.facility_key));
     const columns = [["period","期間"],["facility_key","拠点名(正規化)"],["facility_raw","拠点名(原文)"],
       ["report_days","報告日数"],["work_days","短期稼働日数(最終値)"],
@@ -610,8 +696,8 @@
       ["trial_stays","体験(合計)"],["provisional_applications","仮申込(合計)"],["move_ins","入居(合計)"],
       ["occupancy","入居者数(最終値)"],["target_move_ins","目標入居件数(最終値)"]];
     renderTable(document.getElementById("periodTable"), columns, rows, row => {
-      const funnel = FUNNEL_FIELDS.reduce((s,f)=> s + (parseFloat(row[f])||0), 0);
-      const actual = parseFloat(row.hours_actual)||0;
+      const funnel = FUNNEL_FIELDS.reduce((s,f)=> s + (parseCountValue(row[f])||0), 0);
+      const actual = parseCountValue(row.hours_actual)||0;
       if (funnel === 0 && actual === 0) return "row-warn";
       return "";
     });
@@ -621,9 +707,9 @@
   function renderRawTab(){
     const columns = [["date","日付"],["time","時刻"],["facility_raw","拠点名(原文)"],["reporterName","報告者"],
       ["amName","報告先(AM)"]];
-    const rows = filterByFacility(
-      state.reports.map(r => Object.assign({}, r, {facility_key: r.facilityKey})),
-      "facility_key", "facility_raw"
+    const rows = filterRows(
+      state.reports.map(r => Object.assign({}, r, {facility_key: r.facilityKey, reporter_name: r.reporterName})),
+      "facility_key", "facility_raw", "reporter_name"
     );
     const thead = document.querySelector("#rawTable thead");
     const tbody = document.querySelector("#rawTable tbody");
@@ -661,6 +747,58 @@
         : "<span class=\"badge\" style=\"background:var(--good-bg)\">全拠点、報告が確認できました</span>");
   }
 
+  function renderFacilityChips(){
+    const container = document.getElementById("facilityChips");
+    const allFac = allDetectedFacilities();
+    if (state.selectedFacilities === null){
+      const registered = new Set(
+        document.getElementById("facilityList").value.split("\n").map(s=>s.trim()).filter(Boolean).map(normalizeFacility)
+      );
+      state.selectedFacilities = new Set(allFac.filter(f => registered.size===0 || registered.has(f)));
+    }
+    if (!allFac.length){
+      container.innerHTML = "<span class=\"hint\">まずログを解析してください。</span>";
+      return;
+    }
+    container.innerHTML = allFac.map(f => {
+      const checked = state.selectedFacilities.has(f) ? "checked" : "";
+      return `<label class="facility-pill"><input type="checkbox" data-fac="${escapeHtml(f)}" ${checked}> ${escapeHtml(f)}</label>`;
+    }).join("");
+    container.querySelectorAll("input[type=checkbox]").forEach(cb => {
+      cb.addEventListener("change", () => {
+        const f = cb.dataset.fac;
+        if (cb.checked) state.selectedFacilities.add(f); else state.selectedFacilities.delete(f);
+        renderResults();
+      });
+    });
+  }
+
+  function renderBossSummary(){
+    const el = document.getElementById("bossSummary");
+    if (!state.daily.length || !state.flagResult){
+      el.textContent = "データを解析すると、ここにサマリーが生成されます。";
+      return;
+    }
+    const fr = state.flagResult;
+    const lines = [];
+    const dates = fr.distinctDates;
+    const range = dates.length ? `${dates[0]} 〜 ${dates[dates.length - 1]}` : "不明";
+    const selectedCount = state.selectedFacilities ? state.selectedFacilities.size : 0;
+    lines.push(`【対象期間】${range}　対象拠点数：${selectedCount}`);
+    lines.push("");
+    lines.push("【要確認拠点】");
+    const entries = Array.from(fr.facilityFlags.entries())
+      .filter(([f]) => state.selectedFacilities && state.selectedFacilities.has(f));
+    if (!entries.length) lines.push("  該当なし");
+    else entries.forEach(([f, texts]) => lines.push(`  ・${f}：${texts.join(" / ")}`));
+    lines.push("");
+    lines.push("【未報告拠点(日別)】");
+    const missingEntries = Array.from(fr.missingByDate.entries());
+    if (!missingEntries.length) lines.push("  該当なし");
+    else missingEntries.forEach(([d, facs]) => lines.push(`  ・${d}：${facs.join("、")}`));
+    el.textContent = lines.join("\n");
+  }
+
   function renderColumnToggles(){
     const enabled = new Set(loadLS(LS_KEYS.columns, Array.from(DEFAULT_ON)));
     const el = document.getElementById("columnToggles");
@@ -680,12 +818,19 @@
     });
   }
 
-  function renderAll(){
-    renderStatCards();
+  function renderResults(){
+    state.flagResult = computeFlags(state.daily, state.selectedFacilities || new Set());
     renderDailyTab();
     renderPeriodTab();
     renderRawTab();
     renderMissing();
+    renderBossSummary();
+  }
+
+  function renderAll(){
+    renderStatCards();
+    renderFacilityChips();
+    renderResults();
   }
 
   /* ===================== イベント配線 ===================== */
@@ -757,6 +902,7 @@
     const defaultYear = document.getElementById("defaultYear").value;
     state.reports = parseChatLog(text, defaultYear);
     state.daily = buildDailySummary(state.reports);
+    state.selectedFacilities = null; // 担当拠点リストから初期選択を作り直す
     saveLS(LS_KEYS.text, text);
     saveLS(LS_KEYS.year, defaultYear);
     document.getElementById("parseSummary").textContent =
@@ -777,20 +923,38 @@
   });
   document.getElementById("saveFacilityBtn").addEventListener("click", () => {
     saveLS(LS_KEYS.facilities, document.getElementById("facilityList").value);
-    saveLS(LS_KEYS.useFilter, document.getElementById("useFacilityFilter").checked);
+    state.selectedFacilities = null; // 保存した拠点リストから選択状態を作り直す
     renderAll();
   });
-  document.getElementById("useFacilityFilter").addEventListener("change", () => {
-    saveLS(LS_KEYS.useFilter, document.getElementById("useFacilityFilter").checked);
-    renderAll();
-  });
-  document.getElementById("quickFilter").addEventListener("input", renderAll);
+  document.getElementById("quickFilter").addEventListener("input", renderResults);
   document.getElementById("periodGranularity").addEventListener("change", renderPeriodTab);
   document.getElementById("checkMissingBtn").addEventListener("click", renderMissing);
+  document.getElementById("selectAllFacilitiesBtn").addEventListener("click", () => {
+    state.selectedFacilities = new Set(allDetectedFacilities());
+    renderFacilityChips();
+    renderResults();
+  });
+  document.getElementById("selectNoneFacilitiesBtn").addEventListener("click", () => {
+    state.selectedFacilities = new Set();
+    renderFacilityChips();
+    renderResults();
+  });
+  document.getElementById("copySummaryBtn").addEventListener("click", () => {
+    const text = document.getElementById("bossSummary").textContent;
+    const btn = document.getElementById("copySummaryBtn");
+    const orig = btn.textContent;
+    navigator.clipboard.writeText(text).then(() => {
+      btn.textContent = "コピーしました";
+      setTimeout(() => { btn.textContent = orig; }, 1500);
+    }).catch(() => {
+      btn.textContent = "コピー失敗(手動で選択してください)";
+      setTimeout(() => { btn.textContent = orig; }, 2000);
+    });
+  });
 
   document.getElementById("exportDailyBtn").addEventListener("click", () => {
     const columns = activeColumns();
-    const rows = filterByFacility(state.daily, "facility_key", "facility_raw");
+    const rows = filterRows(state.daily, "facility_key", "facility_raw", "reporter_name");
     downloadText("rasiel_daily_summary.csv", toCsv(columns, rows), "text/csv");
   });
   document.getElementById("exportPeriodBtn").addEventListener("click", () => {
@@ -810,7 +974,6 @@
   function init(){
     const savedFacilities = loadLS(LS_KEYS.facilities, "");
     document.getElementById("facilityList").value = savedFacilities;
-    document.getElementById("useFacilityFilter").checked = !!loadLS(LS_KEYS.useFilter, false);
     document.getElementById("defaultYear").value = loadLS(LS_KEYS.year, new Date().getFullYear());
     document.getElementById("missingDate").valueAsDate = new Date();
     renderColumnToggles();
