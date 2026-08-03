@@ -1,0 +1,5 @@
+# Windows PowerShell 5.1 は BOM の無い .ps1 を Shift-JIS として読むため、
+# Git による改行コード・エンコーディングの自動変換を無効にして BOM を保護する
+*.ps1 -text
+*.bat -text
+*.txt -text
