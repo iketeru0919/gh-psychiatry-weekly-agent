@@ -162,11 +162,18 @@ class ValueTest(unittest.TestCase):
 
 
 def build_gh_workbook(path: Path, users, with_template=True):
-    """users: (シート名, 合計算定日数, C列の状況, 状況を書く日数) のリスト。"""
+    """実ファイル（RASIEL 1F/2F 2026年7月）と同じ配置で疑似シートを作る。
+
+    users: (シート名, 合計算定日数, C列の状況, 状況を書く日数, 住居外利用回数)
+    """
     wb = Workbook()
     wb.remove(wb.active)
 
-    def fill_sheet(ws, day_count, status, status_days, night, medical):
+    def fill_sheet(ws, day_count, status, status_days, outside_use, name=None):
+        if name:
+            ws["I2"] = name          # 支給決定障害者等氏名
+            ws["P2"] = 5             # 支援区分
+
         ws["E3"] = "非該当"
         ws["I3"] = "非該当"
         ws["M3"] = "Ⅴ"
@@ -176,25 +183,35 @@ def build_gh_workbook(path: Path, users, with_template=True):
         ws["M4"] = "非該当"
         ws["Q4"] = "非該当"
 
+        ws["C8"] = "サービス提供の状況"
+        ws["E8"] = "住居外利用"
+
         if status:
             for offset in range(status_days):
                 ws.cell(row=extract.GH_DATA_ROW_START + offset, column=3, value=status)
 
-        # 表の下の注記。行範囲を限定していないと誤カウントされる。
-        ws.cell(row=extract.GH_TOTAL_ROW, column=2, value="合計")
+        # 住居外利用は日次に 1 を立て、E40 がその合計になっている
+        for offset in range(outside_use):
+            ws.cell(row=extract.GH_DATA_ROW_START + offset, column=5, value=1)
+
+        ws.cell(row=extract.GH_TOTAL_ROW, column=1, value="合計")
+        ws[f"C{extract.GH_TOTAL_ROW}"] = day_count
+        ws[f"E{extract.GH_TOTAL_ROW}"] = outside_use
+        ws[f"F{extract.GH_TOTAL_ROW}"] = day_count
+        ws[f"I{extract.GH_TOTAL_ROW}"] = day_count
+
+        # 表の下の見出し行。行範囲を限定していないと誤カウントされる。
+        ws["C42"] = "基本算定日数"
+        ws["E42"] = "住居外利用"
         ws["C45"] = "入院"
         ws["G45"] = "○"
 
-        ws[f"C{extract.GH_TOTAL_ROW}"] = day_count
-        ws[f"F{extract.GH_TOTAL_ROW}"] = night
-        ws[f"I{extract.GH_TOTAL_ROW}"] = medical
-
-    for name, day_count, status, status_days in users:
-        fill_sheet(wb.create_sheet(name), day_count, status, status_days, day_count, day_count)
+    for name, day_count, status, status_days, outside_use in users:
+        fill_sheet(wb.create_sheet(name), day_count, status, status_days, outside_use, name)
 
     if with_template:
-        # 実際のファイルに入っているテンプレートシート（31日分が埋まっている）
-        fill_sheet(wb.create_sheet("実績記録票"), 31, "入院", 31, 31, 31)
+        # 実ファイルのテンプレートシート。31日分が埋まっていて I2 は空欄。
+        fill_sheet(wb.create_sheet("実績記録票"), 31, "", 0, 0)
         wb.create_sheet("延べ日数")
         wb.create_sheet("算定項目リスト")
         wb.create_sheet("重度障害者支援加算要件")
@@ -244,11 +261,11 @@ class EndToEndTest(unittest.TestCase):
 
         build_gh_workbook(
             facility / "実績記録表1F.xlsx",
-            [("山田太郎", 30, "", 0), ("鈴木花子", 0, "入院", 30)],
+            [("山田太郎", 30, "", 0, 5), ("鈴木花子", 0, "入院", 30, 0)],
         )
         build_gh_workbook(
             facility / "実績記録表2Ｆ.xlsx",   # 半角2＋全角Ｆ
-            [("佐藤一郎", 30, "", 0)],
+            [("佐藤一郎", 30, "", 0, 3)],
         )
         build_ss_workbook(
             facility / "短期実績.xlsx",
@@ -257,7 +274,7 @@ class EndToEndTest(unittest.TestCase):
 
         excluded = self.base / "99.テストフォルダ　※担当以外使用禁止"
         excluded.mkdir()
-        build_gh_workbook(excluded / "実績記録表1F.xlsx", [("除外太郎", 30, "", 0)])
+        build_gh_workbook(excluded / "実績記録表1F.xlsx", [("除外太郎", 30, "", 0, 0)])
 
         self._orig_base = common.BASE_DIR
         self._orig_out = extract.OUTPUT_DIR
@@ -334,6 +351,44 @@ class EndToEndTest(unittest.TestCase):
         ]
         self.assertEqual(row["人数"].iloc[0], 3)
 
+    def test_outside_use(self):
+        extract.main()
+        sheets = self.read_output()
+
+        gh = sheets["GH_利用者別明細"]
+        detail = sheets["GH_住居外利用_利用者別"]
+        summary = sheets["GH_住居外利用_施設別"]
+        values = sheets["GH_E列値内訳"]
+
+        # E40 が利用者ごとの住居外利用の総数
+        by_user = dict(zip(gh["利用者名"], gh["住居外利用"]))
+        self.assertEqual(by_user["山田太郎"], 5)
+        self.assertEqual(by_user["佐藤一郎"], 3)
+        self.assertEqual(by_user["鈴木花子"], 0)
+
+        # 0回の利用者は「誰に何回」の一覧に出さない
+        self.assertEqual(sorted(detail["利用者名"].tolist()), ["佐藤一郎", "山田太郎"])
+
+        # 施設ごとの合計回数と該当人数
+        self.assertEqual(summary["住居外利用_合計回数"].sum(), 8)
+        self.assertEqual(summary["住居外利用のあった人数"].sum(), 2)
+
+        # 合計セルと日次入力数が一致していれば「要確認」は付かない
+        self.assertEqual(detail["合計と日次の照合"].tolist(), ["一致", "一致"])
+
+        # E列に実際に入っている値
+        self.assertEqual(values["件数"].sum(), 8)
+
+    def test_outside_use_flags_mismatch(self):
+        extract.main()
+        sheets = self.read_output()
+        gh = sheets["GH_利用者別明細"]
+
+        row = gh[gh["利用者名"] == "山田太郎"].iloc[0]
+        self.assertEqual(row["住居外利用_日次入力数"], 5)
+        self.assertEqual(row["氏名"], "山田太郎")
+        self.assertEqual(row["支援区分"], 5)
+
     def test_error_columns_are_stable(self):
         extract.main()
         sheets = self.read_output()
@@ -355,12 +410,12 @@ class ImpossibleDayCountTest(unittest.TestCase):
         build_gh_workbook(
             facility / "実績記録表1F.xlsx",
             # 「空き部屋」のようなシート名ではなく、名前では判別できないケースを試す
-            [("山田太郎", 30, "", 0), ("山田花子", 31, "", 0)],
+            [("山田太郎", 30, "", 0, 0), ("山田花子", 31, "", 0, 0)],
             with_template=False,
         )
         build_ss_workbook(facility / "短期実績.xlsx", [("田中次郎", 8, 4, 4, 3)],
                           with_template=False)
-        build_gh_workbook(facility / "実績記録表2F.xlsx", [("佐藤一郎", 30, "", 0)],
+        build_gh_workbook(facility / "実績記録表2F.xlsx", [("佐藤一郎", 30, "", 0, 0)],
                           with_template=False)
 
         self._orig_base = common.BASE_DIR

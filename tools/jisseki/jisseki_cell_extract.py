@@ -38,13 +38,25 @@ SS_TOTAL_ROW = 38
 SS_DATA_ROW_START = SS_TOTAL_ROW - DAY_ROW_COUNT   # 7
 SS_DATA_ROW_END = SS_TOTAL_ROW - 1                 # 37
 
-# 利用者名が入っているセルが分かればここに設定する（例: "B1"）。
-# 設定すると「空欄のシートは利用者シートではない」と判定できる。
-GH_USER_NAME_CELL = None
+# 利用者名（支給決定障害者等氏名）のセル。空欄のシートは利用者シートではないと判定する。
+# GH は実ファイルで I2 と確認済み。短期は未確認のため未設定。
+GH_USER_NAME_CELL = "I2"
 SS_USER_NAME_CELL = None
+
+# 支援区分のセル（GH は O2 が見出し、P2 が値）
+GH_BAND_CELL = "P2"
 
 # 当月日数を超える算定日数のシートはテンプレート等とみなして除外する
 EXCLUDE_IMPOSSIBLE_DAY_COUNT = True
+
+# ===== 住居外利用（E列）の設定 =====
+
+# E40 がそのシートの住居外利用の総数。C40 や F40 と同じ合計行にある。
+GH_OUTSIDE_USE_COLUMN = "E"
+
+# 合計セルが数式のまま保存されていて値が取れないと 0 になってしまうため、
+# 日次の入力数を別に数えて突き合わせられるようにする。
+GH_OUTSIDE_USE_CROSS_CHECK = True
 
 # ===== 項目設定 =====
 
@@ -73,6 +85,7 @@ GH_STATUS_ITEMS = [
 
 GH_BASIC_SUM_COLUMNS = [
     "基本算定日数",
+    "住居外利用",
     "夜勤加配",
     "医療連携",
     "入院時支援加算回数",
@@ -295,6 +308,27 @@ def count_contains(grid, column_letter, row_start, row_end, target_text) -> int:
     )
 
 
+def count_filled(grid, column_letter, row_start, row_end) -> int:
+    """日次範囲で何か入力されているセルの数。合計セルとの突き合わせに使う。"""
+    return sum(
+        1 for text in column_texts(grid, column_letter, row_start, row_end)
+        if text != "" and text not in {"0", "０"}
+    )
+
+
+def collect_column_values(grid, column_letter, row_start, row_end) -> dict:
+    """日次範囲に実際に入っている値と、その件数。"""
+    values = {}
+
+    for text in column_texts(grid, column_letter, row_start, row_end):
+        if text == "":
+            continue
+
+        values[text] = values.get(text, 0) + 1
+
+    return values
+
+
 _STATUS_SET = set(GH_STATUS_ITEMS)
 
 
@@ -317,7 +351,14 @@ def extract_gh_sheet(grid, common_info: dict, errors: list) -> dict:
     return {
         **common_info,
 
+        "氏名": cell_value(grid, GH_USER_NAME_CELL) if GH_USER_NAME_CELL else None,
+        "支援区分": cell_value(grid, GH_BAND_CELL) if GH_BAND_CELL else None,
+
         "基本算定日数": num(f"C{total}"),
+        "住居外利用": num(f"{GH_OUTSIDE_USE_COLUMN}{total}"),
+        "住居外利用_日次入力数": count_filled(
+            grid, GH_OUTSIDE_USE_COLUMN, GH_DATA_ROW_START, GH_DATA_ROW_END
+        ),
         "夜勤加配": num(f"F{total}"),
         "医療連携": num(f"I{total}"),
         "入院時支援加算回数": count_circle(grid, "G", GH_DATA_ROW_START, GH_DATA_ROW_END),
@@ -452,6 +493,67 @@ def make_gh_addon_detail(df_gh: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
 
     return pd.DataFrame(rows).sort_values(["施設名", "加算項目", "区分値"])
+
+
+def make_outside_use_detail(df_gh: pd.DataFrame) -> pd.DataFrame:
+    """住居外利用が誰に何回ついているか（0回の利用者は載せない）。"""
+    if df_gh.empty or "住居外利用" not in df_gh.columns:
+        return pd.DataFrame()
+
+    cols = ["施設名", "区分", "利用者名", "住居外利用"]
+
+    if "住居外利用_日次入力数" in df_gh.columns:
+        cols.append("住居外利用_日次入力数")
+
+    detail = df_gh[cols].copy()
+    detail = detail[
+        (detail["住居外利用"] > 0)
+        | (detail.get("住居外利用_日次入力数", 0) > 0)
+    ]
+
+    if detail.empty:
+        return detail
+
+    if "住居外利用_日次入力数" in detail.columns:
+        detail["合計と日次の照合"] = [
+            "一致" if total == daily else "要確認"
+            for total, daily in zip(detail["住居外利用"], detail["住居外利用_日次入力数"])
+        ]
+
+    return detail.sort_values(["施設名", "住居外利用"], ascending=[True, False])
+
+
+def make_outside_use_summary(df_gh: pd.DataFrame) -> pd.DataFrame:
+    """住居外利用が施設ごとに何回あったか。"""
+    if df_gh.empty or "住居外利用" not in df_gh.columns:
+        return pd.DataFrame()
+
+    grouped = df_gh.groupby("施設名")
+
+    rows = []
+
+    for facility_name, group in grouped:
+        rows.append({
+            "施設名": facility_name,
+            "住居外利用_合計回数": group["住居外利用"].sum(),
+            "住居外利用のあった人数": int((group["住居外利用"] > 0).sum()),
+            "利用者数": len(group),
+        })
+
+    return pd.DataFrame(rows).sort_values("住居外利用_合計回数", ascending=False)
+
+
+def make_outside_use_values(value_rows: list) -> pd.DataFrame:
+    """E列の日次範囲に実際に入っている値の一覧（表記の確認用）。"""
+    if not value_rows:
+        return pd.DataFrame(columns=["施設名", "E列の値", "件数"])
+
+    df = pd.DataFrame(value_rows)
+
+    return (
+        df.groupby(["施設名", "E列の値"], as_index=False)["件数"].sum()
+        .sort_values(["施設名", "件数"], ascending=[True, False])
+    )
 
 
 def make_ss_facility_summary(df_ss: pd.DataFrame) -> pd.DataFrame:
@@ -634,6 +736,7 @@ def main():
     ss_results = []
     error_results = []
     skipped_sheets = []
+    outside_use_values = []
 
     target_files, file_errors, excluded_folders = collect_target_files(
         mode, target_year, target_month
@@ -800,6 +903,25 @@ def main():
                     ))
 
                 if file_type in ["1F", "2F"]:
+                    real_name = normalize_cell_text(row.get("氏名"))
+
+                    if real_name and real_name != sheet_name.strip():
+                        error_results.append(make_error(
+                            target_month_label, facility_name, file_type, sheet_name,
+                            f"シート名と氏名({GH_USER_NAME_CELL})が一致しません: {real_name}",
+                        ))
+
+                    if GH_OUTSIDE_USE_CROSS_CHECK:
+                        for value, count in collect_column_values(
+                            grid, GH_OUTSIDE_USE_COLUMN,
+                            GH_DATA_ROW_START, GH_DATA_ROW_END,
+                        ).items():
+                            outside_use_values.append({
+                                "施設名": facility_name,
+                                "E列の値": value,
+                                "件数": count,
+                            })
+
                     gh_results.append(row)
                 else:
                     if normalize_cell_text(row["支援区分"]) == "":
@@ -833,7 +955,11 @@ def main():
         "施設名",
         "区分",
         "利用者名",
+        "氏名",
+        "支援区分",
         "基本算定日数",
+        "住居外利用",
+        "住居外利用_日次入力数",
         "夜勤加配",
         "医療連携",
         "入院時支援加算回数",
@@ -866,6 +992,9 @@ def main():
         "GH_入退居状況集計": make_gh_status_summary(df_gh),
         "GH_加算集計": make_gh_addon_summary(df_gh),
         "GH_加算内訳": make_gh_addon_detail(df_gh),
+        "GH_住居外利用_利用者別": make_outside_use_detail(df_gh),
+        "GH_住居外利用_施設別": make_outside_use_summary(df_gh),
+        "GH_E列値内訳": make_outside_use_values(outside_use_values),
         "短期_利用者別明細": df_ss,
         "短期_施設別集計": make_ss_facility_summary(df_ss),
         "エラー一覧": df_errors,
@@ -878,6 +1007,12 @@ def main():
     print("")
     print("抽出完了")
     print(f"GH明細: {len(df_gh)}行 / 短期明細: {len(df_ss)}行")
+    if "住居外利用" in df_gh.columns:
+        print(
+            f"住居外利用: 合計{int(df_gh['住居外利用'].sum())}回 / "
+            f"該当{int((df_gh['住居外利用'] > 0).sum())}人"
+        )
+
     print(f"エラー・警告: {len(df_errors)}件 / スキップシート: {len(df_skipped)}件")
     print(f"出力先: {output_file}")
 
