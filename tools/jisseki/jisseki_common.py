@@ -299,7 +299,11 @@ def collect_target_files(mode: str, target_year=None, target_month=None,
                          base_dir: Path = None):
     """施設フォルダごとに 1F / 2F / 短期 の対象ファイルを1つずつ選ぶ。
 
-    戻り値: (target_files, errors, excluded_folders)
+    戻り値: (target_files, errors, excluded_folders, unused_files)
+
+    unused_files には「Excelファイルとして見つけたが対象にしなかったもの」を
+    理由つきで入れる。「フォルダにあるのに集計されない」という状況を
+    フォルダを開かずに追えるようにするため。
 
     target_files の各要素:
         施設名 / 元フォルダ名 / 区分 / ファイル / 最新更新日時 /
@@ -310,6 +314,7 @@ def collect_target_files(mode: str, target_year=None, target_month=None,
     target_files = []
     errors = []
     conflicted = []
+    unused_files = []
 
     if not base_dir.exists():
         errors.append({
@@ -319,7 +324,7 @@ def collect_target_files(mode: str, target_year=None, target_month=None,
             "利用者名": "",
             "内容": f"保存先フォルダが見つかりません: {base_dir}",
         })
-        return target_files, errors, []
+        return target_files, errors, [], unused_files
 
     facility_folders, excluded_folders = find_facility_folders(base_dir)
 
@@ -343,20 +348,44 @@ def collect_target_files(mode: str, target_year=None, target_month=None,
             if file.name.startswith("~$"):
                 continue
 
+            def unused(reason, file_type=""):
+                unused_files.append({
+                    "施設名": facility_name,
+                    "区分": file_type,
+                    "ファイル名": file.name,
+                    "理由": reason,
+                    "サブフォルダ": str(file.parent.relative_to(facility_folder)),
+                    "フルパス": str(file),
+                })
+
             if is_conflicted_copy(file.name):
                 conflicted.append(str(file))
+                unused("競合コピーのため除外")
                 continue
 
-            if any(is_excluded_folder(part) for part in file.relative_to(facility_folder).parts[:-1]):
+            sub_parts = file.relative_to(facility_folder).parts[:-1]
+
+            if any(is_excluded_folder(part) for part in sub_parts):
+                unused("除外対象のサブフォルダ配下のため除外")
                 continue
 
             file_type = get_file_type(file.name)
 
             if not file_type:
+                unused("区分を判定できません（ファイル名に 1F / 2F / 短期 が見当たらない）")
                 continue
 
             if mode == "month":
                 if not is_target_month_file(file, target_year, target_month, base_dir):
+                    detected = extract_year_month_from_path(file, base_dir)
+                    detected_text = (
+                        f"検出: {detected[0]}年{detected[1]}月"
+                        if detected else "年月を読み取れません"
+                    )
+                    unused(
+                        f"{target_year}年{target_month}月の対象外（{detected_text}）",
+                        file_type,
+                    )
                     continue
 
             files_by_type[file_type].append(file)
@@ -424,7 +453,7 @@ def collect_target_files(mode: str, target_year=None, target_month=None,
                 "内容": f"複数フォルダが同じ施設名に正規化されています（合算されます）: {' / '.join(folders)}",
             })
 
-    return target_files, errors, excluded_folders
+    return target_files, errors, excluded_folders, unused_files
 
 
 def _select_file(candidates, mode, target_year, target_month, base_dir):

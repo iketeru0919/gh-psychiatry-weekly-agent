@@ -174,6 +174,8 @@ ERROR_COLUMNS = ["重要度", "対象月", "施設名", "区分", "利用者名"
 # エラー一覧の並び順（要対応を先頭に）
 ERROR_LEVEL_ORDER = {"要対応": 0, "確認": 1}
 
+UNUSED_FILE_COLUMNS = ["施設名", "区分", "ファイル名", "理由", "サブフォルダ", "フルパス"]
+
 # ===== 算定できているセルの強調表示 =====
 
 # ここに挙げた列で「0ではない／該当している」セルを塗りつぶす。
@@ -946,7 +948,7 @@ def format_excel_file(file_path: Path):
     warn_header_fill = PatternFill("solid", fgColor="F4CCCC")
     header_font = Font(bold=True)
     center_alignment = Alignment(horizontal="center", vertical="center")
-    warn_sheets = {"エラー一覧", "スキップシート一覧"}
+    warn_sheets = {"エラー一覧", "スキップシート一覧", "未使用ファイル一覧"}
 
     highlight_fill = PatternFill("solid", fgColor=HIGHLIGHT_FILL_COLOR)
     highlight_font = Font(bold=True, color=HIGHLIGHT_FONT_COLOR)
@@ -1016,7 +1018,7 @@ def main():
     skipped_sheets = []
     outside_use_values = []
 
-    target_files, file_errors, excluded_folders = collect_target_files(
+    target_files, file_errors, excluded_folders, unused_files = collect_target_files(
         mode, target_year, target_month
     )
 
@@ -1294,6 +1296,7 @@ def main():
         "短期_施設別集計": make_ss_facility_summary(df_ss),
         "エラー一覧": df_errors,
         "スキップシート一覧": df_skipped,
+        "未使用ファイル一覧": pd.DataFrame(unused_files, columns=UNUSED_FILE_COLUMNS),
     }
 
     output_file = save_output(output_file, sheets)
@@ -1314,7 +1317,8 @@ def main():
     print(
         f"エラー・警告: 要対応{counts.get('要対応', 0)}件 / "
         f"確認{counts.get('確認', 0)}件 / "
-        f"スキップシート: {len(df_skipped)}件"
+        f"スキップシート: {len(df_skipped)}件 / "
+        f"未使用ファイル: {len(unused_files)}件"
     )
     print(f"出力先: {output_file}")
 

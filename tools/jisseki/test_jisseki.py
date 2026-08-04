@@ -664,6 +664,60 @@ class MissingTotalTest(unittest.TestCase):
         self.assertEqual(noise["利用者名"].tolist(), ["山田太郎"])
 
 
+class UnusedFileTest(unittest.TestCase):
+    """フォルダにあるのに集計されないファイルの理由を出せること。
+
+    西浅田ⅱの「短期は取れるのに1F/2Fだけ対象ファイルなし」のような状況を、
+    フォルダを開かずに追えるようにするため。
+    """
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.base = self.tmp / "保存先"
+        self.out = self.tmp / "out"
+        facility = self.base / "RASIEL西浅田ⅱ⑦"
+        facility.mkdir(parents=True)
+
+        # 短期だけ命名も年月も正しい
+        build_ss_workbook(facility / "【西浅田ⅱ短期】実績記録票　2026年7月.xlsm",
+                          [("中村崇", 6, 3, 3, 3)], with_template=False)
+        # 1F/2F は区分が読めない名前
+        build_gh_workbook(facility / "【西浅田ⅱ　１階】実績記録票　2026年7月.xlsm",
+                          [("山田太郎", 31, "", 0, 0)], with_template=False)
+        # 月が違うファイル
+        build_gh_workbook(facility / "【西浅田ⅱ2F】実績記録票　2026年6月.xlsm",
+                          [("佐藤一郎", 30, "", 0, 0)], with_template=False)
+        # 除外サブフォルダ配下
+        old = facility / "過去分"
+        old.mkdir()
+        build_gh_workbook(old / "【西浅田ⅱ1F】実績記録票　2026年7月.xlsm",
+                          [("古田太郎", 31, "", 0, 0)], with_template=False)
+
+        self._orig = (common.BASE_DIR, extract.OUTPUT_DIR)
+        common.BASE_DIR = self.base
+        extract.OUTPUT_DIR = self.out
+        extract.get_run_mode = lambda: ("month", 2026, 7)
+
+    def tearDown(self):
+        common.BASE_DIR, extract.OUTPUT_DIR = self._orig
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_unused_files_are_listed_with_reason(self):
+        extract.main()
+
+        with pd.ExcelFile(next(self.out.glob("*.xlsx"))) as xl:
+            unused = xl.parse("未使用ファイル一覧")
+
+        by_file = dict(zip(unused["ファイル名"], unused["理由"]))
+
+        self.assertIn("区分を判定できません", by_file["【西浅田ⅱ　１階】実績記録票　2026年7月.xlsm"])
+        self.assertIn("2026年6月", by_file["【西浅田ⅱ2F】実績記録票　2026年6月.xlsm"])
+        self.assertIn("除外対象のサブフォルダ", by_file["【西浅田ⅱ1F】実績記録票　2026年7月.xlsm"])
+
+        # 採用されたファイルは未使用一覧に出ない
+        self.assertNotIn("【西浅田ⅱ短期】実績記録票　2026年7月.xlsm", by_file)
+
+
 class NameComparisonTest(unittest.TestCase):
     def test_full_width_space_is_ignored(self):
         self.assertTrue(extract.same_person_name("清水　雅智", "清水雅智"))

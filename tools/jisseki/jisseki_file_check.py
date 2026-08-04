@@ -82,7 +82,11 @@ def format_excel_file(file_path: Path):
             for cell in ws[1]:
                 cell.font = header_font
                 cell.alignment = center_alignment
-                cell.fill = warn_header_fill if ws.title == "確認事項" else header_fill
+                cell.fill = (
+                    warn_header_fill
+                    if ws.title in {"確認事項", "未使用ファイル一覧"}
+                    else header_fill
+                )
 
         for col_idx, column_cells in enumerate(ws.columns, start=1):
             max_length = 0
@@ -106,7 +110,7 @@ def main():
         print(BASE_DIR)
         return
 
-    target_files, errors, excluded_folders = collect_target_files(
+    target_files, errors, excluded_folders, unused_files = collect_target_files(
         mode, target_year, target_month
     )
 
@@ -154,15 +158,24 @@ def main():
             f"実績記録表_対象ファイル確認_{target_year}年{target_month:02d}月_{now_text}.xlsx"
         )
 
+    df_unused = pd.DataFrame(
+        unused_files,
+        columns=["施設名", "区分", "ファイル名", "理由", "サブフォルダ", "フルパス"],
+    )
+
     with pd.ExcelWriter(output_file, engine="openpyxl") as writer:
         df_results.to_excel(writer, sheet_name="対象ファイル一覧", index=False)
         df_errors.to_excel(writer, sheet_name="確認事項", index=False)
+        df_unused.to_excel(writer, sheet_name="未使用ファイル一覧", index=False)
 
     format_excel_file(output_file)
 
     print("")
     print("確認完了")
-    print(f"対象ファイル: {len(df_results)}件 / 確認事項: {len(df_errors)}件")
+    print(
+        f"対象ファイル: {len(df_results)}件 / 確認事項: {len(df_errors)}件 / "
+        f"未使用ファイル: {len(df_unused)}件"
+    )
     print(f"出力先: {output_file}")
 
 
