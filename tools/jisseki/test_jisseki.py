@@ -162,7 +162,7 @@ class ValueTest(unittest.TestCase):
 # ===== 疑似ファイルを作って通しで検証する =====
 
 
-def build_gh_workbook(path: Path, users, with_template=True):
+def build_gh_workbook(path: Path, users, with_template=True, support_marks=None):
     """実ファイル（RASIEL 1F/2F 2026年7月）と同じ配置で疑似シートを作る。
 
     users: (シート名, 合計算定日数, C列の状況, 状況を書く日数, 住居外利用回数)
@@ -200,6 +200,13 @@ def build_gh_workbook(path: Path, users, with_template=True):
         ws[f"E{extract.GH_TOTAL_ROW}"] = outside_use
         ws[f"F{extract.GH_TOTAL_ROW}"] = day_count
         ws[f"I{extract.GH_TOTAL_ROW}"] = day_count
+
+        # 入院時支援(G)・帰宅時支援(H)。様式により「○」と「1」が混在する
+        for column_letter, marks in (support_marks or {}).items():
+            column = {"G": 7, "H": 8}[column_letter]
+            for offset, mark in enumerate(marks):
+                ws.cell(row=extract.GH_DATA_ROW_START + offset,
+                        column=column, value=mark)
 
         # 表の下の見出し行。行範囲を限定していないと誤カウントされる。
         ws["C42"] = "基本算定日数"
@@ -359,7 +366,7 @@ class EndToEndTest(unittest.TestCase):
         gh = sheets["GH_利用者別明細"]
         detail = sheets["GH_住居外利用_利用者別"]
         summary = sheets["GH_住居外利用_施設別"]
-        values = sheets["GH_E列値内訳"]
+        values = sheets["GH_日次入力値内訳"]
 
         # E40 が利用者ごとの住居外利用の総数
         by_user = dict(zip(gh["利用者名"], gh["住居外利用"]))
@@ -378,7 +385,7 @@ class EndToEndTest(unittest.TestCase):
         self.assertEqual(detail["合計と日次の照合"].tolist(), ["一致", "一致"])
 
         # E列に実際に入っている値
-        self.assertEqual(values["件数"].sum(), 8)
+        self.assertEqual(values[values["列"] == "E"]["件数"].sum(), 8)
 
     def test_outside_use_flags_mismatch(self):
         extract.main()
@@ -534,6 +541,64 @@ class StaleFileNameTest(unittest.TestCase):
         mismatch = errors[errors["内容"].str.contains("指定月と一致しません", na=False)]
         self.assertEqual(len(mismatch), 3)
         self.assertTrue((mismatch["重要度"] == "要対応").all())
+
+
+class MarkCountTest(unittest.TestCase):
+    """入院時支援・帰宅時支援は ○ 前提で数えていたため、
+
+    「1」で入力する様式では全社0件になっていた。その回帰テスト。
+    """
+
+    def test_is_marked(self):
+        for value in ["○", "〇", "◯", "●", "✓", "1", "1.0", "3"]:
+            with self.subTest(value=value):
+                self.assertTrue(extract.is_marked(value))
+
+        for value in ["", "0", "０", "-", "－", "×"]:
+            with self.subTest(value=value):
+                self.assertFalse(extract.is_marked(value))
+
+    def test_counts_numeric_marks(self):
+        tmp = Path(tempfile.mkdtemp())
+        base = tmp / "保存先"
+        out = tmp / "out"
+        facility = base / "RASIEL検証" / "2026年7月"
+        facility.mkdir(parents=True)
+
+        # G列は「1」、H列は「○」で入力されているファイル
+        build_gh_workbook(
+            facility / "実績記録表1F.xlsx",
+            [("山田太郎", 31, "", 0, 0)],
+            with_template=False,
+            support_marks={"G": ([1] * 4), "H": (["○"] * 2)},
+        )
+        build_gh_workbook(facility / "実績記録表2F.xlsx", [("佐藤一郎", 31, "", 0, 0)],
+                          with_template=False)
+        build_ss_workbook(facility / "短期実績.xlsx", [("田中次郎", 8, 4, 4, 3)],
+                          with_template=False)
+
+        orig_base, orig_out = common.BASE_DIR, extract.OUTPUT_DIR
+        common.BASE_DIR = base
+        extract.OUTPUT_DIR = out
+        extract.get_run_mode = lambda: ("month", 2026, 7)
+
+        try:
+            extract.main()
+
+            with pd.ExcelFile(next(out.glob("*.xlsx"))) as xl:
+                gh = xl.parse("GH_利用者別明細")
+                audit = xl.parse("GH_日次入力値内訳")
+
+            row = gh[gh["利用者名"] == "山田太郎"].iloc[0]
+            self.assertEqual(row["入院時支援加算回数"], 4)   # 「1」でも数える
+            self.assertEqual(row["帰宅時支援加算回数"], 2)   # 「○」でも数える
+
+            # 内訳に実際の値が出る
+            g_values = set(audit[audit["列"] == "G"]["値"])
+            self.assertIn("1", g_values)
+        finally:
+            common.BASE_DIR, extract.OUTPUT_DIR = orig_base, orig_out
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
 class NameComparisonTest(unittest.TestCase):

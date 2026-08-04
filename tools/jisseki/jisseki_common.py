@@ -85,6 +85,15 @@ def normalize_facility_name(folder_name: str) -> str:
     return folder_name
 
 
+# Dropbox / OneDrive が同時編集時に作るコピー。中身が古いことがあるので候補から外す。
+CONFLICT_MARKERS = ["競合コピー", "conflicted copy", "の競合", "-conflict"]
+
+
+def is_conflicted_copy(file_name: str) -> bool:
+    lowered = file_name.lower()
+    return any(marker.lower() in lowered for marker in CONFLICT_MARKERS)
+
+
 def is_excluded_folder(folder_name: str) -> bool:
     lowered = folder_name.lower()
 
@@ -300,6 +309,7 @@ def collect_target_files(mode: str, target_year=None, target_month=None,
 
     target_files = []
     errors = []
+    conflicted = []
 
     if not base_dir.exists():
         errors.append({
@@ -331,6 +341,10 @@ def collect_target_files(mode: str, target_year=None, target_month=None,
                 continue
 
             if file.name.startswith("~$"):
+                continue
+
+            if is_conflicted_copy(file.name):
+                conflicted.append(str(file))
                 continue
 
             if any(is_excluded_folder(part) for part in file.relative_to(facility_folder).parts[:-1]):
@@ -390,6 +404,15 @@ def collect_target_files(mode: str, target_year=None, target_month=None,
                 "検出年月": extract_year_month_from_path(latest_file, base_dir),
                 "候補ファイル数": len(candidates),
             })
+
+    for path in conflicted:
+        errors.append({
+            "重要度": "確認",
+            "施設名": "",
+            "区分": "",
+            "利用者名": "",
+            "内容": f"競合コピーのため候補から除外しました: {path}",
+        })
 
     for normalized, folders in normalized_to_folders.items():
         if len(folders) > 1:

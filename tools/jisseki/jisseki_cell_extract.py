@@ -62,6 +62,14 @@ GH_OUTSIDE_USE_COLUMN = "E"
 # 日次の入力数を別に数えて突き合わせられるようにする。
 GH_OUTSIDE_USE_CROSS_CHECK = True
 
+# 日次の入力値を一覧に出す列。様式が変わって表記が変わったときに気づけるようにする。
+# （○前提で数えていたために入院時支援・帰宅時支援が全社0件になった経緯がある）
+GH_VALUE_AUDIT_COLUMNS = {
+    "E": "住居外利用",
+    "G": "入院時支援加算",
+    "H": "帰宅時支援加算",
+}
+
 # ===== 項目設定 =====
 
 GH_STATUS_ITEMS = [
@@ -369,7 +377,29 @@ def count_filled(grid, column_letter, row_start, row_end) -> int:
     """日次範囲で何か入力されているセルの数。合計セルとの突き合わせに使う。"""
     return sum(
         1 for text in column_texts(grid, column_letter, row_start, row_end)
-        if text != "" and text not in {"0", "０"}
+        if is_marked(text)
+    )
+
+
+def is_marked(text: str) -> bool:
+    """日次セルに「算定した」印が入っているか。
+
+    様式・施設によって ○ / 〇 / ● / ✓ / 1 と表記が分かれるため、
+    空欄と 0 以外はすべて算定ありとして扱う。
+    """
+    if text == "":
+        return False
+
+    if text in {"0", "０", "0.0", "-", "－", "―", "ー", "×", "✕"}:
+        return False
+
+    return True
+
+
+def count_marked(grid, column_letter, row_start, row_end) -> int:
+    return sum(
+        1 for text in column_texts(grid, column_letter, row_start, row_end)
+        if is_marked(text)
     )
 
 
@@ -418,8 +448,10 @@ def extract_gh_sheet(grid, common_info: dict, errors: list) -> dict:
         ),
         "夜勤加配": num(f"F{total}"),
         "医療連携": num(f"I{total}"),
-        "入院時支援加算回数": count_circle(grid, "G", GH_DATA_ROW_START, GH_DATA_ROW_END),
-        "帰宅時支援加算回数": count_circle(grid, "H", GH_DATA_ROW_START, GH_DATA_ROW_END),
+        # G40/H40 に合計セルが無いため日次を数える。
+        # 様式によって「○」と「1」が混在するので、空欄・0以外をすべて1回とする。
+        "入院時支援加算回数": count_marked(grid, "G", GH_DATA_ROW_START, GH_DATA_ROW_END),
+        "帰宅時支援加算回数": count_marked(grid, "H", GH_DATA_ROW_START, GH_DATA_ROW_END),
 
         "重度支援加算(Ⅰ)": cell_value(grid, "E3"),
         "重度支援加算(Ⅱ)": cell_value(grid, "I3"),
@@ -651,16 +683,22 @@ def make_outside_use_summary(df_gh: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows).sort_values("住居外利用_合計回数", ascending=False)
 
 
+VALUE_AUDIT_COLUMNS = ["施設名", "列", "項目", "値", "件数"]
+
+
 def make_outside_use_values(value_rows: list) -> pd.DataFrame:
-    """E列の日次範囲に実際に入っている値の一覧（表記の確認用）。"""
+    """日次範囲に実際に入っている値の一覧（表記の確認用）。
+
+    「○で数えていたら実際は1だった」といった様式の食い違いに気づくため。
+    """
     if not value_rows:
-        return pd.DataFrame(columns=["施設名", "E列の値", "件数"])
+        return pd.DataFrame(columns=VALUE_AUDIT_COLUMNS)
 
     df = pd.DataFrame(value_rows)
 
     return (
-        df.groupby(["施設名", "E列の値"], as_index=False)["件数"].sum()
-        .sort_values(["施設名", "件数"], ascending=[True, False])
+        df.groupby(["施設名", "列", "項目", "値"], as_index=False)["件数"].sum()
+        .sort_values(["列", "施設名", "件数"], ascending=[True, True, False])
     )
 
 
@@ -1097,15 +1135,18 @@ def main():
                         ))
 
                     if GH_OUTSIDE_USE_CROSS_CHECK:
-                        for value, count in collect_column_values(
-                            grid, GH_OUTSIDE_USE_COLUMN,
-                            GH_DATA_ROW_START, GH_DATA_ROW_END,
-                        ).items():
-                            outside_use_values.append({
-                                "施設名": facility_name,
-                                "E列の値": value,
-                                "件数": count,
-                            })
+                        for column, label in GH_VALUE_AUDIT_COLUMNS.items():
+                            for value, count in collect_column_values(
+                                grid, column,
+                                GH_DATA_ROW_START, GH_DATA_ROW_END,
+                            ).items():
+                                outside_use_values.append({
+                                    "施設名": facility_name,
+                                    "列": column,
+                                    "項目": label,
+                                    "値": value,
+                                    "件数": count,
+                                })
 
                     gh_results.append(row)
                 else:
@@ -1188,7 +1229,7 @@ def main():
         "GH_加算内訳": make_gh_addon_detail(df_gh),
         "GH_住居外利用_利用者別": make_outside_use_detail(df_gh),
         "GH_住居外利用_施設別": make_outside_use_summary(df_gh),
-        "GH_E列値内訳": make_outside_use_values(outside_use_values),
+        "GH_日次入力値内訳": make_outside_use_values(outside_use_values),
         "短期_利用者別明細": df_ss,
         "短期_施設別集計": make_ss_facility_summary(df_ss),
         "エラー一覧": df_errors,
