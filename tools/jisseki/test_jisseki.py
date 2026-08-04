@@ -474,6 +474,75 @@ class EndToEndTest(unittest.TestCase):
         self.assertEqual(list(errors.columns), extract.ERROR_COLUMNS)
 
 
+class StaleFileNameTest(unittest.TestCase):
+    """7月のフォルダに「2026年6月」という名前のファイルが入っているケース。
+
+    実運用（和歌山）で、ファイル名の年月から当月日数を30日と誤判定し、
+    31日算定の利用者19人が丸ごと集計から落ちた事故の回帰テスト。
+    """
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.base = self.tmp / "保存先"
+        self.out = self.tmp / "out"
+
+        # フォルダは2026年7月、ファイル名は2026年6月のまま
+        facility = self.base / "RASIEL和歌山" / "2026年7月"
+        facility.mkdir(parents=True)
+
+        build_gh_workbook(
+            facility / "【和歌山1F】実績記録票　2026年6月.xlsm",
+            [("森本聖也", 31, "", 0, 0), ("浦井浩志", 29, "", 0, 25)],
+            with_template=False,
+        )
+        build_gh_workbook(
+            facility / "【和歌山2F】実績記録票　2026年6月.xlsm",
+            [("山川満", 31, "", 0, 0)],
+            with_template=False,
+        )
+        build_ss_workbook(
+            facility / "【和歌山 短期】実績記録票　2026年6月.xlsm",
+            [("慈幸裕矢", 5, 1, 4, 3)],
+            with_template=False,
+        )
+
+        self._orig_base = common.BASE_DIR
+        self._orig_out = extract.OUTPUT_DIR
+        common.BASE_DIR = self.base
+        extract.OUTPUT_DIR = self.out
+        extract.get_run_mode = lambda: ("month", 2026, 7)
+
+    def tearDown(self):
+        common.BASE_DIR = self._orig_base
+        extract.OUTPUT_DIR = self._orig_out
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_31day_users_are_not_dropped(self):
+        extract.main()
+
+        with pd.ExcelFile(next(self.out.glob("*.xlsx"))) as xl:
+            gh = xl.parse("GH_利用者別明細")
+            errors = xl.parse("エラー一覧")
+
+        # 7月は31日なので、31日算定の利用者を落としてはいけない
+        self.assertEqual(
+            sorted(gh["利用者名"].tolist()), ["山川満", "森本聖也", "浦井浩志"]
+        )
+        self.assertEqual(gh["基本算定日数"].sum(), 91)
+
+        # ただしファイル名の年月が違うことは警告する
+        mismatch = errors[errors["内容"].str.contains("指定月と一致しません", na=False)]
+        self.assertEqual(len(mismatch), 3)
+        self.assertTrue((mismatch["重要度"] == "要対応").all())
+
+
+class NameComparisonTest(unittest.TestCase):
+    def test_full_width_space_is_ignored(self):
+        self.assertTrue(extract.same_person_name("清水　雅智", "清水雅智"))
+        self.assertTrue(extract.same_person_name("長谷川 勇也", "長谷川勇也"))
+        self.assertFalse(extract.same_person_name("清水雅智", "清水雅之"))
+
+
 class ImpossibleDayCountTest(unittest.TestCase):
     """シート名の除外をすり抜けても、当月日数を超える値は弾く。"""
 

@@ -46,6 +46,10 @@ SS_USER_NAME_CELL = None
 # 支援区分のセル（GH は O2 が見出し、P2 が値）
 GH_BAND_CELL = "P2"
 
+# 短期の支援区分セル。様式が変わって位置が動いた場合はここを直す。
+SS_BAND_CELL = "K3"
+SS_SUPPLY_CELL = "B3"
+
 # 当月日数を超える算定日数のシートはテンプレート等とみなして除外する
 EXCLUDE_IMPOSSIBLE_DAY_COUNT = True
 
@@ -137,7 +141,10 @@ NOT_APPLICABLE_TEXTS = {
     "０",
 }
 
-ERROR_COLUMNS = ["対象月", "施設名", "区分", "利用者名", "内容"]
+ERROR_COLUMNS = ["重要度", "対象月", "施設名", "区分", "利用者名", "内容"]
+
+# エラー一覧の並び順（要対応を先頭に）
+ERROR_LEVEL_ORDER = {"要対応": 0, "確認": 1}
 
 # ===== 算定できているセルの強調表示 =====
 
@@ -182,15 +189,30 @@ _ZEN_TO_HAN = str.maketrans("０１２３４５６７８９", "0123456789")
 # ===== 小さなユーティリティ =====
 
 
-def make_error(target_month_label, facility_name, file_type, user_name, message) -> dict:
+def make_error(target_month_label, facility_name, file_type, user_name, message,
+               level="要対応") -> dict:
     """エラー行のキーを常に同じにする（列順・欠損を安定させるため）。"""
     return {
+        "重要度": level,
         "対象月": target_month_label,
         "施設名": facility_name,
         "区分": file_type,
         "利用者名": user_name,
         "内容": message,
     }
+
+
+def strip_spaces(text: str) -> str:
+    """全角・半角の空白をすべて除く。"""
+    return re.sub(r"[\s\u3000]+", "", text)
+
+
+def same_person_name(name_a: str, name_b: str) -> bool:
+    """「清水　雅智」と「清水雅智」を同一人物として扱う。
+
+    シート名は姓名の間に空白を入れる運用があり、氏名セルには入っていないため。
+    """
+    return strip_spaces(name_a) == strip_spaces(name_b)
 
 
 def normalize_cell_text(value) -> str:
@@ -424,12 +446,12 @@ def extract_shortstay_sheet(grid, common_info: dict, errors: list) -> dict:
         return to_number(cell_value(grid, ref), common_info, errors)
 
     total = SS_TOTAL_ROW
-    supply_raw = cell_value(grid, "B3")
+    supply_raw = cell_value(grid, SS_SUPPLY_CELL)
 
     return {
         **common_info,
 
-        "支援区分": cell_value(grid, "K3"),
+        "支援区分": cell_value(grid, SS_BAND_CELL),
         "短期支給量": supply_raw,
         "短期支給量(日)": extract_day_count(supply_raw),
         "SS算定回数": num(f"C{total}"),
@@ -907,6 +929,7 @@ def main():
             error.get("区分", ""),
             error.get("利用者名", ""),
             error.get("内容", ""),
+            level=error.get("重要度", "要対応"),
         ))
 
     for folder_name in excluded_folders:
@@ -930,20 +953,23 @@ def main():
 
         print(f"処理中: {facility_name} / {file_type}")
 
-        if detected:
-            month_days = days_in_month(*detected)
-            detected_label = f"{detected[0]}年{detected[1]}月"
-        elif mode == "month":
+        detected_label = f"{detected[0]}年{detected[1]}月" if detected else ""
+
+        # 当月日数は「利用者が指定した月」を正とする。
+        # ファイル名の年月が古いまま（7月のデータが6月名で保存されている等）でも、
+        # 実在の利用者を集計から落とさないため。
+        if mode == "month":
             month_days = days_in_month(target_year, target_month)
-            detected_label = ""
+        elif detected:
+            month_days = days_in_month(*detected)
         else:
             month_days = 31
-            detected_label = ""
 
         if mode == "month" and detected and detected != (target_year, target_month):
             error_results.append(make_error(
                 target_month_label, facility_name, file_type, "",
-                f"ファイル名の年月（{detected_label}）が指定月と一致しません: {file_path.name}",
+                f"ファイル名の年月（{detected_label}）が指定月と一致しません。"
+                f"中身が対象月のものか確認してください: {file_path.name}",
             ))
 
         if file_path.suffix.lower() == ".xls":
@@ -1063,10 +1089,11 @@ def main():
                 if file_type in ["1F", "2F"]:
                     real_name = normalize_cell_text(row.get("氏名"))
 
-                    if real_name and real_name != sheet_name.strip():
+                    if real_name and not same_person_name(real_name, sheet_name):
                         error_results.append(make_error(
                             target_month_label, facility_name, file_type, sheet_name,
                             f"シート名と氏名({GH_USER_NAME_CELL})が一致しません: {real_name}",
+                            level="確認",
                         ))
 
                     if GH_OUTSIDE_USE_CROSS_CHECK:
@@ -1085,7 +1112,8 @@ def main():
                     if normalize_cell_text(row["支援区分"]) == "":
                         error_results.append(make_error(
                             target_month_label, facility_name, file_type, sheet_name,
-                            "支援区分(K3)が空欄です",
+                            f"支援区分({SS_BAND_CELL})が空欄です",
+                            level="確認",
                         ))
 
                     ss_results.append(row)
@@ -1103,6 +1131,13 @@ def main():
     df_gh = add_outside_use_rate(sort_dataframe(pd.DataFrame(gh_results)))
     df_ss = sort_dataframe(pd.DataFrame(ss_results))
     df_errors = pd.DataFrame(error_results, columns=ERROR_COLUMNS)
+
+    if not df_errors.empty:
+        df_errors = df_errors.sort_values(
+            by="重要度",
+            key=lambda col: col.map(lambda v: ERROR_LEVEL_ORDER.get(v, 9)),
+            kind="stable",
+        )
     df_skipped = pd.DataFrame(
         skipped_sheets, columns=["施設名", "区分", "シート名", "理由"]
     )
@@ -1172,7 +1207,15 @@ def main():
             f"該当{int((df_gh['住居外利用'] > 0).sum())}人"
         )
 
-    print(f"エラー・警告: {len(df_errors)}件 / スキップシート: {len(df_skipped)}件")
+    if df_errors.empty:
+        print("エラー・警告: 0件 / スキップシート: 0件")
+    else:
+        counts = df_errors["重要度"].value_counts()
+        print(
+            f"エラー・警告: 要対応{counts.get('要対応', 0)}件 / "
+            f"確認{counts.get('確認', 0)}件 / "
+            f"スキップシート: {len(df_skipped)}件"
+        )
     print(f"出力先: {output_file}")
 
 

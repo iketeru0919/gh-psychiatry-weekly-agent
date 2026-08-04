@@ -303,6 +303,7 @@ def collect_target_files(mode: str, target_year=None, target_month=None,
 
     if not base_dir.exists():
         errors.append({
+            "重要度": "要対応",
             "施設名": "",
             "区分": "",
             "利用者名": "",
@@ -356,6 +357,7 @@ def collect_target_files(mode: str, target_year=None, target_month=None,
                     message = f"{target_year}年{target_month}月の対象ファイルなし"
 
                 errors.append({
+                    "重要度": "要対応",
                     "施設名": facility_name,
                     "区分": file_type,
                     "利用者名": "",
@@ -369,6 +371,7 @@ def collect_target_files(mode: str, target_year=None, target_month=None,
             if len(candidates) > 1:
                 names = " / ".join(sorted(p.name for p in candidates))
                 errors.append({
+                    "重要度": "確認",
                     "施設名": facility_name,
                     "区分": file_type,
                     "利用者名": "",
@@ -391,6 +394,7 @@ def collect_target_files(mode: str, target_year=None, target_month=None,
     for normalized, folders in normalized_to_folders.items():
         if len(folders) > 1:
             errors.append({
+                "重要度": "確認",
                 "施設名": normalized,
                 "区分": "",
                 "利用者名": "",
