@@ -28,5 +28,7 @@ if not "%RESULT%"=="0" (
 
 echo 何かキーを押すと閉じます。
 pause >nul
-endlocal
-exit /b %RESULT%
+
+rem endlocal を単独行にすると RESULT が消えてから exit /b が展開されるため、
+rem 終了コードが渡らない。同じ行に書いて先に展開させる。
+endlocal & exit /b %RESULT%

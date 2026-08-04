@@ -62,6 +62,26 @@ GH_OUTSIDE_USE_COLUMN = "E"
 # 日次の入力数を別に数えて突き合わせられるようにする。
 GH_OUTSIDE_USE_CROSS_CHECK = True
 
+# 合計セルと日次入力を突き合わせる列。
+# data_only=True で開くため、数式の計算結果が保存されていないファイルでは
+# 合計セルが None になる。そのまま0にすると過少集計に気づけないので、
+# 「合計は空/0なのに日次には入力がある」ケースをエラーとして出す。
+GH_TOTAL_CROSS_CHECK_COLUMNS = {
+    "E": "住居外利用",
+    "F": "夜勤加配",
+    "I": "医療連携",
+    "J": "精神障害地域移行加算",
+    "K": "地域生活移行支援加算",
+    "L": "自立生活支援加算(Ⅱ)",
+    "M": "自立生活支援加算(Ⅲ)",
+    "N": "集中的支援加算(Ⅰ)",
+    "O": "集中的支援加算(Ⅱ)",
+}
+
+# 短期は実ファイルで日次列の中身を確認できていないため、
+# 誤検知を避けて突き合わせは行わず、合計セルの空欄だけを見る。
+SS_TOTAL_CROSS_CHECK_COLUMNS = {}
+
 # 日次の入力値を一覧に出す列。様式が変わって表記が変わったときに気づけるようにする。
 # （○前提で数えていたために入院時支援・帰宅時支援が全社0件になった経緯がある）
 GH_VALUE_AUDIT_COLUMNS = {
@@ -429,11 +449,46 @@ def count_gh_status_items(grid) -> dict:
     return result
 
 
+def check_totals(grid, total_row, cross_check_columns, required_cells,
+                 context, errors):
+    """合計セルが読めていないのに 0 として集計されるのを防ぐ。
+
+    - 合計セルが空欄（数式の計算結果が保存されていない）
+    - 合計が空/0なのに日次には入力がある
+    のどちらかならエラー一覧に出す。
+    """
+    for ref, label in required_cells.items():
+        if cell_value(grid, ref) is None:
+            errors.append(make_error(
+                context["対象月"], context["施設名"], context["区分"],
+                context["利用者名"],
+                f"合計セル({ref} {label})が空欄です。"
+                "数式の計算結果が保存されていない可能性があります",
+            ))
+
+    for column, label in cross_check_columns.items():
+        total = to_number(cell_value(grid, f"{column}{total_row}"))
+        daily = count_marked(grid, column, GH_DATA_ROW_START, GH_DATA_ROW_END)
+
+        if daily > 0 and not total:
+            errors.append(make_error(
+                context["対象月"], context["施設名"], context["区分"],
+                context["利用者名"],
+                f"{label}: 合計セル({column}{total_row})は空/0ですが"
+                f"日次には{daily}件の入力があります",
+            ))
+
+
 def extract_gh_sheet(grid, common_info: dict, errors: list) -> dict:
     def num(ref):
         return to_number(cell_value(grid, ref), common_info, errors)
 
     total = GH_TOTAL_ROW
+
+    check_totals(
+        grid, total, GH_TOTAL_CROSS_CHECK_COLUMNS,
+        {f"C{total}": "基本算定日数"}, common_info, errors,
+    )
 
     return {
         **common_info,
@@ -479,6 +534,11 @@ def extract_shortstay_sheet(grid, common_info: dict, errors: list) -> dict:
 
     total = SS_TOTAL_ROW
     supply_raw = cell_value(grid, SS_SUPPLY_CELL)
+
+    check_totals(
+        grid, total, SS_TOTAL_CROSS_CHECK_COLUMNS,
+        {f"C{total}": "SS算定回数"}, common_info, errors,
+    )
 
     return {
         **common_info,
@@ -1248,15 +1308,14 @@ def main():
             f"該当{int((df_gh['住居外利用'] > 0).sum())}人"
         )
 
-    if df_errors.empty:
-        print("エラー・警告: 0件 / スキップシート: 0件")
-    else:
-        counts = df_errors["重要度"].value_counts()
-        print(
-            f"エラー・警告: 要対応{counts.get('要対応', 0)}件 / "
-            f"確認{counts.get('確認', 0)}件 / "
-            f"スキップシート: {len(df_skipped)}件"
-        )
+    counts = (
+        df_errors["重要度"].value_counts() if not df_errors.empty else {}
+    )
+    print(
+        f"エラー・警告: 要対応{counts.get('要対応', 0)}件 / "
+        f"確認{counts.get('確認', 0)}件 / "
+        f"スキップシート: {len(df_skipped)}件"
+    )
     print(f"出力先: {output_file}")
 
 

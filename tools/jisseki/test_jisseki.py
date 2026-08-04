@@ -601,6 +601,69 @@ class MarkCountTest(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+class MissingTotalTest(unittest.TestCase):
+    """合計セルの数式キャッシュが無いファイルで過少集計になるのを検知する。"""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.base = self.tmp / "保存先"
+        self.out = self.tmp / "out"
+        facility = self.base / "RASIEL検証" / "2026年7月"
+        facility.mkdir(parents=True)
+
+        from openpyxl import load_workbook
+
+        path = facility / "実績記録表1F.xlsx"
+        build_gh_workbook(path, [("山田太郎", 31, "", 0, 6)], with_template=False)
+
+        # 住居外利用の合計セルだけを空にする（数式の計算結果が無い状態を再現）
+        wb = load_workbook(path)
+        wb["山田太郎"][f"E{extract.GH_TOTAL_ROW}"] = None
+        wb.save(path)
+        wb.close()
+
+        build_gh_workbook(facility / "実績記録表2F.xlsx", [("佐藤一郎", 31, "", 0, 0)],
+                          with_template=False)
+        build_ss_workbook(facility / "短期実績.xlsx", [("田中次郎", 8, 4, 4, 3)],
+                          with_template=False)
+
+        self._orig = (common.BASE_DIR, extract.OUTPUT_DIR)
+        common.BASE_DIR = self.base
+        extract.OUTPUT_DIR = self.out
+        extract.get_run_mode = lambda: ("month", 2026, 7)
+
+    def tearDown(self):
+        common.BASE_DIR, extract.OUTPUT_DIR = self._orig
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_empty_total_with_daily_input_is_reported(self):
+        extract.main()
+
+        with pd.ExcelFile(next(self.out.glob("*.xlsx"))) as xl:
+            errors = xl.parse("エラー一覧")
+            gh = xl.parse("GH_利用者別明細")
+
+        hit = errors[errors["内容"].str.contains("日次には6件の入力があります", na=False)]
+        self.assertEqual(len(hit), 1)
+        self.assertEqual(hit["利用者名"].iloc[0], "山田太郎")
+        self.assertEqual(hit["重要度"].iloc[0], "要対応")
+
+        # 集計自体は0のまま出るが、日次入力数との差で気づける
+        row = gh[gh["利用者名"] == "山田太郎"].iloc[0]
+        self.assertEqual(row["住居外利用"], 0)
+        self.assertEqual(row["住居外利用_日次入力数"], 6)
+
+    def test_no_false_positive_when_daily_is_empty(self):
+        extract.main()
+
+        with pd.ExcelFile(next(self.out.glob("*.xlsx"))) as xl:
+            errors = xl.parse("エラー一覧")
+
+        # 日次に入力が無い列は、合計が0でも警告しない
+        noise = errors[errors["内容"].str.contains("合計セル", na=False)]
+        self.assertEqual(noise["利用者名"].tolist(), ["山田太郎"])
+
+
 class NameComparisonTest(unittest.TestCase):
     def test_full_width_space_is_ignored(self):
         self.assertTrue(extract.same_person_name("清水　雅智", "清水雅智"))
