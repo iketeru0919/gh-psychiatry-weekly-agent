@@ -8,6 +8,7 @@ import shutil
 import tempfile
 import unittest
 
+import pandas as pd
 from openpyxl import Workbook
 
 import jisseki_common as common
@@ -422,6 +423,38 @@ class EndToEndTest(unittest.TestCase):
         base_cell = ws.cell(row=2, column=base_col)
         self.assertNotIn(extract.HIGHLIGHT_FILL_COLOR, str(base_cell.fill.fgColor.rgb))
 
+        wb.close()
+
+    def test_outside_use_rate(self):
+        from openpyxl import load_workbook
+
+        extract.main()
+        sheets = self.read_output()
+
+        gh = sheets["GH_利用者別明細"]
+        rates = dict(zip(gh["利用者名"], gh["住居外利用率"]))
+
+        # 山田太郎: 住居外利用5 / 基本算定日数30
+        self.assertAlmostEqual(rates["山田太郎"], 5 / 30)
+        self.assertAlmostEqual(rates["佐藤一郎"], 3 / 30)
+
+        # 基本算定日数が0（入院中）の人は空欄。0% にはしない
+        self.assertTrue(pd.isna(rates["鈴木花子"]))
+
+        # 住居外利用の右隣に置く
+        cols = list(gh.columns)
+        self.assertEqual(cols[cols.index("住居外利用") + 1], "住居外利用率")
+
+        # 施設別は 合計÷合計
+        facility = sheets["GH_施設別集計"]
+        self.assertAlmostEqual(facility["住居外利用率"].iloc[0], 8 / 60)
+
+        # Excel 上でパーセント表示になっている
+        wb = load_workbook(next(self.out.glob("*.xlsx")))
+        ws = wb["GH_利用者別明細"]
+        headers = {str(c.value): c.column for c in ws[1]}
+        cell = ws.cell(row=2, column=headers["住居外利用率"])
+        self.assertEqual(cell.number_format, extract.PERCENT_FORMAT)
         wb.close()
 
     def test_should_highlight(self):

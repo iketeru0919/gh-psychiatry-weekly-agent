@@ -171,6 +171,9 @@ HIGHLIGHT_COLUMN_SUFFIXES = ("_該当人数", "_合計回数")
 HIGHLIGHT_FILL_COLOR = "FFEB9C"
 HIGHLIGHT_FONT_COLOR = "9C6500"
 
+# 「◯◯率」の列の表示形式
+PERCENT_FORMAT = "0.0%"
+
 CIRCLE_TEXTS = {"○", "〇", "◯", "●"}
 
 _ZEN_TO_HAN = str.maketrans("０１２３４５６７８９", "0123456789")
@@ -458,8 +461,19 @@ def make_gh_facility_summary(df_gh: pd.DataFrame) -> pd.DataFrame:
     ).sum(numeric_only=True)
 
     counts = df_gh.groupby("施設名", as_index=False).size().rename(columns={"size": "利用者数"})
+    summary = counts.merge(summary, on="施設名", how="right")
 
-    return counts.merge(summary, on="施設名", how="right")
+    if {"住居外利用", "基本算定日数"} <= set(summary.columns):
+        summary.insert(
+            summary.columns.get_loc("住居外利用") + 1,
+            "住居外利用率",
+            [
+                calc_rate(use, base)
+                for use, base in zip(summary["住居外利用"], summary["基本算定日数"])
+            ],
+        )
+
+    return summary
 
 
 def make_gh_status_summary(df_gh: pd.DataFrame) -> pd.DataFrame:
@@ -527,12 +541,45 @@ def make_gh_addon_detail(df_gh: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows).sort_values(["施設名", "加算項目", "区分値"])
 
 
+def calc_rate(numerator, denominator):
+    """割合を返す。分母が0のときは空欄（0%ではない）にする。
+
+    入院などで基本算定日数が0の利用者に 0% と出すと、
+    「住居外利用がない人」と区別がつかなくなるため。
+    """
+    if not denominator:
+        return None
+
+    return numerator / denominator
+
+
+def add_outside_use_rate(df: pd.DataFrame) -> pd.DataFrame:
+    """基本算定日数を分母にした住居外利用の割合を追加する。"""
+    if df.empty:
+        return df
+
+    if not {"住居外利用", "基本算定日数"} <= set(df.columns):
+        return df
+
+    df = df.copy()
+    df["住居外利用率"] = [
+        calc_rate(use, base)
+        for use, base in zip(df["住居外利用"], df["基本算定日数"])
+    ]
+
+    return df
+
+
 def make_outside_use_detail(df_gh: pd.DataFrame) -> pd.DataFrame:
     """住居外利用が誰に何回ついているか（0回の利用者は載せない）。"""
     if df_gh.empty or "住居外利用" not in df_gh.columns:
         return pd.DataFrame()
 
-    cols = ["施設名", "区分", "利用者名", "住居外利用"]
+    cols = [c for c in ["施設名", "区分", "利用者名", "基本算定日数", "住居外利用"]
+            if c in df_gh.columns]
+
+    if "住居外利用率" in df_gh.columns:
+        cols.append("住居外利用率")
 
     if "住居外利用_日次入力数" in df_gh.columns:
         cols.append("住居外利用_日次入力数")
@@ -565,9 +612,16 @@ def make_outside_use_summary(df_gh: pd.DataFrame) -> pd.DataFrame:
     rows = []
 
     for facility_name, group in grouped:
+        total_use = group["住居外利用"].sum()
+        total_base = (
+            group["基本算定日数"].sum() if "基本算定日数" in group.columns else 0
+        )
+
         rows.append({
             "施設名": facility_name,
-            "住居外利用_合計回数": group["住居外利用"].sum(),
+            "基本算定日数_合計": total_base,
+            "住居外利用_合計回数": total_use,
+            "住居外利用率": calc_rate(total_use, total_base),
             "住居外利用のあった人数": int((group["住居外利用"] > 0).sum()),
             "利用者数": len(group),
         })
@@ -749,6 +803,22 @@ def highlight_calculated_cells(ws, highlight_fill, highlight_font):
     return count
 
 
+def apply_percent_format(ws):
+    """「◯◯率」の列をパーセント表示にする。"""
+    target_columns = [
+        cell.column for cell in ws[1]
+        if cell.value is not None and str(cell.value).strip().endswith("率")
+    ]
+
+    if not target_columns:
+        return
+
+    for row in ws.iter_rows(min_row=2):
+        for cell in row:
+            if cell.column in target_columns:
+                cell.number_format = PERCENT_FORMAT
+
+
 def format_excel_file(file_path: Path):
     wb = load_workbook(file_path)
 
@@ -772,6 +842,7 @@ def format_excel_file(file_path: Path):
                 cell.fill = warn_header_fill if ws.title in warn_sheets else header_fill
 
             highlight_calculated_cells(ws, highlight_fill, highlight_font)
+            apply_percent_format(ws)
 
         for col_idx, column_cells in enumerate(ws.columns, start=1):
             max_length = 0
@@ -1029,7 +1100,7 @@ def main():
             f"最新モードで複数の年月が混在しています: {months}",
         ))
 
-    df_gh = sort_dataframe(pd.DataFrame(gh_results))
+    df_gh = add_outside_use_rate(sort_dataframe(pd.DataFrame(gh_results)))
     df_ss = sort_dataframe(pd.DataFrame(ss_results))
     df_errors = pd.DataFrame(error_results, columns=ERROR_COLUMNS)
     df_skipped = pd.DataFrame(
@@ -1046,6 +1117,7 @@ def main():
         "支援区分",
         "基本算定日数",
         "住居外利用",
+        "住居外利用率",
         "住居外利用_日次入力数",
         "夜勤加配",
         "医療連携",
