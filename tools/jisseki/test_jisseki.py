@@ -389,6 +389,50 @@ class EndToEndTest(unittest.TestCase):
         self.assertEqual(row["氏名"], "山田太郎")
         self.assertEqual(row["支援区分"], 5)
 
+    def test_calculated_cells_are_highlighted(self):
+        from openpyxl import load_workbook
+
+        extract.main()
+        path = next(self.out.glob("*.xlsx"))
+        wb = load_workbook(path)
+        ws = wb["GH_利用者別明細"]
+
+        headers = {str(c.value): c.column for c in ws[1]}
+        col = headers["住居外利用"]
+        name_col = headers["利用者名"]
+
+        filled = {}
+        for row in ws.iter_rows(min_row=2):
+            name = ws.cell(row=row[0].row, column=name_col).value
+            cell = ws.cell(row=row[0].row, column=col)
+            filled[name] = (cell.value, cell.fill.fgColor.rgb)
+
+        # 0ではない住居外利用は塗られる
+        self.assertEqual(filled["山田太郎"][0], 5)
+        self.assertIn(extract.HIGHLIGHT_FILL_COLOR, str(filled["山田太郎"][1]))
+        self.assertEqual(filled["佐藤一郎"][0], 3)
+        self.assertIn(extract.HIGHLIGHT_FILL_COLOR, str(filled["佐藤一郎"][1]))
+
+        # 0 は塗らない
+        self.assertEqual(filled["鈴木花子"][0], 0)
+        self.assertNotIn(extract.HIGHLIGHT_FILL_COLOR, str(filled["鈴木花子"][1]))
+
+        # 対象外の列（基本算定日数）は 0 でなくても塗らない
+        base_col = headers["基本算定日数"]
+        base_cell = ws.cell(row=2, column=base_col)
+        self.assertNotIn(extract.HIGHLIGHT_FILL_COLOR, str(base_cell.fill.fgColor.rgb))
+
+        wb.close()
+
+    def test_should_highlight(self):
+        self.assertTrue(extract.should_highlight(3))
+        self.assertTrue(extract.should_highlight("Ⅱ"))
+        self.assertTrue(extract.should_highlight("該当"))
+        self.assertFalse(extract.should_highlight(0))
+        self.assertFalse(extract.should_highlight(None))
+        self.assertFalse(extract.should_highlight("非該当"))
+        self.assertFalse(extract.should_highlight(""))
+
     def test_error_columns_are_stable(self):
         extract.main()
         sheets = self.read_output()

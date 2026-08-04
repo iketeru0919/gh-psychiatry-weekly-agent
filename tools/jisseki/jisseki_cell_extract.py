@@ -139,6 +139,38 @@ NOT_APPLICABLE_TEXTS = {
 
 ERROR_COLUMNS = ["対象月", "施設名", "区分", "利用者名", "内容"]
 
+# ===== 算定できているセルの強調表示 =====
+
+# ここに挙げた列で「0ではない／該当している」セルを塗りつぶす。
+# 算定できている箇所を目立たせて、算定漏れとの差を見えるようにするため。
+HIGHLIGHT_COLUMNS = {
+    "入院時支援加算回数",
+    "帰宅時支援加算回数",
+    "精神障害地域移行加算",
+    "地域生活移行支援加算",
+    "自立生活支援加算(Ⅱ)",
+    "自立生活支援加算(Ⅲ)",
+    "集中的支援加算(Ⅰ)",
+    "集中的支援加算(Ⅱ)",
+    "住居外利用",
+    "緊急短期受入加算(Ⅰ)",
+    "重度支援加算(Ⅰ)",
+    "重度支援加算(Ⅱ)",
+    "定員超過特例",
+    "強行地域移行加算",
+    "強行体験利用加算",
+    "ピアサポート加算",
+    "感染対策向上加算",
+    "福祉専門職等配置加算",
+}
+
+# 末尾がこれで終わる列も対象にする（GH_加算集計 の「◯◯_該当人数」など）
+HIGHLIGHT_COLUMN_SUFFIXES = ("_該当人数", "_合計回数")
+
+# 塗りつぶしの色。派手にしたい場合は "FFFF00"（純粋な黄色）にする。
+HIGHLIGHT_FILL_COLOR = "FFEB9C"
+HIGHLIGHT_FONT_COLOR = "9C6500"
+
 CIRCLE_TEXTS = {"○", "〇", "◯", "●"}
 
 _ZEN_TO_HAN = str.maketrans("０１２３４５６７８９", "0123456789")
@@ -667,6 +699,56 @@ def open_workbook(file_path: Path):
 # ===== 出力の整形 =====
 
 
+def is_highlight_column(header: str) -> bool:
+    if header in HIGHLIGHT_COLUMNS:
+        return True
+
+    return header.endswith(HIGHLIGHT_COLUMN_SUFFIXES)
+
+
+def should_highlight(value) -> bool:
+    """算定できている（0ではない／該当している）か。"""
+    if value is None:
+        return False
+
+    if isinstance(value, bool):
+        return value
+
+    if isinstance(value, (int, float)):
+        return value != 0
+
+    return bool(is_applicable(value))
+
+
+def highlight_calculated_cells(ws, highlight_fill, highlight_font):
+    """加算の列で、算定できているセルを塗りつぶす。"""
+    target_columns = {}
+
+    for cell in ws[1]:
+        if cell.value is None:
+            continue
+
+        if is_highlight_column(str(cell.value).strip()):
+            target_columns[cell.column] = True
+
+    if not target_columns:
+        return 0
+
+    count = 0
+
+    for row in ws.iter_rows(min_row=2):
+        for cell in row:
+            if cell.column not in target_columns:
+                continue
+
+            if should_highlight(cell.value):
+                cell.fill = highlight_fill
+                cell.font = highlight_font
+                count += 1
+
+    return count
+
+
 def format_excel_file(file_path: Path):
     wb = load_workbook(file_path)
 
@@ -675,6 +757,9 @@ def format_excel_file(file_path: Path):
     header_font = Font(bold=True)
     center_alignment = Alignment(horizontal="center", vertical="center")
     warn_sheets = {"エラー一覧", "スキップシート一覧"}
+
+    highlight_fill = PatternFill("solid", fgColor=HIGHLIGHT_FILL_COLOR)
+    highlight_font = Font(bold=True, color=HIGHLIGHT_FONT_COLOR)
 
     for ws in wb.worksheets:
         if ws.max_row >= 1:
@@ -685,6 +770,8 @@ def format_excel_file(file_path: Path):
                 cell.font = header_font
                 cell.alignment = center_alignment
                 cell.fill = warn_header_fill if ws.title in warn_sheets else header_fill
+
+            highlight_calculated_cells(ws, highlight_fill, highlight_font)
 
         for col_idx, column_cells in enumerate(ws.columns, start=1):
             max_length = 0
