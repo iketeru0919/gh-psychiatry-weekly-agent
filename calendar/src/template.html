@@ -1,0 +1,741 @@
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<!--FONT_FACE_CSS-->
+<style>
+  body { margin: 0; background: oklch(0.975 0.006 75); }
+  * { box-sizing: border-box; font-family: 'Zen Kaku Gothic New', 'Hiragino Sans', sans-serif; }
+  ::-webkit-scrollbar { height: 8px; width: 8px; }
+  ::-webkit-scrollbar-thumb { background: oklch(0.82 0.01 75); border-radius: 4px; }
+
+  /* 空室セルの「＋追加」は常時フル表示だと62枠中58枠を埋めて実データより目立つ。
+     普段は控えめに、セルにポインタが乗ったときだけはっきり見せる。 */
+  .ss-add { opacity: 0.32; transition: opacity .12s ease; }
+  .ss-cell:hover .ss-add, .ss-cell:focus-within .ss-add { opacity: 1; }
+
+  .ss-bar { cursor: grab; user-select: none; touch-action: none; }
+  .ss-bar:active { cursor: grabbing; }
+  .ss-handle { cursor: ew-resize; touch-action: none; }
+  .ss-track { touch-action: none; }
+
+  .ss-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .ss-table th { text-align: left; font-weight: 700; color: oklch(0.45 0.01 75); padding: 8px 10px; border-bottom: 2px solid oklch(0.88 0.01 75); white-space: nowrap; }
+  .ss-table td { padding: 8px 10px; border-bottom: 1px solid oklch(0.93 0.008 75); vertical-align: top; }
+  .ss-table tbody tr:hover { background: oklch(0.98 0.006 75); }
+
+  /* 現場ではスマホから見ることがある。7列固定のままだと日付が潰れて読めない。 */
+  @media (max-width: 860px) {
+    .ss-page { padding: 18px 12px 60px !important; }
+    .ss-title { font-size: 24px !important; }
+    .ss-kpi { grid-template-columns: repeat(2, 1fr) !important; }
+    .ss-month-grid { grid-template-columns: 1fr !important; }
+    .ss-weekday-row { display: none !important; }
+    .ss-cell { min-height: auto !important; }
+    .ss-cell--out { display: none !important; }
+    .ss-drawer { width: 100% !important; max-width: 100% !important; padding: 20px 16px !important; }
+    .ss-modal { width: 100% !important; max-width: 100% !important; border-radius: 0 !important; top: 0 !important; height: 100vh !important; max-height: 100vh !important; }
+    .ss-report-head { flex-direction: column !important; align-items: stretch !important; }
+  }
+
+  @media print {
+    [data-print-hide] { display: none !important; }
+    body { background: white; }
+    [data-print-area] { padding: 0 !important; max-width: none !important; }
+    .ss-cell { break-inside: avoid; }
+    .ss-table { font-size: 10.5px; }
+    .ss-table tr { break-inside: avoid; }
+  }
+</style>
+</helmet>
+<div style="min-height:100vh;background:oklch(0.975 0.006 75);color:oklch(0.28 0.01 75);">
+  <div data-print-area="" class="ss-page" style="max-width:1440px;margin:0 auto;padding:36px 44px 80px;">
+
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:20px;gap:20px;flex-wrap:wrap;">
+      <div>
+        <div style="font-size:13px;letter-spacing:.1em;font-weight:500;color:{{ primaryAccent }};margin-bottom:6px;">{{ facilityName }} ／ {{ buildingLabel }}</div>
+        <div class="ss-title" style="font-size:32px;font-weight:900;letter-spacing:.02em;">ショートステイ・体験利用 管理表</div>
+      </div>
+      <div style="text-align:right;">
+        <div style="font-size:13px;color:oklch(0.5 0.01 75);">{{ currentLabel }}の滞在</div>
+        <div style="font-size:22px;font-weight:700;">{{ totalCount }}<span style="font-size:13px;font-weight:500;color:oklch(0.5 0.01 75);"> 件</span><span style="font-size:12px;font-weight:500;color:oklch(0.62 0.01 75);"> ／ 入退所記録 {{ recordCount }} 件</span></div>
+        <div data-print-hide="" style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;flex-wrap:wrap;">
+          <button sc-camel-on-click="{{ openSettings }}" style="padding:8px 16px;border-radius:8px;border:1px solid oklch(0.85 0.01 75);background:none;color:oklch(0.45 0.01 75);font-weight:700;font-size:13px;cursor:pointer;">マスタ設定</button>
+          <button sc-camel-on-click="{{ printCalendar }}" style="padding:8px 16px;border-radius:8px;border:1px solid {{ primaryAccent }};background:none;color:{{ primaryAccent }};font-weight:700;font-size:13px;cursor:pointer;">印刷</button>
+        </div>
+      </div>
+    </div>
+
+    <sc-if value="{{ hasConflicts }}" hint-placeholder-val="{{ false }}">
+      <div style="margin-bottom:14px;padding:11px 15px;border-radius:10px;background:oklch(0.96 0.06 25);border:1px solid oklch(0.78 0.13 25);color:oklch(0.44 0.16 25);font-size:12.5px;font-weight:600;">⚠ {{ conflictMessage }}</div>
+    </sc-if>
+    <sc-if value="{{ storageNotice }}" hint-placeholder-val="{{ false }}">
+      <div data-print-hide="" style="margin-bottom:14px;padding:10px 15px;border-radius:10px;background:oklch(0.97 0.02 250);border:1px solid oklch(0.86 0.04 250);color:oklch(0.4 0.07 250);font-size:12.5px;">{{ storageNotice }}</div>
+    </sc-if>
+
+    <div data-print-hide="" class="ss-kpi" style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:10px;">
+      <button type="button" sc-camel-on-click="{{ toggleUserUsage }}" aria-expanded="{{ userUsageOpen }}" style="appearance:none;text-align:left;background:oklch(1 0 0);border-radius:16px;padding:18px 20px;border:1px solid oklch(0.82 0.05 250);cursor:pointer;font-family:inherit;" style-hover="border-color:{{ userKpi.color }};box-shadow:0 3px 12px oklch(0.5 0.14 250 / 0.12);">
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;font-size:12.5px;font-weight:700;color:oklch(0.45 0.05 250);margin-bottom:8px;"><span>{{ userKpi.label }}</span><span style="font-size:10.5px;font-weight:500;">{{ userUsageToggleLabel }}</span></div>
+        <div style="display:flex;align-items:baseline;gap:4px;">
+          <span style="font-size:26px;font-weight:900;color:{{ userKpi.color }};">{{ userKpi.value }}</span>
+          <span style="font-size:13px;font-weight:500;color:oklch(0.55 0.01 75);">{{ userKpi.unit }}</span>
+        </div>
+        <div style="font-size:11px;color:oklch(0.62 0.01 75);margin-top:4px;">{{ userKpi.sub }}</div>
+      </button>
+      <sc-for list="{{ kpiCards }}" as="kpi" hint-placeholder-count="3">
+        <div style="background:oklch(1 0 0);border-radius:16px;padding:18px 20px;border:1px solid oklch(0.91 0.008 75);">
+          <div style="font-size:12.5px;font-weight:500;color:oklch(0.5 0.01 75);margin-bottom:8px;">{{ kpi.label }}</div>
+          <div style="display:flex;align-items:baseline;gap:4px;">
+            <span style="font-size:26px;font-weight:900;color:{{ kpi.color }};">{{ kpi.value }}</span>
+            <span style="font-size:13px;font-weight:500;color:oklch(0.55 0.01 75);">{{ kpi.unit }}</span>
+          </div>
+          <div style="font-size:11px;color:oklch(0.62 0.01 75);margin-top:4px;">{{ kpi.sub }}</div>
+        </div>
+      </sc-for>
+    </div>
+
+    <div data-print-hide="" style="display:flex;justify-content:flex-end;gap:10px;align-items:center;margin-bottom:16px;">
+      <button sc-camel-on-click="{{ toggleKpiTentative }}" style="padding:5px 12px;border-radius:999px;border:1px solid oklch(0.85 0.01 75);background:white;color:oklch(0.45 0.01 75);font-size:11.5px;font-weight:700;cursor:pointer;">集計範囲：{{ kpiScopeLabel }}（切替）</button>
+      <button sc-camel-on-click="{{ toggleVacancy }}" style="padding:5px 12px;border-radius:999px;border:1px solid {{ primaryAccent }};background:white;color:{{ primaryAccent }};font-size:11.5px;font-weight:700;cursor:pointer;">{{ vacancyToggleLabel }}</button>
+    </div>
+
+    <sc-if value="{{ userUsageOpen }}" hint-placeholder-val="{{ false }}">
+      <div data-print-hide="" style="margin-bottom:20px;background:oklch(0.985 0.008 250);border:1px solid oklch(0.88 0.035 250);border-radius:14px;padding:14px 18px;">
+        <div style="font-size:13px;font-weight:800;color:oklch(0.38 0.08 250);margin-bottom:10px;">{{ currentLabel }}　利用者別の利用回数・利用日数</div>
+        <sc-if value="{{ userUsageHasRows }}" hint-placeholder-val="{{ false }}">
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px 12px;">
+            <sc-for list="{{ userUsageRows }}" as="usage" hint-placeholder-count="4">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;background:white;border-radius:9px;padding:9px 11px;border:1px solid oklch(0.91 0.015 250);">
+                <span style="font-size:13px;font-weight:600;color:oklch(0.35 0.02 75);">{{ usage.name }}</span>
+                <span style="white-space:nowrap;font-size:13px;font-weight:900;color:{{ userKpi.color }};">{{ usage.count }}回 ／ {{ usage.days }}日</span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid oklch(0.88 0.025 250);font-size:12.5px;color:oklch(0.42 0.03 250);">
+            <strong>合計</strong><span>{{ userUsageTotalCount }}回 ／ {{ userUsageTotalDays }}利用日</span>
+          </div>
+        </sc-if>
+        <sc-if value="{{ userUsageEmpty }}" hint-placeholder-val="{{ false }}"><div style="font-size:12px;color:oklch(0.58 0.01 75);">この月の利用記録はありません。</div></sc-if>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ vacancyOpen }}" hint-placeholder-val="{{ false }}">
+      <div data-print-hide="" style="margin-bottom:20px;background:white;border:1px solid oklch(0.86 0.03 150);border-radius:14px;padding:16px 18px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
+          <div style="font-size:13px;font-weight:800;color:oklch(0.4 0.1 150);">空室照会 ― 「この期間空いていますか」に即答する</div>
+          <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:oklch(0.5 0.01 75);">
+            <input type="date" value="{{ vacancyStart }}" sc-camel-on-change="{{ onVacancyStartChange }}" style="padding:6px 8px;border-radius:7px;border:1px solid oklch(0.85 0.01 75);font-size:12.5px;">
+            〜
+            <input type="date" value="{{ vacancyEnd }}" sc-camel-on-change="{{ onVacancyEndChange }}" style="padding:6px 8px;border-radius:7px;border:1px solid oklch(0.85 0.01 75);font-size:12.5px;">
+          </div>
+        </div>
+        <div style="font-size:12.5px;font-weight:700;color:oklch(0.42 0.01 75);margin-bottom:10px;">{{ vacancySummary }}</div>
+        <sc-if value="{{ vacancyValid }}" hint-placeholder-val="{{ true }}">
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px;">
+            <sc-for list="{{ vacancyRows }}" as="v" hint-placeholder-count="2">
+              <div style="border-radius:11px;padding:12px 14px;border:1px solid oklch(0.9 0.01 75);background:oklch(0.99 0.003 75);">
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;">
+                  <span style="font-size:13px;font-weight:700;">{{ v.roomName }}</span>
+                  <sc-if value="{{ v.free }}" hint-placeholder-val="{{ true }}">
+                    <span style="font-size:11px;font-weight:800;padding:3px 9px;border-radius:999px;background:oklch(0.92 0.08 150);color:oklch(0.38 0.12 150);">{{ v.statusLabel }}</span>
+                  </sc-if>
+                  <sc-if value="{{ v.busy }}" hint-placeholder-val="{{ false }}">
+                    <span style="font-size:11px;font-weight:800;padding:3px 9px;border-radius:999px;background:oklch(0.94 0.04 25);color:oklch(0.5 0.14 25);">{{ v.statusLabel }}</span>
+                  </sc-if>
+                </div>
+                <div style="font-size:11.5px;color:oklch(0.55 0.01 75);line-height:1.6;">{{ v.detail }}</div>
+                <sc-if value="{{ v.free }}" hint-placeholder-val="{{ true }}">
+                  <button sc-camel-on-click="{{ v.onCreate }}" style="margin-top:9px;padding:6px 12px;border-radius:8px;border:1px solid {{ primaryAccent }};background:white;color:{{ primaryAccent }};font-size:11.5px;font-weight:700;cursor:pointer;">この部屋で予約を作成</button>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+      </div>
+    </sc-if>
+
+    <div data-print-hide="" style="display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:18px;">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <button sc-camel-on-click="{{ prevMonth }}" style="width:34px;height:34px;border-radius:9px;border:1px solid oklch(0.87 0.01 75);background:white;color:oklch(0.4 0.01 75);font-size:15px;font-weight:700;cursor:pointer;">◀</button>
+        <input type="month" value="{{ currentMonth }}" sc-camel-on-change="{{ onMonthInputChange }}" style="padding:7px 10px;border-radius:9px;border:1px solid oklch(0.87 0.01 75);font-size:14px;font-weight:700;color:oklch(0.3 0.01 75);">
+        <button sc-camel-on-click="{{ nextMonth }}" style="width:34px;height:34px;border-radius:9px;border:1px solid oklch(0.87 0.01 75);background:white;color:oklch(0.4 0.01 75);font-size:15px;font-weight:700;cursor:pointer;">▶</button>
+        <button sc-camel-on-click="{{ goToday }}" style="padding:7px 14px;border-radius:9px;border:1px solid {{ primaryAccent }};background:white;color:{{ primaryAccent }};font-size:12.5px;font-weight:700;cursor:pointer;">今日</button>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <sc-for list="{{ viewTabs }}" as="vt" hint-placeholder-count="4">
+          <button sc-camel-on-click="{{ vt.select }}" style="padding:8px 16px;border-radius:999px;border:1px solid {{ vt.border }};background:{{ vt.bg }};color:{{ vt.color }};font-size:13px;font-weight:{{ vt.weight }};cursor:pointer;">{{ vt.label }}</button>
+        </sc-for>
+      </div>
+    </div>
+
+    <!-- ── 月カレンダー ────────────────────────────────────────── -->
+    <sc-if value="{{ isMonthView }}" hint-placeholder-val="{{ true }}">
+      <div>
+        <div class="ss-weekday-row" style="display:grid;grid-template-columns:repeat(7,1fr);gap:10px;margin-bottom:8px;">
+          <sc-for list="{{ weekdayHeaders }}" as="w" hint-placeholder-count="7">
+            <div style="text-align:center;font-size:12px;font-weight:700;padding:4px 0;color:{{ w.color }};">{{ w.label }}</div>
+          </sc-for>
+        </div>
+
+        <div class="ss-month-grid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:10px;">
+          <sc-for list="{{ calendarCells }}" as="c" hint-placeholder-count="42">
+            <div class="ss-cell {{ c.outClass }}" style="min-height:{{ cellMinHeight }};border-radius:16px;padding:10px;display:flex;flex-direction:column;gap:8px;background:{{ c.cellBg }};border:{{ c.cellBorderWidth }} solid {{ c.cellBorder }};opacity:{{ c.cellOpacity }};position:relative;">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
+                <span style="font-size:13px;font-weight:700;color:{{ c.dateColor }};">{{ c.dayNum }}</span>
+                <sc-if value="{{ c.isToday }}" hint-placeholder-val="{{ false }}">
+                  <span style="font-size:9.5px;font-weight:800;padding:2px 7px;border-radius:999px;background:{{ primaryAccent }};color:white;">{{ c.todayBadge }}</span>
+                </sc-if>
+              </div>
+
+              <sc-for list="{{ c.lanes }}" as="lane" hint-placeholder-count="2">
+                <div style="display:flex;flex-direction:column;gap:4px;">
+                  <div style="display:flex;align-items:center;gap:5px;">
+                    <sc-if value="{{ lane.showLabel }}" hint-placeholder-val="{{ false }}">
+                      <span style="font-size:9.5px;font-weight:700;color:oklch(0.6 0.01 75);letter-spacing:.03em;">{{ lane.roomName }}</span>
+                    </sc-if>
+                    <sc-if value="{{ lane.hasConflict }}" hint-placeholder-val="{{ false }}">
+                      <span title="同じ部屋で期間が重なっています" style="font-size:9px;font-weight:800;padding:1px 6px;border-radius:999px;background:oklch(0.92 0.1 25);color:oklch(0.45 0.17 25);">重複</span>
+                    </sc-if>
+                  </div>
+
+                  <sc-for list="{{ lane.stayingChips }}" as="st" hint-placeholder-count="0">
+                    <div sc-camel-on-click="{{ st.onOpen }}" title="{{ st.tooltip }}" style="border-radius:9px;background:{{ st.bg }};border-left:3px {{ st.borderStyle }} {{ st.color }};padding:5px 7px;cursor:pointer;font-size:11.5px;line-height:1.4;" style-hover="filter:brightness(0.97);">
+                      <span style="font-weight:700;color:{{ st.color }};">滞在中</span>
+                      <div style="font-weight:500;color:oklch(0.42 0.01 75);">{{ st.name }}</div>
+                      <div style="font-size:9.5px;color:oklch(0.62 0.01 75);">{{ st.mealLabel }}</div>
+                    </div>
+                  </sc-for>
+
+                  <sc-for list="{{ lane.reservations }}" as="r" hint-placeholder-count="0">
+                    <div sc-camel-on-click="{{ r.onEdit }}" title="{{ r.tooltip }}" style="border-radius:9px;background:{{ r.bg }};border-left:3px {{ r.borderStyle }} {{ r.color }};padding:5px 7px;cursor:pointer;font-size:11.5px;line-height:1.4;position:relative;" style-hover="filter:brightness(0.97);">
+                      <div style="display:flex;justify-content:space-between;gap:4px;">
+                        <span style="font-weight:700;color:{{ r.color }};">{{ r.typeLabel }} {{ r.time }}</span>
+                        <sc-if value="{{ r.hasNotes }}" hint-placeholder-val="{{ false }}">
+                          <span style="width:6px;height:6px;border-radius:50%;background:oklch(0.68 0.16 55);margin-top:4px;flex:none;"></span>
+                        </sc-if>
+                      </div>
+                      <div style="font-weight:500;color:oklch(0.3 0.01 75);">{{ r.name }}</div>
+                      <sc-if value="{{ r.showPickup }}" hint-placeholder-val="{{ false }}">
+                        <div style="display:flex;margin-top:3px;">
+                          <span style="font-size:9.5px;padding:1px 5px;border-radius:4px;background:{{ r.pickupBg }};color:{{ r.pickupColor }};font-weight:700;margin-left:auto;">送迎{{ r.pickupLabel }}</span>
+                        </div>
+                      </sc-if>
+                    </div>
+                  </sc-for>
+
+                  <sc-if value="{{ lane.isEmpty }}" hint-placeholder-val="{{ false }}">
+                    <button data-print-hide="" class="ss-add" sc-camel-on-click="{{ lane.onAdd }}" style="text-align:left;border:1px dashed oklch(0.88 0.008 75);background:none;border-radius:8px;padding:5px 7px;font-size:10.5px;color:oklch(0.68 0.008 75);cursor:pointer;" style-hover="border-color:{{ primaryAccent }};color:{{ primaryAccent }};">空室 ＋ 追加</button>
+                  </sc-if>
+                  <sc-if value="{{ lane.hasReservations }}" hint-placeholder-val="{{ false }}">
+                    <button data-print-hide="" class="ss-add" sc-camel-on-click="{{ lane.onAdd }}" style="text-align:left;border:none;background:none;padding:1px 7px;font-size:10px;color:oklch(0.65 0.008 75);cursor:pointer;">＋ この部屋に追加</button>
+                  </sc-if>
+                </div>
+              </sc-for>
+
+              <sc-if value="{{ c.hasMeals }}" hint-placeholder-val="{{ false }}">
+                <div style="margin-top:auto;padding-top:5px;border-top:1px dashed oklch(0.91 0.008 75);font-size:9.5px;color:oklch(0.6 0.01 75);">食数 {{ c.mealSummary }}</div>
+              </sc-if>
+            </div>
+          </sc-for>
+        </div>
+
+        <div style="display:flex;gap:16px;margin-top:22px;font-size:11.5px;color:oklch(0.5 0.01 75);flex-wrap:wrap;">
+          <sc-for list="{{ legendCategories }}" as="lc" hint-placeholder-count="3">
+            <span><span style="display:inline-block;width:9px;height:9px;border-radius:3px;background:{{ lc.color }};margin-right:5px;"></span>{{ lc.label }}</span>
+          </sc-for>
+          <span><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:oklch(0.68 0.16 55);margin-right:6px;"></span>備考あり（マウスを乗せると内容表示）</span>
+          <span><span style="display:inline-block;width:12px;height:0;border-top:2px dashed oklch(0.6 0.01 75);margin-right:6px;vertical-align:middle;"></span>破線＝仮予約・調整中</span>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- ── タイムライン ────────────────────────────────────────── -->
+    <sc-if value="{{ isTimelineView }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div data-print-hide="" style="font-size:11.5px;color:oklch(0.55 0.01 75);margin-bottom:10px;line-height:1.7;">
+          連泊は1本の帯で表示されます。帯をドラッグ＝日程の移動、帯の左右の端をドラッグ＝入所日・退所日の変更、空きトラックをドラッグ＝その期間で新規予約。帯のクリックで詳細を編集できます。
+        </div>
+        <div style="overflow-x:auto;padding-bottom:8px;">
+          <div style="min-width:max-content;">
+            <div style="display:flex;align-items:flex-end;">
+              <div style="width:120px;flex:none;font-size:11px;font-weight:700;color:oklch(0.55 0.01 75);padding-bottom:6px;">部屋 ＼ 日付</div>
+              <div style="display:flex;width:{{ timelineWidth }};">
+                <sc-for list="{{ timelineDays }}" as="td" hint-placeholder-count="31">
+                  <div style="width:38px;flex:none;text-align:center;padding-bottom:6px;background:{{ td.bg }};">
+                    <div style="font-size:11px;font-weight:700;color:{{ td.color }};">{{ td.dayNum }}</div>
+                    <div style="font-size:9px;color:{{ td.color }};">{{ td.weekday }}</div>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+
+            <sc-for list="{{ timelineRows }}" as="row" hint-placeholder-count="2">
+              <div style="display:flex;align-items:stretch;border-top:1px solid oklch(0.91 0.008 75);">
+                <div style="width:120px;flex:none;display:flex;align-items:center;font-size:12.5px;font-weight:700;color:oklch(0.35 0.01 75);padding:10px 8px 10px 0;">{{ row.roomName }}</div>
+                <div class="ss-track" data-track="1" data-grid-start="{{ row.gridStart }}" sc-camel-on-pointer-down="{{ row.onTrackDown }}" style="position:relative;width:{{ timelineWidth }};height:54px;background-image:repeating-linear-gradient(to right, oklch(0.94 0.005 75) 0 1px, transparent 1px 38px);cursor:crosshair;">
+                  <sc-if value="{{ row.hasPreview }}" hint-placeholder-val="{{ false }}">
+                    <div style="position:absolute;top:6px;left:{{ row.preview.left }};width:{{ row.preview.width }};height:42px;border-radius:8px;border:2px dashed {{ primaryAccent }};background:color-mix(in oklab, {{ primaryAccent }} 10%, white);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:{{ primaryAccent }};pointer-events:none;">{{ row.preview.label }}</div>
+                  </sc-if>
+                  <sc-for list="{{ row.bars }}" as="bar" hint-placeholder-count="1">
+                    <div class="ss-bar" sc-camel-on-pointer-down="{{ bar.onMoveDown }}" sc-camel-on-click="{{ bar.onOpen }}" title="{{ bar.tooltip }}" style="position:absolute;top:6px;left:{{ bar.left }};width:{{ bar.width }};height:42px;border-radius:8px;border:1.5px {{ bar.borderStyle }} {{ bar.border }};background:{{ bar.bg }};padding:4px 8px;overflow:hidden;display:flex;flex-direction:column;justify-content:center;">
+                      <div style="font-size:11.5px;font-weight:700;color:{{ bar.color }};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ bar.label }}</div>
+                      <div style="font-size:9.5px;color:oklch(0.52 0.01 75);white-space:nowrap;">{{ bar.sub }}</div>
+                      <div class="ss-handle" sc-camel-on-pointer-down="{{ bar.onStartDown }}" style="position:absolute;left:0;top:0;width:9px;height:100%;border-radius:8px 0 0 8px;"></div>
+                      <div class="ss-handle" sc-camel-on-pointer-down="{{ bar.onEndDown }}" style="position:absolute;right:0;top:0;width:9px;height:100%;border-radius:0 8px 8px 0;"></div>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- ── 当日の動き ──────────────────────────────────────────── -->
+    <sc-if value="{{ isTodayView }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px;">
+          <button data-print-hide="" sc-camel-on-click="{{ focusPrev }}" style="width:32px;height:32px;border-radius:8px;border:1px solid oklch(0.87 0.01 75);background:white;cursor:pointer;font-weight:700;">◀</button>
+          <div style="font-size:19px;font-weight:900;">{{ focusDateLabel }}</div>
+          <button data-print-hide="" sc-camel-on-click="{{ focusNext }}" style="width:32px;height:32px;border-radius:8px;border:1px solid oklch(0.87 0.01 75);background:white;cursor:pointer;font-weight:700;">▶</button>
+          <input data-print-hide="" type="date" value="{{ focusDate }}" sc-camel-on-change="{{ onFocusDateChange }}" style="padding:6px 9px;border-radius:8px;border:1px solid oklch(0.87 0.01 75);font-size:13px;">
+          <button data-print-hide="" sc-camel-on-click="{{ focusToday }}" style="padding:6px 13px;border-radius:8px;border:1px solid {{ primaryAccent }};background:white;color:{{ primaryAccent }};font-size:12px;font-weight:700;cursor:pointer;">今日へ</button>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:20px;">
+          <div style="background:white;border:1px solid oklch(0.91 0.008 75);border-radius:14px;padding:14px 16px;">
+            <div style="font-size:12px;color:oklch(0.5 0.01 75);margin-bottom:6px;">在室</div>
+            <div style="font-size:24px;font-weight:900;color:{{ primaryAccent }};">{{ focusOccupied }}<span style="font-size:12px;font-weight:500;color:oklch(0.55 0.01 75);"> / {{ focusCapacity }} 室</span></div>
+          </div>
+          <div style="background:oklch(0.98 0.03 75);border:1px solid oklch(0.87 0.06 75);border-radius:14px;padding:14px 16px;">
+            <div style="font-size:12px;color:oklch(0.45 0.06 75);margin-bottom:6px;">食数（厨房連絡用）</div>
+            <div style="display:flex;gap:14px;align-items:baseline;">
+              <div><span style="font-size:22px;font-weight:900;color:oklch(0.42 0.1 75);">{{ focusMealB }}</span><span style="font-size:11px;color:oklch(0.5 0.03 75);"> 朝</span></div>
+              <div><span style="font-size:22px;font-weight:900;color:oklch(0.42 0.1 75);">{{ focusMealL }}</span><span style="font-size:11px;color:oklch(0.5 0.03 75);"> 昼</span></div>
+              <div><span style="font-size:22px;font-weight:900;color:oklch(0.42 0.1 75);">{{ focusMealD }}</span><span style="font-size:11px;color:oklch(0.5 0.03 75);"> 夕</span></div>
+            </div>
+            <div style="font-size:10.5px;color:oklch(0.6 0.01 75);margin-top:4px;">合計 {{ focusMealTotal }} 食</div>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;">
+          <div style="background:white;border:1px solid oklch(0.91 0.008 75);border-radius:14px;padding:16px 18px;">
+            <div style="font-size:13px;font-weight:800;color:oklch(0.4 0.12 150);margin-bottom:10px;">入所（{{ focusDateLabel }}）</div>
+            <sc-if value="{{ noArrivals }}" hint-placeholder-val="{{ false }}"><div style="font-size:12px;color:oklch(0.65 0.01 75);">予定なし</div></sc-if>
+            <sc-for list="{{ arrivals }}" as="a" hint-placeholder-count="1">
+              <div sc-camel-on-click="{{ a.onOpen }}" style="cursor:pointer;padding:9px 0;border-bottom:1px solid oklch(0.94 0.008 75);" style-hover="background:oklch(0.985 0.005 75);">
+                <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;">
+                  <span style="font-size:13.5px;font-weight:700;">{{ a.name }}</span>
+                  <span style="font-size:12.5px;font-weight:700;color:{{ a.color }};">{{ a.time }}</span>
+                </div>
+                <div style="font-size:11px;color:oklch(0.55 0.01 75);margin-top:3px;">{{ a.room }} ／ {{ a.category }} ／ 食事 {{ a.meals }} ／ 送迎 {{ a.pickup }}</div>
+                <sc-if value="{{ a.showPickupDetail }}" hint-placeholder-val="{{ false }}"><div style="font-size:11px;color:oklch(0.5 0.06 70);margin-top:2px;">送迎詳細: {{ a.pickupDetail }}</div></sc-if>
+                <sc-if value="{{ a.showNotes }}" hint-placeholder-val="{{ false }}"><div style="font-size:11px;color:oklch(0.55 0.08 55);margin-top:2px;">備考: {{ a.notes }}</div></sc-if>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="background:white;border:1px solid oklch(0.91 0.008 75);border-radius:14px;padding:16px 18px;">
+            <div style="font-size:13px;font-weight:800;color:oklch(0.45 0.13 25);margin-bottom:10px;">退所（{{ focusDateLabel }}）</div>
+            <sc-if value="{{ noDepartures }}" hint-placeholder-val="{{ false }}"><div style="font-size:12px;color:oklch(0.65 0.01 75);">予定なし</div></sc-if>
+            <sc-for list="{{ departures }}" as="dp" hint-placeholder-count="1">
+              <div sc-camel-on-click="{{ dp.onOpen }}" style="cursor:pointer;padding:9px 0;border-bottom:1px solid oklch(0.94 0.008 75);" style-hover="background:oklch(0.985 0.005 75);">
+                <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;">
+                  <span style="font-size:13.5px;font-weight:700;">{{ dp.name }}</span>
+                  <span style="font-size:12.5px;font-weight:700;color:{{ dp.color }};">{{ dp.time }}</span>
+                </div>
+                <div style="font-size:11px;color:oklch(0.55 0.01 75);margin-top:3px;">{{ dp.room }} ／ {{ dp.category }} ／ 食事 {{ dp.meals }} ／ 送迎 {{ dp.pickup }}</div>
+                <sc-if value="{{ dp.showPickupDetail }}" hint-placeholder-val="{{ false }}"><div style="font-size:11px;color:oklch(0.5 0.06 70);margin-top:2px;">送迎詳細: {{ dp.pickupDetail }}</div></sc-if>
+                <sc-if value="{{ dp.showNotes }}" hint-placeholder-val="{{ false }}"><div style="font-size:11px;color:oklch(0.55 0.08 55);margin-top:2px;">備考: {{ dp.notes }}</div></sc-if>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="background:white;border:1px solid oklch(0.91 0.008 75);border-radius:14px;padding:16px 18px;">
+            <div style="font-size:13px;font-weight:800;color:oklch(0.42 0.01 75);margin-bottom:10px;">滞在中</div>
+            <sc-if value="{{ noStaying }}" hint-placeholder-val="{{ false }}"><div style="font-size:12px;color:oklch(0.65 0.01 75);">なし</div></sc-if>
+            <sc-for list="{{ staying }}" as="stn" hint-placeholder-count="1">
+              <div sc-camel-on-click="{{ stn.onOpen }}" style="cursor:pointer;padding:9px 0;border-bottom:1px solid oklch(0.94 0.008 75);" style-hover="background:oklch(0.985 0.005 75);">
+                <div style="font-size:13.5px;font-weight:700;">{{ stn.name }}</div>
+                <div style="font-size:11px;color:oklch(0.55 0.01 75);margin-top:3px;">{{ stn.room }} ／ {{ stn.category }} ／ 食事 {{ stn.meals }}</div>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="background:white;border:1px solid oklch(0.89 0.04 70);border-radius:14px;padding:16px 18px;">
+            <div style="font-size:13px;font-weight:800;color:oklch(0.45 0.11 70);margin-bottom:10px;">送迎の予定</div>
+            <sc-if value="{{ noFocusPickups }}" hint-placeholder-val="{{ false }}"><div style="font-size:12px;color:oklch(0.65 0.01 75);">なし</div></sc-if>
+            <sc-for list="{{ focusPickups }}" as="pu" hint-placeholder-count="1">
+              <div sc-camel-on-click="{{ pu.onOpen }}" style="cursor:pointer;padding:9px 0;border-bottom:1px solid oklch(0.94 0.008 75);">
+                <div style="display:flex;justify-content:space-between;gap:8px;">
+                  <span style="font-size:13.5px;font-weight:700;">{{ pu.name }}</span>
+                  <span style="font-size:11.5px;font-weight:700;color:oklch(0.45 0.11 70);">{{ pu.pickup }}</span>
+                </div>
+                <div style="font-size:11px;color:oklch(0.55 0.01 75);margin-top:3px;">{{ pu.pickupDetail }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- ── 一覧・印刷 ──────────────────────────────────────────── -->
+    <sc-if value="{{ isListView }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div style="font-size:15px;font-weight:800;margin-bottom:12px;">{{ currentLabel }} 利用一覧</div>
+        <sc-if value="{{ listEmpty }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:12.5px;color:oklch(0.6 0.01 75);">この月の利用記録はありません。</div>
+        </sc-if>
+        <sc-if value="{{ listHasRows }}" hint-placeholder-val="{{ true }}">
+          <!-- HTMLのテーブル解析規則は tbody 直下の非テーブル要素を外へ追い出すため、
+               sc-for をそのまま <tbody> に置くと行が壊れる。ランタイムが用意している
+               sc-raw-* 別名を使うとテーブル解析を回避でき、描画時に本来のタグへ戻る。 -->
+          <div style="overflow-x:auto;background:white;border:1px solid oklch(0.91 0.008 75);border-radius:14px;padding:6px 14px 10px;">
+            <sc-raw-table class="ss-table">
+              <sc-raw-thead>
+                <sc-raw-tr>
+                  <sc-raw-th>氏名</sc-raw-th><sc-raw-th>区分</sc-raw-th><sc-raw-th>部屋</sc-raw-th><sc-raw-th>期間</sc-raw-th><sc-raw-th>利用日</sc-raw-th><sc-raw-th>宿泊</sc-raw-th><sc-raw-th>食数</sc-raw-th><sc-raw-th>状態</sc-raw-th><sc-raw-th>送迎</sc-raw-th><sc-raw-th>備考</sc-raw-th>
+                </sc-raw-tr>
+              </sc-raw-thead>
+              <sc-raw-tbody>
+                <sc-for list="{{ listRows }}" as="lr" hint-placeholder-count="4">
+                  <sc-raw-tr sc-camel-on-click="{{ lr.onOpen }}" style="cursor:pointer;">
+                    <sc-raw-td style="font-weight:700;">{{ lr.name }}</sc-raw-td>
+                    <sc-raw-td><span style="display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;background:color-mix(in oklab, {{ lr.color }} 14%, white);color:{{ lr.color }};">{{ lr.category }}</span></sc-raw-td>
+                    <sc-raw-td>{{ lr.room }}</sc-raw-td>
+                    <sc-raw-td style="white-space:nowrap;">{{ lr.range }}</sc-raw-td>
+                    <sc-raw-td>{{ lr.days }}日</sc-raw-td>
+                    <sc-raw-td>{{ lr.nights }}泊</sc-raw-td>
+                    <sc-raw-td style="white-space:nowrap;">{{ lr.meals }}</sc-raw-td>
+                    <sc-raw-td>{{ lr.status }}</sc-raw-td>
+                    <sc-raw-td>{{ lr.pickup }}</sc-raw-td>
+                    <sc-raw-td style="max-width:260px;">{{ lr.notes }}</sc-raw-td>
+                  </sc-raw-tr>
+                </sc-for>
+              </sc-raw-tbody>
+            </sc-raw-table>
+          </div>
+        </sc-if>
+      </div>
+    </sc-if>
+
+    <!-- ── 期間指定レポート ────────────────────────────────────── -->
+    <div data-print-hide="" style="margin-top:28px;">
+      <div class="ss-report-head" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:10px;">
+        <div style="font-size:12.5px;font-weight:700;color:oklch(0.5 0.01 75);letter-spacing:.04em;">期間指定レポート（上司報告・請求突合用）</div>
+        <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:oklch(0.5 0.01 75);flex-wrap:wrap;">
+          <input type="date" value="{{ reportRangeStart }}" sc-camel-on-change="{{ onReportStartChange }}" style="padding:5px 7px;border-radius:7px;border:1px solid oklch(0.85 0.01 75);font-size:12.5px;" style-focus="border-color:{{ primaryAccent }};outline:none;">
+          〜
+          <input type="date" value="{{ reportRangeEnd }}" sc-camel-on-change="{{ onReportEndChange }}" style="padding:5px 7px;border-radius:7px;border:1px solid oklch(0.85 0.01 75);font-size:12.5px;" style-focus="border-color:{{ primaryAccent }};outline:none;">
+          <button sc-camel-on-click="{{ setReportThisMonth }}" style="padding:5px 11px;border-radius:7px;border:1px solid oklch(0.85 0.01 75);background:white;color:oklch(0.45 0.01 75);font-size:11.5px;font-weight:700;cursor:pointer;">表示中の月に合わせる</button>
+        </div>
+      </div>
+      <sc-if value="{{ reportRangeInvalid }}" hint-placeholder-val="{{ false }}">
+        <div style="margin-bottom:10px;padding:8px 12px;border-radius:8px;background:oklch(0.96 0.04 25);color:oklch(0.48 0.14 25);font-size:12px;font-weight:500;">開始日が終了日より後になっています。期間を選び直してください。</div>
+      </sc-if>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;">
+        <sc-for list="{{ reportCards }}" as="rep" hint-placeholder-count="2">
+          <div style="background:{{ rep.bg }};border-radius:14px;padding:16px 18px;border:1px dashed {{ rep.border }};">
+            <div style="font-size:12px;font-weight:500;color:oklch(0.5 0.01 75);margin-bottom:10px;">{{ rep.label }}</div>
+            <div style="display:flex;gap:18px;">
+              <div>
+                <div style="font-size:20px;font-weight:900;">{{ rep.users }}<span style="font-size:12px;font-weight:500;color:oklch(0.55 0.01 75);"> 名</span></div>
+                <div style="font-size:10.5px;color:oklch(0.6 0.01 75);">利用者数</div>
+              </div>
+              <div>
+                <div style="font-size:20px;font-weight:900;">{{ rep.days }}<span style="font-size:12px;font-weight:500;color:oklch(0.55 0.01 75);"> 日</span></div>
+                <div style="font-size:10.5px;color:oklch(0.6 0.01 75);">利用日数</div>
+              </div>
+              <div>
+                <div style="font-size:20px;font-weight:900;">{{ rep.nights }}<span style="font-size:12px;font-weight:500;color:oklch(0.55 0.01 75);"> 泊</span></div>
+                <div style="font-size:10.5px;color:oklch(0.6 0.01 75);">延べ宿泊</div>
+              </div>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
+        <button sc-camel-on-click="{{ exportDetailCsv }}" style="padding:9px 15px;border-radius:9px;border:1px solid {{ primaryAccent }};background:white;color:{{ primaryAccent }};font-size:12.5px;font-weight:700;cursor:pointer;">明細CSVを書き出す</button>
+        <button sc-camel-on-click="{{ exportSummaryCsv }}" style="padding:9px 15px;border-radius:9px;border:1px solid {{ primaryAccent }};background:white;color:{{ primaryAccent }};font-size:12.5px;font-weight:700;cursor:pointer;">区分別 集計CSV</button>
+        <button sc-camel-on-click="{{ exportMealCsv }}" style="padding:9px 15px;border-radius:9px;border:1px solid oklch(0.7 0.1 75);background:white;color:oklch(0.45 0.11 75);font-size:12.5px;font-weight:700;cursor:pointer;">食数CSV（厨房用）</button>
+        <span style="font-size:11px;color:oklch(0.62 0.01 75);align-self:center;">Excelでそのまま開けます（BOM付きUTF-8）</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 予約ドロワー ────────────────────────────────────────── -->
+  <sc-if value="{{ drawerOpen }}" hint-placeholder-val="{{ false }}">
+    <div sc-camel-on-click="{{ closeDrawer }}" style="position:fixed;inset:0;background:oklch(0.2 0.01 75 / 0.35);z-index:40;"></div>
+    <div class="ss-drawer" style="position:fixed;top:0;right:0;height:100vh;width:400px;max-width:92vw;background:oklch(0.995 0.003 75);box-shadow:-8px 0 30px oklch(0.2 0.01 75 / 0.12);z-index:41;padding:28px 26px;overflow-y:auto;display:flex;flex-direction:column;gap:18px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div style="font-size:17px;font-weight:700;">{{ drawerDateLabel }}の予約</div>
+        <button sc-camel-on-click="{{ closeDrawer }}" style="border:none;background:none;font-size:20px;cursor:pointer;color:oklch(0.5 0.01 75);">×</button>
+      </div>
+
+      <sc-if value="{{ drawerIsStayEditor }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;flex-direction:column;gap:10px;padding:12px;border-radius:12px;background:oklch(0.975 0.012 250);border:1px solid oklch(0.9 0.025 250);">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+            <div style="font-size:12px;font-weight:800;color:oklch(0.42 0.08 250);">1回の利用として入所・退所をまとめて入力</div>
+            <div style="font-size:11.5px;font-weight:800;color:{{ primaryAccent }};white-space:nowrap;">{{ drawerNightsLabel }}</div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 112px;gap:8px;align-items:end;">
+            <label style="font-size:11px;font-weight:700;color:oklch(0.5 0.01 75);">入所日<input type="date" value="{{ drawerStartDate }}" sc-camel-on-change="{{ onStartDateChange }}" style="display:block;width:100%;margin-top:4px;padding:8px;border-radius:8px;border:1px solid oklch(0.84 0.01 75);font-size:13px;"></label>
+            <label style="font-size:11px;font-weight:700;color:oklch(0.5 0.01 75);">入所時刻<input type="time" value="{{ drawerStartTime }}" sc-camel-on-change="{{ onStartTimeChange }}" style="display:block;width:100%;margin-top:4px;padding:8px;border-radius:8px;border:1px solid oklch(0.84 0.01 75);font-size:13px;"></label>
+            <label style="font-size:11px;font-weight:700;color:oklch(0.5 0.01 75);">退所予定日<input type="date" value="{{ drawerEndDate }}" sc-camel-on-change="{{ onEndDateChange }}" style="display:block;width:100%;margin-top:4px;padding:8px;border-radius:8px;border:1px solid oklch(0.84 0.01 75);font-size:13px;"></label>
+            <label style="font-size:11px;font-weight:700;color:oklch(0.5 0.01 75);">退所時刻<input type="time" value="{{ drawerEndTime }}" sc-camel-on-change="{{ onEndTimeChange }}" style="display:block;width:100%;margin-top:4px;padding:8px;border-radius:8px;border:1px solid oklch(0.84 0.01 75);font-size:13px;"></label>
+          </div>
+          <div style="display:flex;gap:7px;flex-wrap:wrap;">
+            <button sc-camel-on-click="{{ extendStay }}" style="padding:7px 10px;border-radius:8px;border:1px solid oklch(0.78 0.02 75);background:white;color:oklch(0.42 0.01 75);font-size:11.5px;font-weight:700;cursor:pointer;">延泊 +1日</button>
+            <button sc-camel-on-click="{{ shortenStay }}" style="padding:7px 10px;border-radius:8px;border:1px solid oklch(0.78 0.02 75);background:white;color:oklch(0.42 0.01 75);font-size:11.5px;font-weight:700;cursor:pointer;">短縮 −1日</button>
+            <button sc-camel-on-click="{{ applyPrevious }}" style="padding:7px 10px;border-radius:8px;border:1px solid {{ primaryAccent }};background:white;color:{{ primaryAccent }};font-size:11.5px;font-weight:700;cursor:pointer;">前回内容を適用</button>
+            <button sc-camel-on-click="{{ duplicateNextWeek }}" style="padding:7px 10px;border-radius:8px;border:1px solid oklch(0.78 0.02 75);background:white;color:oklch(0.42 0.01 75);font-size:11.5px;font-weight:700;cursor:pointer;">翌週へ複製</button>
+          </div>
+        </div>
+      </sc-if>
+      <sc-if value="{{ drawerIsLegacyEditor }}" hint-placeholder-val="{{ false }}">
+        <div>
+          <div style="font-size:12px;font-weight:700;color:oklch(0.5 0.01 75);margin-bottom:6px;">日付（従来形式の記録）</div>
+          <input type="date" value="{{ drawerDateStr }}" sc-camel-on-change="{{ onDateChange }}" style="width:100%;padding:9px 10px;border-radius:9px;border:1px solid oklch(0.87 0.01 75);font-size:14px;">
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ multiRoomDrawer }}" hint-placeholder-val="{{ false }}">
+        <div>
+          <div style="font-size:12px;font-weight:700;color:oklch(0.5 0.01 75);margin-bottom:6px;">部屋</div>
+          <div style="display:flex;gap:6px;">
+            <sc-for list="{{ roomOptions }}" as="room" hint-placeholder-count="2">
+              <button sc-camel-on-click="{{ room.select }}" style="flex:1;padding:8px 4px;border-radius:9px;border:1px solid {{ room.border }};background:{{ room.bg }};color:{{ room.color }};font-weight:700;font-size:12.5px;cursor:pointer;">{{ room.label }}</button>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ drawerIsLegacyEditor }}" hint-placeholder-val="{{ false }}"><div>
+        <div style="font-size:12px;font-weight:700;color:oklch(0.5 0.01 75);margin-bottom:6px;">種別</div>
+        <div style="display:flex;gap:8px;">
+          <button sc-camel-on-click="{{ setTypeCheckin }}" style="flex:1;padding:9px;border-radius:9px;border:1px solid {{ typeCheckinBorder }};background:{{ typeCheckinBg }};color:{{ typeCheckinColor }};font-weight:700;font-size:13px;cursor:pointer;">入所</button>
+          <button sc-camel-on-click="{{ setTypeCheckout }}" style="flex:1;padding:9px;border-radius:9px;border:1px solid {{ typeCheckoutBorder }};background:{{ typeCheckoutBg }};color:{{ typeCheckoutColor }};font-weight:700;font-size:13px;cursor:pointer;">退所</button>
+        </div>
+      </div></sc-if>
+
+      <sc-if value="{{ drawerIsLegacyEditor }}" hint-placeholder-val="{{ false }}"><div>
+        <div style="font-size:12px;font-weight:700;color:oklch(0.5 0.01 75);margin-bottom:6px;">時間</div>
+        <input type="time" value="{{ drawerTime }}" sc-camel-on-change="{{ onTimeChange }}" style="width:100%;padding:9px 10px;border-radius:9px;border:1px solid oklch(0.87 0.01 75);font-size:14px;" style-focus="border-color:{{ primaryAccent }};outline:none;">
+      </div></sc-if>
+
+      <div>
+        <div style="font-size:12px;font-weight:700;color:oklch(0.5 0.01 75);margin-bottom:6px;">氏名</div>
+        <input type="text" list="user-master-options" value="{{ drawerName }}" sc-camel-on-change="{{ onNameChange }}" placeholder="山田 太郎" style="width:100%;padding:9px 10px;border-radius:9px;border:1px solid oklch(0.87 0.01 75);font-size:14px;" style-focus="border-color:{{ primaryAccent }};outline:none;">
+        <datalist id="user-master-options">
+          <sc-for list="{{ userNameOptions }}" as="un" hint-placeholder-count="0">
+            <option value="{{ un }}"></option>
+          </sc-for>
+        </datalist>
+      </div>
+
+      <div>
+        <div style="font-size:12px;font-weight:700;color:oklch(0.5 0.01 75);margin-bottom:6px;">区分</div>
+        <div style="display:flex;gap:6px;">
+          <sc-for list="{{ categoryOptions }}" as="cat" hint-placeholder-count="3">
+            <button sc-camel-on-click="{{ cat.select }}" style="flex:1;padding:8px 4px;border-radius:9px;border:1px solid {{ cat.border }};background:{{ cat.bg }};color:{{ cat.color }};font-weight:700;font-size:12.5px;cursor:pointer;">{{ cat.label }}</button>
+          </sc-for>
+        </div>
+      </div>
+
+      <div>
+        <div style="font-size:12px;font-weight:700;color:oklch(0.5 0.01 75);margin-bottom:6px;">予約状態</div>
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;">
+          <sc-for list="{{ statusOptions }}" as="stt" hint-placeholder-count="5">
+            <button sc-camel-on-click="{{ stt.select }}" style="padding:8px 4px;border-radius:9px;border:1px solid {{ stt.border }};background:{{ stt.bg }};color:{{ stt.color }};font-weight:700;font-size:12px;cursor:pointer;">{{ stt.label }}</button>
+          </sc-for>
+        </div>
+        <div style="font-size:10.5px;color:oklch(0.6 0.01 75);margin-top:5px;line-height:1.6;">仮予約・調整中はカレンダー上で破線表示になり、集計範囲の切替で除外できます。キャンセルは削除せず記録として残り、部屋の重複判定から除外されます。</div>
+      </div>
+
+      <sc-if value="{{ drawerIsStayEditor }}" hint-placeholder-val="{{ true }}">
+        <div>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;">
+            <div style="font-size:12px;font-weight:700;color:oklch(0.5 0.01 75);">食事（日別）</div>
+            <div style="font-size:11px;font-weight:700;color:oklch(0.45 0.09 75);">{{ drawerMealSummary }}</div>
+          </div>
+          <button sc-camel-on-click="{{ toggleDrawerMeals }}" aria-expanded="{{ drawerMealsOpen }}" style="width:100%;padding:9px 11px;border-radius:9px;border:1px solid oklch(0.86 0.015 75);background:oklch(0.985 0.005 75);color:oklch(0.42 0.01 75);font-weight:700;font-size:12px;cursor:pointer;text-align:left;">{{ drawerMealsLabel }}</button>
+          <sc-if value="{{ drawerMealsOpen }}" hint-placeholder-val="{{ false }}">
+            <div style="margin-top:9px;padding:11px;border-radius:10px;background:white;border:1px solid oklch(0.91 0.008 75);">
+              <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:9px;">
+                <sc-for list="{{ mealPresets }}" as="mp" hint-placeholder-count="3">
+                  <button sc-camel-on-click="{{ mp.apply }}" style="padding:5px 8px;border-radius:7px;border:1px solid oklch(0.84 0.015 75);background:white;color:oklch(0.45 0.01 75);font-size:10.5px;font-weight:600;cursor:pointer;">{{ mp.label }}</button>
+                </sc-for>
+              </div>
+              <sc-for list="{{ mealRows }}" as="mr" hint-placeholder-count="3">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 0;border-bottom:1px solid oklch(0.96 0.004 75);">
+                  <span style="font-size:11.5px;color:oklch(0.42 0.01 75);white-space:nowrap;">{{ mr.label }}</span>
+                  <div style="display:flex;gap:4px;">
+                    <sc-for list="{{ mr.cells }}" as="mc" hint-placeholder-count="3">
+                      <button sc-camel-on-click="{{ mc.toggle }}" style="width:34px;padding:5px 0;border-radius:7px;border:1px solid {{ mc.border }};background:{{ mc.bg }};color:{{ mc.color }};font-size:11.5px;font-weight:700;cursor:pointer;">{{ mc.label }}</button>
+                    </sc-for>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </sc-if>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ drawerIsLegacyEditor }}" hint-placeholder-val="{{ false }}">
+        <div>
+          <div style="font-size:12px;font-weight:700;color:oklch(0.5 0.01 75);margin-bottom:6px;">食事</div>
+          <div style="display:flex;gap:6px;">
+            <sc-for list="{{ mealOptions }}" as="meal" hint-placeholder-count="3">
+              <button sc-camel-on-click="{{ meal.toggle }}" style="flex:1;padding:8px 4px;border-radius:9px;border:1px solid {{ meal.border }};background:{{ meal.bg }};color:{{ meal.color }};font-weight:700;font-size:12.5px;cursor:pointer;">{{ meal.label }}</button>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <div>
+        <div style="font-size:12px;font-weight:700;color:oklch(0.5 0.01 75);margin-bottom:6px;">送迎</div>
+        <div style="display:flex;gap:6px;">
+          <sc-for list="{{ pickupOptions }}" as="pk" hint-placeholder-count="3">
+            <button sc-camel-on-click="{{ pk.select }}" style="flex:1;padding:8px 4px;border-radius:9px;border:1px solid {{ pk.border }};background:{{ pk.bg }};color:{{ pk.color }};font-weight:700;font-size:12.5px;cursor:pointer;">{{ pk.label }}</button>
+          </sc-for>
+        </div>
+      </div>
+
+      <button sc-camel-on-click="{{ toggleDrawerDetails }}" aria-expanded="{{ drawerDetailsOpen }}" style="width:100%;padding:9px 11px;border-radius:9px;border:1px solid oklch(0.86 0.015 75);background:oklch(0.985 0.005 75);color:oklch(0.42 0.01 75);font-weight:700;font-size:12px;cursor:pointer;text-align:left;">{{ drawerDetailsLabel }}</button>
+      <sc-if value="{{ drawerDetailsOpen }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;gap:12px;padding:12px;border-radius:10px;background:oklch(0.985 0.005 75);border:1px solid oklch(0.91 0.008 75);">
+          <label style="font-size:11px;font-weight:700;color:oklch(0.5 0.01 75);">送迎方法<input type="text" value="{{ drawerPickupMethod }}" sc-camel-on-change="{{ onPickupMethodChange }}" placeholder="施設・家族・相談員・公共交通など" style="display:block;width:100%;margin-top:4px;padding:8px;border-radius:8px;border:1px solid oklch(0.84 0.01 75);font-size:12.5px;"></label>
+          <label style="font-size:11px;font-weight:700;color:oklch(0.5 0.01 75);">送迎場所・時間帯<input type="text" value="{{ drawerPickupLocation }}" sc-camel-on-change="{{ onPickupLocationChange }}" placeholder="○○駅 12:30～13:00" style="display:block;width:100%;margin-top:4px;padding:8px;border-radius:8px;border:1px solid oklch(0.84 0.01 75);font-size:12.5px;"></label>
+          <label style="font-size:11px;font-weight:700;color:oklch(0.5 0.01 75);">外部サービス<input type="text" value="{{ drawerExternalService }}" sc-camel-on-change="{{ onExternalServiceChange }}" placeholder="事業所名・通所時間など" style="display:block;width:100%;margin-top:4px;padding:8px;border-radius:8px;border:1px solid oklch(0.84 0.01 75);font-size:12.5px;"></label>
+        </div>
+      </sc-if>
+
+      <div>
+        <div style="font-size:12px;font-weight:700;color:oklch(0.5 0.01 75);margin-bottom:6px;">備考</div>
+        <textarea value="{{ drawerNotes }}" sc-camel-on-change="{{ onNotesChange }}" rows="3" placeholder="注意事項、送迎の調整状況など" style="width:100%;padding:9px 10px;border-radius:9px;border:1px solid oklch(0.87 0.01 75);font-size:13.5px;resize:vertical;" style-focus="border-color:{{ primaryAccent }};outline:none;"></textarea>
+      </div>
+
+      <sc-if value="{{ drawerHasHistory }}" hint-placeholder-val="{{ false }}">
+        <div style="font-size:11px;color:oklch(0.6 0.01 75);">{{ drawerUpdatedAt }}</div>
+      </sc-if>
+
+      <sc-if value="{{ drawerError }}" hint-placeholder-val="{{ false }}">
+        <div style="padding:10px 12px;border-radius:9px;background:oklch(0.95 0.05 25);border:1px solid oklch(0.8 0.1 25);color:oklch(0.45 0.16 25);font-size:12.5px;font-weight:500;line-height:1.6;">{{ drawerError }}</div>
+      </sc-if>
+
+      <div style="display:flex;gap:10px;margin-top:6px;">
+        <button sc-camel-on-click="{{ saveDrawer }}" style="flex:1;padding:12px;border-radius:10px;border:none;background:{{ primaryAccent }};color:white;font-weight:700;font-size:14px;cursor:pointer;">保存</button>
+        <button sc-camel-on-click="{{ closeDrawer }}" style="padding:12px 18px;border-radius:10px;border:1px solid oklch(0.87 0.01 75);background:none;color:oklch(0.45 0.01 75);font-weight:500;font-size:14px;cursor:pointer;">キャンセル</button>
+      </div>
+      <sc-if value="{{ drawerIsExisting }}" hint-placeholder-val="{{ false }}">
+        <button sc-camel-on-click="{{ deleteDrawer }}" style="padding:10px;border-radius:10px;border:none;background:none;color:oklch(0.55 0.16 25);font-weight:500;font-size:13px;cursor:pointer;">この予約を削除</button>
+      </sc-if>
+    </div>
+  </sc-if>
+
+  <!-- ── マスタ設定 ──────────────────────────────────────────── -->
+  <sc-if value="{{ settingsOpen }}" hint-placeholder-val="{{ false }}">
+    <div sc-camel-on-click="{{ closeSettings }}" style="position:fixed;inset:0;background:oklch(0.2 0.01 75 / 0.4);z-index:50;"></div>
+    <div class="ss-modal" style="position:fixed;top:5vh;left:50%;transform:translateX(-50%);width:540px;max-width:92vw;max-height:90vh;overflow-y:auto;background:oklch(0.995 0.003 75);border-radius:20px;box-shadow:0 20px 60px oklch(0.2 0.01 75 / 0.25);z-index:51;padding:28px 30px;display:flex;flex-direction:column;gap:24px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div style="font-size:19px;font-weight:900;">マスタ設定</div>
+        <button sc-camel-on-click="{{ closeSettings }}" style="border:none;background:none;font-size:20px;cursor:pointer;color:oklch(0.5 0.01 75);">×</button>
+      </div>
+
+      <div>
+        <div style="font-size:13px;font-weight:700;margin-bottom:10px;">施設情報</div>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <input type="text" value="{{ facilityName }}" sc-camel-on-change="{{ onFacilityNameChange }}" placeholder="施設名" style="padding:8px 10px;border-radius:8px;border:1px solid oklch(0.87 0.01 75);font-size:13.5px;" style-focus="border-color:{{ primaryAccent }};outline:none;">
+          <input type="text" value="{{ buildingLabel }}" sc-camel-on-change="{{ onBuildingLabelChange }}" placeholder="棟・フロア" style="padding:8px 10px;border-radius:8px;border:1px solid oklch(0.87 0.01 75);font-size:13.5px;" style-focus="border-color:{{ primaryAccent }};outline:none;">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-size:12.5px;color:oklch(0.5 0.01 75);">定員(ベッド数)</span>
+            <strong style="font-size:14px;color:{{ primaryAccent }};">{{ capacity }}名</strong>
+            <span style="font-size:12px;color:oklch(0.6 0.01 75);">部屋数と連動（1部屋につき1名）</span>
+          </div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;">
+            <label style="font-size:11.5px;font-weight:700;color:oklch(0.5 0.01 75);">標準の入所時刻<input type="time" value="{{ defaultCheckinTime }}" sc-camel-on-change="{{ onDefaultCheckinChange }}" style="display:block;margin-top:4px;padding:7px 9px;border-radius:8px;border:1px solid oklch(0.87 0.01 75);font-size:13px;"></label>
+            <label style="font-size:11.5px;font-weight:700;color:oklch(0.5 0.01 75);">標準の退所時刻<input type="time" value="{{ defaultCheckoutTime }}" sc-camel-on-change="{{ onDefaultCheckoutChange }}" style="display:block;margin-top:4px;padding:7px 9px;border-radius:8px;border:1px solid oklch(0.87 0.01 75);font-size:13px;"></label>
+            <label style="font-size:11.5px;font-weight:700;color:oklch(0.5 0.01 75);flex:1;min-width:150px;">入力者名（更新履歴に残ります）<input type="text" value="{{ operator }}" sc-camel-on-change="{{ onOperatorChange }}" placeholder="例：山田" style="display:block;width:100%;margin-top:4px;padding:7px 9px;border-radius:8px;border:1px solid oklch(0.87 0.01 75);font-size:13px;"></label>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <div style="font-size:13px;font-weight:700;">部屋マスタ</div>
+          <button sc-camel-on-click="{{ addRoom }}" style="border:none;background:none;color:{{ primaryAccent }};font-weight:700;font-size:13px;cursor:pointer;">＋ 追加</button>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <sc-for list="{{ roomRows }}" as="rm" hint-placeholder-count="2">
+            <div style="display:flex;gap:6px;">
+              <input type="text" value="{{ rm.name }}" sc-camel-on-change="{{ rm.onChange }}" style="flex:1;padding:7px 9px;border-radius:8px;border:1px solid oklch(0.87 0.01 75);font-size:13px;" style-focus="border-color:{{ primaryAccent }};outline:none;">
+              <button sc-camel-on-click="{{ rm.onRemove }}" style="border:none;background:none;color:oklch(0.6 0.05 25);font-size:16px;cursor:pointer;padding:0 6px;">×</button>
+            </div>
+          </sc-for>
+        </div>
+        <div style="font-size:11px;color:oklch(0.6 0.01 75);margin-top:6px;line-height:1.6;">部屋数が1つの場合はカレンダー上に部屋名は表示されません<br>部屋を削除すると、その部屋の予約は先頭の部屋へ移動します</div>
+      </div>
+
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <div style="font-size:13px;font-weight:700;">利用者マスタ</div>
+          <button sc-camel-on-click="{{ addUser }}" style="border:none;background:none;color:{{ primaryAccent }};font-weight:700;font-size:13px;cursor:pointer;">＋ 追加</button>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <sc-for list="{{ userRows }}" as="u" hint-placeholder-count="7">
+            <div style="display:flex;gap:6px;">
+              <input type="text" value="{{ u.value }}" sc-camel-on-change="{{ u.onChange }}" style="flex:1;padding:7px 9px;border-radius:8px;border:1px solid oklch(0.87 0.01 75);font-size:13px;" style-focus="border-color:{{ primaryAccent }};outline:none;">
+              <button sc-camel-on-click="{{ u.onRemove }}" style="border:none;background:none;color:oklch(0.6 0.05 25);font-size:16px;cursor:pointer;padding:0 6px;">×</button>
+            </div>
+          </sc-for>
+        </div>
+        <div style="font-size:11px;color:oklch(0.6 0.01 75);margin-top:6px;line-height:1.6;">氏名を修正すると、その利用者の既存の予約記録にも反映されます</div>
+      </div>
+
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <div style="font-size:13px;font-weight:700;">区分マスタ</div>
+          <button sc-camel-on-click="{{ addCategory }}" style="border:none;background:none;color:{{ primaryAccent }};font-weight:700;font-size:13px;cursor:pointer;">＋ 追加</button>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <sc-for list="{{ categoryRows }}" as="c" hint-placeholder-count="3">
+            <div style="display:flex;gap:6px;align-items:center;">
+              <input type="color" value="{{ c.color }}" sc-camel-on-change="{{ c.onColorChange }}" style="width:34px;height:32px;border-radius:6px;border:1px solid oklch(0.87 0.01 75);padding:0;cursor:pointer;">
+              <input type="text" value="{{ c.label }}" sc-camel-on-change="{{ c.onLabelChange }}" style="flex:1;padding:7px 9px;border-radius:8px;border:1px solid oklch(0.87 0.01 75);font-size:13px;" style-focus="border-color:{{ primaryAccent }};outline:none;">
+              <button sc-camel-on-click="{{ c.onRemove }}" style="border:none;background:none;color:oklch(0.6 0.05 25);font-size:16px;cursor:pointer;padding:0 6px;">×</button>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <div style="font-size:13px;font-weight:700;">送迎ステータス マスタ</div>
+          <button sc-camel-on-click="{{ addPickupOption }}" style="border:none;background:none;color:{{ primaryAccent }};font-weight:700;font-size:13px;cursor:pointer;">＋ 追加</button>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <sc-for list="{{ pickupRows }}" as="p" hint-placeholder-count="3">
+            <div style="display:flex;gap:6px;align-items:center;">
+              <input type="text" value="{{ p.label }}" sc-camel-on-change="{{ p.onLabelChange }}" style="flex:1;padding:7px 9px;border-radius:8px;border:1px solid oklch(0.87 0.01 75);font-size:13px;" style-focus="border-color:{{ primaryAccent }};outline:none;">
+              <label style="display:flex;align-items:center;gap:4px;font-size:11.5px;color:oklch(0.5 0.01 75);white-space:nowrap;">
+                <input type="checkbox" checked="{{ p.highlight }}" sc-camel-on-change="{{ p.onToggleHighlight }}">カレンダーで強調
+              </label>
+              <button sc-camel-on-click="{{ p.onRemove }}" style="border:none;background:none;color:oklch(0.6 0.05 25);font-size:16px;cursor:pointer;padding:0 6px;">×</button>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <button sc-camel-on-click="{{ closeSettings }}" style="padding:12px;border-radius:10px;border:none;background:{{ primaryAccent }};color:white;font-weight:700;font-size:14px;cursor:pointer;">閉じる</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button sc-camel-on-click="{{ exportBackup }}" style="flex:1;min-width:130px;padding:9px;border-radius:9px;border:1px solid {{ primaryAccent }};background:white;color:{{ primaryAccent }};font-weight:700;font-size:12px;cursor:pointer;">バックアップ保存</button>
+          <label style="flex:1;min-width:130px;padding:9px;border-radius:9px;border:1px solid {{ primaryAccent }};background:white;color:{{ primaryAccent }};font-weight:700;font-size:12px;text-align:center;cursor:pointer;">バックアップ復元（置換）<input type="file" accept="application/json,.json" sc-camel-on-change="{{ importBackup }}" style="display:none;"></label>
+          <label sc-camel-on-click="{{ markImportMerge }}" style="flex:1;min-width:130px;padding:9px;border-radius:9px;border:1px solid oklch(0.7 0.09 150);background:white;color:oklch(0.42 0.11 150);font-weight:700;font-size:12px;text-align:center;cursor:pointer;">別端末の分を取り込む（マージ）<input type="file" accept="application/json,.json" sc-camel-on-change="{{ importBackup }}" style="display:none;"></label>
+        </div>
+        <button sc-camel-on-click="{{ restoreAutoBackup }}" style="padding:8px;border-radius:9px;border:1px solid oklch(0.82 0.02 75);background:none;color:oklch(0.42 0.04 75);font-weight:500;font-size:12px;cursor:pointer;">初期化前の自動バックアップを復元</button>
+        <button sc-camel-on-click="{{ resetAll }}" style="padding:9px;border-radius:9px;border:1px solid oklch(0.88 0.01 75);background:none;color:{{ resetColor }};font-weight:500;font-size:12px;cursor:pointer;">{{ resetLabel }}</button>
+        <div style="font-size:11px;color:oklch(0.62 0.01 75);text-align:center;line-height:1.7;">入力内容はこのブラウザに自動保存されます。<strong>複数の端末で同時には共有されません。</strong>他の端末の内容を取り込むには、その端末でバックアップを保存し「取り込む（マージ）」から読み込んでください。</div>
+      </div>
+    </div>
+  </sc-if>
+</div>
