@@ -40,6 +40,10 @@ function dateLabelOf(dateStr) {
   const d = parseDate(dateStr);
   return (d.getMonth() + 1) + '月' + d.getDate() + '日（' + WEEKDAY_LABELS[d.getDay()] + '）';
 }
+function fullDateLabel(dateStr) {
+  const d = parseDate(dateStr);
+  return d.getFullYear() + '年' + (d.getMonth() + 1) + '月' + d.getDate() + '日（' + WEEKDAY_LABELS[d.getDay()] + '）';
+}
 function daysBetween(a, b) {
   return Math.round((parseDate(b).getTime() - parseDate(a).getTime()) / 86400000);
 }
@@ -422,6 +426,44 @@ function occupancyMap(stays, winStart, winEnd) {
   return map;
 }
 
+// ── 空き状況カレンダー（FAX帳票用） ──────────────────────────────
+// 「その日の欄」は“その日の夜（宿泊）”の空きを表す。退所日は次の人が泊まれるので、
+// 空き照会の単位としては利用日ではなく宿泊で数えるのが正しい。
+// 状態は4つ:
+//   open      … 全室空き            → 「OK」
+//   partial   … 一部空き            → 「残N」
+//   tentative … 空きなしだが全て仮予約・調整中 → 「仮」
+//   full      … 確定で埋まっている  → 黒ベタ
+function vacancyByDate(stays, rooms, startStr, endStr) {
+  const held = {};
+  stays.forEach((s) => {
+    stayNights(s, startStr, endStr).forEach((d) => {
+      const byRoom = (held[d] = held[d] || {});
+      (byRoom[s.room] = byRoom[s.room] || []).push(s);
+    });
+  });
+  const out = {};
+  eachDate(startStr, endStr, (d) => {
+    const byRoom = held[d] || {};
+    const blockers = [];
+    let takenRooms = 0;
+    rooms.forEach((r) => {
+      const list = byRoom[r.id] || [];
+      if (!list.length) return;
+      takenRooms += 1;
+      list.forEach((s) => blockers.push(s));
+    });
+    const free = rooms.length - takenRooms;
+    let state;
+    if (free >= rooms.length) state = 'open';
+    else if (free > 0) state = 'partial';
+    else if (blockers.length && blockers.every((s) => isTentative(s.status))) state = 'tentative';
+    else state = 'full';
+    out[d] = { free, taken: takenRooms, state };
+  });
+  return out;
+}
+
 // 指定期間まるごと空いている部屋を返す。相談員からの「◯日〜◯日空いてますか」に
 // 即答するための照会。
 function vacancyFor(stays, rooms, startStr, endStr, checkinTime, checkoutTime) {
@@ -614,6 +656,9 @@ class Component extends DCLogic {
         : '',
       reportRange: { start: monthStartOf(THIS_MONTH), end: monthEndOf(THIS_MONTH) },
       dragPreview: null,
+      faxRecipientId: '',
+      faxNote: '',
+      faxIncludeCover: false,
     };
     // ドラッグ中の一時状態。1ドラッグにつき何度も setState したくないので、
     // 「日」単位で変化したときだけ dragPreview を更新する。
@@ -959,6 +1004,10 @@ class Component extends DCLogic {
   removeFaxRecipient = (idx) => this.setState((s) => ({
     master: { ...s.master, faxRecipients: s.master.faxRecipients.filter((_, i) => i !== idx) },
   }));
+
+  selectFaxRecipient = (id) => this.setState((s) => ({ faxRecipientId: s.faxRecipientId === id ? '' : id }));
+  updateFaxNote = (e) => this.setState({ faxNote: e.target.value });
+  toggleFaxCover = () => this.setState((s) => ({ faxIncludeCover: !s.faxIncludeCover }));
 
   updateBoilerplate = (patch) => this.setState((s) => ({
     master: { ...s.master, boilerplate: { ...s.master.boilerplate, ...patch } },
@@ -1759,6 +1808,61 @@ class Component extends DCLogic {
         };
       });
 
+    // ── FAX: 空き状況カレンダー ──────────────────────────────────
+    // 画面のカレンダーと同じ配置のまま、色ではなく「黒ベタ / OK」で表す。
+    // FAXは200×100dpiのモノクロなので、淡い塗りや細い色文字は再現されない。
+    const faxVacancy = vacancyByDate(activeStays, master.rooms, monthStartStr, monthEndStr);
+    const faxWeeks = Math.ceil((startWeekday + daysInMonthCount) / 7);
+    const faxCells = [];
+    const faxTally = { open: 0, partial: 0, tentative: 0, full: 0 };
+    for (let i = 0; i < faxWeeks * 7; i++) {
+      const d = new Date(gridStart);
+      d.setDate(gridStart.getDate() + i);
+      const dateStr = fmtDate(d);
+      const inMonth = d.getMonth() === monthNum - 1;
+      if (!inMonth) {
+        faxCells.push({ dayNum: '', weekday: d.getDay(), inMonth: false, mark: '', cls: 'fax-cell fax-out' });
+        continue;
+      }
+      const v = faxVacancy[dateStr] || { free: master.rooms.length, state: 'open' };
+      faxTally[v.state] += 1;
+      const mark = v.state === 'open' ? 'OK'
+        : v.state === 'partial' ? '残' + v.free
+          : v.state === 'tentative' ? '仮' : '×';
+      faxCells.push({
+        dayNum: d.getDate(),
+        weekday: d.getDay(),
+        inMonth: true,
+        mark,
+        cls: 'fax-cell fax-' + v.state,
+      });
+    }
+    const faxWeekdayHeaders = WEEKDAY_LABELS.map((label, i) => ({
+      label, cls: 'fax-wd' + (i === 0 ? ' fax-wd-sun' : i === 6 ? ' fax-wd-sat' : ''),
+    }));
+    const multiRoomFacility = master.rooms.length > 1;
+
+    const selectedRecipient = master.faxRecipients.find((r) => r.id === this.state.faxRecipientId) || null;
+    const faxRecipientButtons = master.faxRecipients.map((r) => {
+      const active = r.id === this.state.faxRecipientId;
+      return {
+        label: r.name || '（名称未入力）',
+        sub: r.fax || 'FAX未入力',
+        select: () => this.selectFaxRecipient(r.id),
+        border: active ? primaryAccent : 'oklch(0.87 0.01 75)',
+        bg: active ? 'color-mix(in oklab, ' + primaryAccent + ' 12%, white)' : 'white',
+        color: active ? primaryAccent : 'oklch(0.45 0.01 75)',
+      };
+    });
+    const facilityContactLine = [
+      master.tel ? 'TEL ' + master.tel : '',
+      master.fax ? 'FAX ' + master.fax : '',
+      master.contactPerson ? '担当 ' + master.contactPerson : '',
+    ].filter(Boolean).join('　');
+    const facilityAddressLine = [master.postalCode, master.address].filter(Boolean).join(' ');
+    const issueDate = fullDateLabel(TODAY);
+    const faxPageCount = this.state.faxIncludeCover ? 2 : 1;
+
     // ── 空室照会 ──────────────────────────────────────────────────
     const vac = this.state.vacancyRange;
     const vacancyValid = !!vac.start && !!vac.end && vac.end >= vac.start;
@@ -1879,6 +1983,7 @@ class Component extends DCLogic {
       { key: 'timeline', label: 'タイムライン' },
       { key: 'today', label: '当日の動き' },
       { key: 'list', label: '一覧・印刷' },
+      { key: 'fax', label: 'FAX作成' },
     ].map((t) => ({
       label: t.label,
       select: () => this.setView(t.key),
@@ -1909,7 +2014,47 @@ class Component extends DCLogic {
       isTimelineView: view === 'timeline',
       isTodayView: view === 'today',
       isListView: view === 'list',
+      isFaxView: view === 'fax',
       viewTabs,
+
+      // FAX紙面を印刷するときは、アプリのヘッダーや警告バナーまで一緒に刷らない。
+      // 属性値が undefined ならReactが属性ごと落とすので、[data-print-hide] に
+      // 当たらなくなる＝FAX表示のときだけ隠れる。
+      hideOnFaxPrint: view === 'fax' ? '' : undefined,
+      faxPageClass: view === 'fax' ? 'ss-page ss-page--fax' : 'ss-page',
+
+      faxTitle: '短期入所　空き状況のご案内',
+      faxMonthLabel: currentMonthLabel,
+      faxIssueDate: issueDate,
+      faxCells,
+      faxWeekdayHeaders,
+      faxRecipientButtons,
+      faxHasRecipients: master.faxRecipients.length > 0,
+      faxNoRecipients: master.faxRecipients.length === 0,
+      faxRecipientName: selectedRecipient ? (selectedRecipient.name || '') : '',
+      faxRecipientContact: selectedRecipient ? (selectedRecipient.contact || '') : '',
+      faxRecipientFax: selectedRecipient ? (selectedRecipient.fax || '') : '',
+      faxHasSelected: !!selectedRecipient,
+      faxNoSelected: !selectedRecipient,
+      faxShowRecipientContact: !!(selectedRecipient && selectedRecipient.contact),
+      selectFaxRecipientNone: () => this.selectFaxRecipient(''),
+      faxNote: this.state.faxNote,
+      onFaxNoteChange: this.updateFaxNote,
+      faxHasNote: !!String(this.state.faxNote || '').trim(),
+      faxIncludeCover: this.state.faxIncludeCover,
+      toggleFaxCover: this.toggleFaxCover,
+      faxCoverLabel: this.state.faxIncludeCover ? '送信状を付ける（付ける）' : '送信状を付ける（付けない）',
+      faxPageCount,
+      faxOpenDays: faxTally.open,
+      faxPartialDays: faxTally.partial,
+      faxTentativeDays: faxTally.tentative,
+      faxFullDays: faxTally.full,
+      faxShowPartial: multiRoomFacility,
+      faxRoomCount: master.rooms.length,
+      facilityContactLine,
+      facilityAddressLine,
+      facilityHasAddress: !!facilityAddressLine,
+      facilityHasContact: !!facilityContactLine,
 
       prevMonth: this.prevMonth,
       nextMonth: this.nextMonth,

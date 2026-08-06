@@ -36,6 +36,45 @@
     .ss-report-head { flex-direction: column !important; align-items: stretch !important; }
   }
 
+  /* ── FAX帳票 ──────────────────────────────────────────────────
+     FAXは白黒2値・200×100dpi。淡い塗り・細い色文字・薄い罫線は再現されない。
+     この紙面だけは色を一切使わず、黒ベタと太い罫線と大きな文字で組む。 */
+  .fax-sheet {
+    width: 190mm; margin: 0 auto; padding: 10mm 9mm;
+    background: #fff; color: #000;
+    border: 1px solid oklch(0.85 0.01 75);
+    box-shadow: 0 2px 14px oklch(0.2 0.01 75 / 0.12);
+  }
+  /* 背景色は既定で印刷時に落とされる。満室の黒ベタが消えると意味が反転するため、
+     この紙面に限って背景の印刷を明示的に許可する。 */
+  .fax-sheet, .fax-sheet * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  /* 文字色は .fax-sheet の #000 を継承させる。ここで `.fax-sheet span { color:#000 }`
+     のような一括指定をしてはいけない: {{ }} の中身は <span class="sc-interp"> に
+     包まれて出力されるため、その内側spanが直接マッチしてしまい、
+     満室セルの白抜き文字（親からの継承）が黒に戻って黒地に黒＝見えなくなる。 */
+
+  .fax-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 0; border: 2px solid #000; border-right: 0; border-bottom: 0; }
+  .fax-wd { text-align: center; font-size: 12pt; font-weight: 700; padding: 4px 0; border-right: 2px solid #000; border-bottom: 2px solid #000; background: #fff; }
+  .fax-wd-sun::after { content: ''; }
+  .fax-cell {
+    min-height: 15mm; padding: 3px 4px; border-right: 2px solid #000; border-bottom: 2px solid #000;
+    display: flex; flex-direction: column; align-items: center; justify-content: flex-start; background: #fff;
+  }
+  .fax-cell .fax-day { font-size: 10.5pt; font-weight: 700; align-self: flex-start; line-height: 1.1; }
+  .fax-cell .fax-mark { font-size: 15pt; font-weight: 900; line-height: 1.1; margin-top: 1mm; letter-spacing: .02em; }
+  .fax-open .fax-mark { font-size: 16pt; }
+  /* 満室は黒ベタ＋白抜き。遠目でも、FAXの潰れた紙面でも一目で分かる。 */
+  .fax-full { background: #000; }
+  /* 子孫まで指定するのは sc-interp ラッパー対策（上のコメント参照）。 */
+  .fax-full .fax-day, .fax-full .fax-day *,
+  .fax-full .fax-mark, .fax-full .fax-mark * { color: #fff; }
+  /* 仮予約だけで埋まっている日は「まだ動く可能性がある」ので黒ベタにしない。 */
+  .fax-tentative { background: #fff; box-shadow: inset 0 0 0 3px #000; }
+  .fax-out { background: #d9d9d9; }
+  .fax-legend-box { display: inline-flex; width: 9mm; height: 6mm; border: 2px solid #000; align-items: center; justify-content: center; font-size: 10pt; font-weight: 900; }
+
+  @page { size: A4 portrait; margin: 8mm; }
+
   @media print {
     [data-print-hide] { display: none !important; }
     body { background: white; }
@@ -43,13 +82,17 @@
     .ss-cell { break-inside: avoid; }
     .ss-table { font-size: 10.5px; }
     .ss-table tr { break-inside: avoid; }
+    /* FAX表示のときは、紙面以外の画面部品を一切刷らない。 */
+    .ss-page--fax > *:not(.fax-block) { display: none !important; }
+    .fax-sheet { width: auto; margin: 0; padding: 0; border: 0; box-shadow: none; break-inside: avoid; }
+    .fax-page-break { break-after: page; }
   }
 </style>
 </helmet>
 <div style="min-height:100vh;background:oklch(0.975 0.006 75);color:oklch(0.28 0.01 75);">
-  <div data-print-area="" class="ss-page" style="max-width:1440px;margin:0 auto;padding:36px 44px 80px;">
+  <div data-print-area="" class="{{ faxPageClass }}" style="max-width:1440px;margin:0 auto;padding:36px 44px 80px;">
 
-    <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:20px;gap:20px;flex-wrap:wrap;">
+    <div data-print-hide="{{ hideOnFaxPrint }}" style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:20px;gap:20px;flex-wrap:wrap;">
       <div>
         <div style="font-size:13px;letter-spacing:.1em;font-weight:500;color:{{ primaryAccent }};margin-bottom:6px;">{{ facilityName }} ／ {{ buildingLabel }}</div>
         <div class="ss-title" style="font-size:32px;font-weight:900;letter-spacing:.02em;">ショートステイ・体験利用 管理表</div>
@@ -65,7 +108,7 @@
     </div>
 
     <sc-if value="{{ hasConflicts }}" hint-placeholder-val="{{ false }}">
-      <div style="margin-bottom:14px;padding:11px 15px;border-radius:10px;background:oklch(0.96 0.06 25);border:1px solid oklch(0.78 0.13 25);color:oklch(0.44 0.16 25);font-size:12.5px;font-weight:600;">⚠ {{ conflictMessage }}</div>
+      <div data-print-hide="{{ hideOnFaxPrint }}" style="margin-bottom:14px;padding:11px 15px;border-radius:10px;background:oklch(0.96 0.06 25);border:1px solid oklch(0.78 0.13 25);color:oklch(0.44 0.16 25);font-size:12.5px;font-weight:600;">⚠ {{ conflictMessage }}</div>
     </sc-if>
     <sc-if value="{{ storageNotice }}" hint-placeholder-val="{{ false }}">
       <div data-print-hide="" style="margin-bottom:14px;padding:10px 15px;border-radius:10px;background:oklch(0.97 0.02 250);border:1px solid oklch(0.86 0.04 250);color:oklch(0.4 0.07 250);font-size:12.5px;">{{ storageNotice }}</div>
@@ -415,6 +458,152 @@
             </sc-raw-table>
           </div>
         </sc-if>
+      </div>
+    </sc-if>
+
+    <!-- ── FAX作成（空き状況カレンダー） ──────────────────────── -->
+    <sc-if value="{{ isFaxView }}" hint-placeholder-val="{{ false }}">
+      <div class="fax-block">
+        <div data-print-hide="" style="background:white;border:1px solid oklch(0.91 0.008 75);border-radius:14px;padding:16px 18px;margin-bottom:22px;">
+          <div style="font-size:13px;font-weight:800;margin-bottom:4px;">{{ currentLabel }}の空き状況をFAXで送る</div>
+          <div style="font-size:11.5px;color:oklch(0.55 0.01 75);line-height:1.7;margin-bottom:14px;">
+            下のプレビューがそのまま送信原稿になります。<strong>満室の日は黒く塗りつぶし、空いている日は「OK」</strong>で表示され、予約を変更すると自動で切り替わります。利用者名は載りません。
+          </div>
+
+          <div style="font-size:12px;font-weight:700;color:oklch(0.5 0.01 75);margin-bottom:7px;">宛先（FAX送付先マスタから選択）</div>
+          <sc-if value="{{ faxNoRecipients }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:12px;color:oklch(0.5 0.09 60);padding:10px 12px;border:1px dashed oklch(0.8 0.06 60);border-radius:9px;margin-bottom:12px;">送付先が未登録です。「マスタ設定 → FAX送付先マスタ」で登録すると、ここから選べます。未選択のままでも宛名欄が空欄の用紙として印刷できます。</div>
+          </sc-if>
+          <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:14px;">
+            <sc-for list="{{ faxRecipientButtons }}" as="fb" hint-placeholder-count="0">
+              <button sc-camel-on-click="{{ fb.select }}" style="text-align:left;padding:8px 13px;border-radius:9px;border:1px solid {{ fb.border }};background:{{ fb.bg }};color:{{ fb.color }};cursor:pointer;">
+                <div style="font-size:12.5px;font-weight:700;">{{ fb.label }}</div>
+                <div style="font-size:10.5px;opacity:.75;">{{ fb.sub }}</div>
+              </button>
+            </sc-for>
+            <sc-if value="{{ faxHasSelected }}" hint-placeholder-val="{{ false }}">
+              <button sc-camel-on-click="{{ selectFaxRecipientNone }}" style="padding:8px 13px;border-radius:9px;border:1px solid oklch(0.87 0.01 75);background:white;color:oklch(0.5 0.01 75);font-size:12px;font-weight:600;cursor:pointer;">宛先をはずす</button>
+            </sc-if>
+          </div>
+
+          <label style="display:block;font-size:12px;font-weight:700;color:oklch(0.5 0.01 75);margin-bottom:12px;">連絡事項（任意・用紙の下部に印字されます）
+            <textarea value="{{ faxNote }}" sc-camel-on-change="{{ onFaxNoteChange }}" rows="2" placeholder="例）月末は満室ですが、キャンセル待ちを承ります。お気軽にお問い合わせください。" style="display:block;width:100%;margin-top:5px;padding:9px 10px;border-radius:9px;border:1px solid oklch(0.87 0.01 75);font-size:13px;line-height:1.7;resize:vertical;" style-focus="border-color:{{ primaryAccent }};outline:none;"></textarea>
+          </label>
+
+          <div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;">
+            <button sc-camel-on-click="{{ toggleFaxCover }}" style="padding:8px 14px;border-radius:9px;border:1px solid oklch(0.85 0.01 75);background:white;color:oklch(0.45 0.01 75);font-size:12px;font-weight:700;cursor:pointer;">{{ faxCoverLabel }}</button>
+            <button sc-camel-on-click="{{ printCalendar }}" style="padding:10px 20px;border-radius:9px;border:none;background:{{ primaryAccent }};color:white;font-size:13.5px;font-weight:700;cursor:pointer;">この用紙を印刷（全{{ faxPageCount }}枚）</button>
+            <span style="font-size:11px;color:oklch(0.62 0.01 75);">印刷して複合機から送信、またはPDFに保存してインターネットFAXへ</span>
+          </div>
+        </div>
+
+        <!-- ── 送信状（1枚目・任意） ── -->
+        <sc-if value="{{ faxIncludeCover }}" hint-placeholder-val="{{ false }}">
+          <div class="fax-sheet fax-page-break" style="margin-bottom:22px;">
+            <div style="text-align:center;font-size:20pt;font-weight:900;letter-spacing:.3em;padding-bottom:5mm;border-bottom:3px solid #000;">FAX　送信票</div>
+            <div style="display:flex;justify-content:space-between;font-size:11pt;padding:4mm 0 6mm;">
+              <div>送信日：{{ faxIssueDate }}</div>
+              <div>本票を含め　全 {{ faxPageCount }} 枚</div>
+            </div>
+            <div style="border:2px solid #000;padding:5mm;margin-bottom:5mm;">
+              <div style="font-size:10pt;font-weight:700;margin-bottom:3mm;">■ 送信先</div>
+              <div style="font-size:15pt;font-weight:900;line-height:1.6;">{{ faxRecipientName }}　御中</div>
+              <sc-if value="{{ faxShowRecipientContact }}" hint-placeholder-val="{{ false }}">
+                <div style="font-size:12pt;line-height:1.7;">{{ faxRecipientContact }}</div>
+              </sc-if>
+              <div style="font-size:11pt;margin-top:2mm;">FAX：{{ faxRecipientFax }}</div>
+            </div>
+            <div style="border:2px solid #000;padding:5mm;margin-bottom:6mm;">
+              <div style="font-size:10pt;font-weight:700;margin-bottom:3mm;">■ 送信元</div>
+              <div style="font-size:14pt;font-weight:900;line-height:1.6;">{{ facilityName }}　{{ buildingLabel }}</div>
+              <sc-if value="{{ facilityHasAddress }}" hint-placeholder-val="{{ false }}">
+                <div style="font-size:11pt;line-height:1.7;">{{ facilityAddressLine }}</div>
+              </sc-if>
+              <sc-if value="{{ facilityHasContact }}" hint-placeholder-val="{{ false }}">
+                <div style="font-size:11pt;line-height:1.7;">{{ facilityContactLine }}</div>
+              </sc-if>
+            </div>
+            <div style="font-size:12pt;line-height:1.9;">
+              <div style="font-weight:700;margin-bottom:2mm;">■ 用件</div>
+              <div>{{ faxMonthLabel }}の短期入所 空き状況をお送りいたします。ご確認のほどよろしくお願いいたします。</div>
+              <sc-if value="{{ faxHasNote }}" hint-placeholder-val="{{ false }}">
+                <div style="margin-top:3mm;white-space:pre-wrap;">{{ faxNote }}</div>
+              </sc-if>
+            </div>
+            <div style="margin-top:8mm;padding-top:3mm;border-top:1px solid #000;font-size:9.5pt;line-height:1.6;">
+              本状が誤って届いた場合は、お手数ですが上記までご連絡のうえ破棄してください。
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- ── 空き状況カレンダー本体 ── -->
+        <div class="fax-sheet">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6mm;padding-bottom:3mm;border-bottom:3px solid #000;">
+            <div>
+              <div style="font-size:19pt;font-weight:900;letter-spacing:.06em;line-height:1.3;">{{ faxTitle }}</div>
+              <div style="font-size:15pt;font-weight:900;margin-top:1mm;">{{ faxMonthLabel }}</div>
+            </div>
+            <div style="text-align:right;font-size:10pt;line-height:1.7;">
+              <div style="font-size:12.5pt;font-weight:900;">{{ facilityName }}　{{ buildingLabel }}</div>
+              <sc-if value="{{ facilityHasAddress }}" hint-placeholder-val="{{ false }}">
+                <div>{{ facilityAddressLine }}</div>
+              </sc-if>
+              <sc-if value="{{ facilityHasContact }}" hint-placeholder-val="{{ false }}">
+                <div>{{ facilityContactLine }}</div>
+              </sc-if>
+              <div>作成日：{{ faxIssueDate }}</div>
+            </div>
+          </div>
+
+          <sc-if value="{{ faxHasSelected }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:14pt;font-weight:900;padding:4mm 0 1mm;">{{ faxRecipientName }}　御中</div>
+            <sc-if value="{{ faxShowRecipientContact }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:11pt;padding-bottom:2mm;">{{ faxRecipientContact }}　行</div>
+            </sc-if>
+          </sc-if>
+          <sc-if value="{{ faxNoSelected }}" hint-placeholder-val="{{ true }}">
+            <div style="font-size:12pt;padding:4mm 0 2mm;">＿＿＿＿＿＿＿＿＿＿＿＿＿＿　御中</div>
+          </sc-if>
+
+          <div style="font-size:11pt;line-height:1.8;padding:2mm 0 4mm;">
+            平素より大変お世話になっております。{{ faxMonthLabel }}の空き状況は下記のとおりです。
+          </div>
+
+          <div class="fax-grid">
+            <sc-for list="{{ faxWeekdayHeaders }}" as="fw" hint-placeholder-count="7">
+              <div class="{{ fw.cls }}">{{ fw.label }}</div>
+            </sc-for>
+            <sc-for list="{{ faxCells }}" as="fc" hint-placeholder-count="35">
+              <div class="{{ fc.cls }}">
+                <span class="fax-day">{{ fc.dayNum }}</span>
+                <span class="fax-mark">{{ fc.mark }}</span>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="display:flex;gap:7mm;flex-wrap:wrap;align-items:center;padding:4mm 0 2mm;font-size:10.5pt;">
+            <span style="display:inline-flex;align-items:center;gap:2mm;"><span class="fax-legend-box">OK</span>空室あり</span>
+            <sc-if value="{{ faxShowPartial }}" hint-placeholder-val="{{ true }}">
+              <span style="display:inline-flex;align-items:center;gap:2mm;"><span class="fax-legend-box">残1</span>残りわずか</span>
+            </sc-if>
+            <span style="display:inline-flex;align-items:center;gap:2mm;"><span class="fax-legend-box" style="background:#000;color:#fff;">×</span>満室</span>
+            <span style="display:inline-flex;align-items:center;gap:2mm;"><span class="fax-legend-box" style="box-shadow:inset 0 0 0 3px #000;">仮</span>仮予約で調整中</span>
+          </div>
+
+          <div style="border:2px solid #000;padding:3mm 4mm;font-size:10.5pt;line-height:1.8;margin-top:2mm;">
+            <div>・各日の欄は<strong>その日の夜（宿泊）</strong>の空き状況です。退所日の当日は次の方がご利用いただけます。</div>
+            <div>・空き状況は日々変動します。<strong>ご予約前に必ずお電話でご確認ください。</strong></div>
+            <div>・全{{ faxRoomCount }}室。この用紙に利用者様のお名前は記載しておりません。</div>
+          </div>
+
+          <sc-if value="{{ faxHasNote }}" hint-placeholder-val="{{ false }}">
+            <div style="margin-top:4mm;padding:3mm 4mm;border:2px solid #000;font-size:11pt;line-height:1.8;white-space:pre-wrap;">{{ faxNote }}</div>
+          </sc-if>
+
+          <div style="margin-top:5mm;font-size:10pt;text-align:right;">
+            空室あり {{ faxOpenDays }}日／残りわずか {{ faxPartialDays }}日／仮予約 {{ faxTentativeDays }}日／満室 {{ faxFullDays }}日
+          </div>
+        </div>
       </div>
     </sc-if>
 
