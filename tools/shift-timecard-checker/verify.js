@@ -1,7 +1,7 @@
 /* 照合ツールの検証スクリプト
  *
  *   node verify.js                                  … データ非依存のユニットテストのみ
- *   node verify.js <勤務表.xlsx> <勤怠.csv> [<タイミー明細.csv>]
+ *   node verify.js <勤務表.xlsx> <勤怠.csv> [<タイミー明細.csv>] [<シート名>]
  *                                                   … 実ファイルを流して結果を表示
  *
  * index.html の <script> からロジック部分だけを取り出して評価する。
@@ -148,20 +148,52 @@ ok(L.signedDiffMin(23 * 60, 10) === 70, 'D-5 0時をまたいでも符号つき�
     agg.map(a => `${a.種別}:${a.シフト}×${a.件数}`).join(' / '));
 }
 
-// E-2 レイアウト自動検出
+// G-1 レイアウト自動検出（管理用シート＝2列おき / 入力シート＝1列ずつ）
 {
-  const warns = [];
-  const rows = [[], ['職種', '', '氏名', 46204, '', 46205, '', '', '時間指標']];
-  const lay = L.detectScheduleLayout(rows, m => warns.push(m));
-  ok(lay && lay.name === 2 && lay.firstDay === 3 && lay.step === 2 && lay.cu === 8,
-    'E-2 見出しから氏名・日付・月間時間の列を検出', JSON.stringify(lay));
-  ok(warns.length > 0, 'E-2 既定と違えば警告する', warns[0]?.slice(0, 50) + '…');
+  const SERIAL_2026_07_01 = 46204;
+  const mkSheet = (nameCol, roleCol, firstDay, step, extra) => {
+    const header = [];
+    for (let i = 0; i < 31; i++) header[firstDay + i * step] = SERIAL_2026_07_01 + i;
+    const mk = (name, role, val) => {
+      const r = []; r[nameCol] = name; r[roleCol] = role;
+      for (let i = 0; i < 31; i++) r[firstDay + i * step] = val;
+      return r;
+    };
+    return [[], [], header,
+      mk('山田　太郎', '生活支援員', '日'),
+      mk('鈴木　花子', '生活支援員', '日'),
+      mk('佐藤　次郎', '世話人', '日'),
+      ...(extra || [])].concat();
+  };
+  const a = L.detectScheduleLayout(mkSheet(12, 1, 34, 2), () => {}, { maxDays: 31 });
+  ok(a && a.name === 12 && a.role === 1 && a.firstDay === 34 && a.step === 2,
+    'G-1 管理用シート型（氏名M列・日付2列おき）を検出', JSON.stringify(a));
+  const b = L.detectScheduleLayout(mkSheet(2, 1, 5, 1), () => {}, { maxDays: 31 });
+  ok(b && b.name === 2 && b.role === 1 && b.firstDay === 5 && b.step === 1,
+    'G-1 入力シート型（氏名C列・日付1列ずつ）を検出', JSON.stringify(b));
+  ok(b && b.cu === -1, 'G-3 月間時間の列が無いことを検出できる', 'cu=' + (b && b.cu));
+  const ym = L.ymFromLayout(mkSheet(2, 1, 5, 1), b);
+  ok(ym && ym.y === 2026 && ym.m === 7, 'G-1 日付見出し行から年月を取る', JSON.stringify(ym));
+
+  // G-2 シート下部のシフト別集計行を職員として扱わない
+  const master = { '日': { start: 540, end: 1080, breakStart: 780, breakEnd: 840, hours: 8 } };
+  const tally = []; tally[2] = '日'; tally[1] = null;
+  for (let i = 0; i < 31; i++) tally[5 + i] = 3;          // 集計行は数値
+  const sheet = { rows: mkSheet(2, 1, 5, 1, [tally]), errs: new Set() };
+  const lay = L.detectScheduleLayout(sheet.rows, () => {}, { maxDays: 31 });
+  const sch = L.parseSchedule(sheet, master,
+    { facility: 'X', y: 2026, m: 7, aliasMap: {}, includeDispatch: true, warn: () => {}, layout: lay });
+  const names = Object.values(sch.metaByName).map(v => v.職員名);
+  ok(names.length === 3 && !names.includes('日'),
+    'G-2 シフト名が氏名欄に来る集計行を職員にしない', names.join('、'));
+  ok(sch.hasCuColumn === false, 'G-3 月間時間の列が無いシートを判別', 'hasCuColumn=' + sch.hasCuColumn);
 }
 
 console.log(`\n  ${pass} passed / ${fail} failed\n`);
 
 /* ------------------------------------------------------------ 実データ検証 */
-const [xlsxPath, kintaiPath, timeePath] = process.argv.slice(2);
+const [xlsxPath, kintaiPath, timeePath, sheetArg] = process.argv.slice(2);
+const SHEET = sheetArg || '入力シート【現場配布用】';
 if (!xlsxPath || !kintaiPath) {
   console.log('実データ検証をするには:  node verify.js <勤務表.xlsx> <勤怠.csv> [<タイミー明細.csv>]');
   process.exit(fail ? 1 : 0);
@@ -196,12 +228,13 @@ const warn = m => { if (!logs.includes(m)) logs.push(m); };
 const aliasMap = L.buildAliasMap('');
 const wb = XLSX.readFile(xlsxPath);
 const { master } = L.parseMaster(readSheet(wb, 'マスタ設定').rows, warn);
-const sheet = readSheet(wb, '管理用シート');
-const ym = L.inferYearMonth({ name: path.basename(xlsxPath) }) || L.parseYmFromSheet(sheet.rows);
+const sheet = readSheet(wb, SHEET);
+const layout = L.detectScheduleLayout(sheet.rows, warn, { maxDays: 31 });
+const ym = L.inferYearMonth({ name: path.basename(xlsxPath) }) || L.ymFromLayout(sheet.rows, layout) || L.parseYmFromSheet(sheet.rows);
 if (!ym) { console.error('年月を判定できませんでした'); process.exit(1); }
 const { y, m } = ym;
 
-const sch = L.parseSchedule(sheet, master, { facility: '(単一施設)', y, m, aliasMap, includeDispatch: true, warn });
+const sch = L.parseSchedule(sheet, master, { facility: '(単一施設)', y, m, aliasMap, includeDispatch: false, warn, layout });
 const kin = L.parseKintai(readTextSmart(kintaiPath), {
   facility: '(単一施設)', excludedKeys: sch.excludedKeys, aliasMap, warn, fileName: path.basename(kintaiPath)
 });
@@ -226,7 +259,8 @@ const counts = L.compareTimeeCounts(slots, tim, GROUP);
 const details = L.compareTimeeDetails(slots, tim, 15, 0.25, GROUP);
 
 console.log('='.repeat(74));
-console.log(`■ 実データ検証  ${y}/${m}`);
+console.log(`■ 実データ検証  ${y}/${m}   シート「${SHEET}」`);
+console.log(`  レイアウト          氏名列 ${layout && layout.name} / 職種列 ${layout && layout.role} / 日付 ${layout && layout.firstDay}列から${layout && layout.step}列ずつ / 月間時間列 ${layout && layout.cu >= 0 ? layout.cu : 'なし'}`);
 console.log('='.repeat(74));
 console.log(`  日別ズレ            ${daily.length}件（1日ずれ集約前 ${dailyRaw.length}件 / うち日ずれ ${daily.filter(r => r.判定 === '日ずれ').length}件）`);
 console.log(`  月間集計            ${monthly.length}名（要確認 ${monthly.filter(r => r.判定 !== 'OK').length}名）`);

@@ -41,7 +41,7 @@
 <body>
 <header>
   <h1>シフト・勤怠CSV・タイミー明細 照合ツール <span id="verLabel"></span></h1>
-  <p>勤務表Excelの「管理用シート」と「マスタ設定」を基準に、勤怠CSV・タイミー明細CSVとのズレを確認します。</p>
+  <p>勤務表Excelの「入力シート【現場配布用】」と「マスタ設定」を基準に、勤怠CSV・タイミー明細CSVとのズレを確認します。</p>
 </header>
 <main>
   <section class="grid">
@@ -57,8 +57,9 @@
     </div>
     <div class="card">
       <h2>2. 設定</h2>
-      <label>管理用シート名</label>
-      <input id="manageSheet" value="管理用シート" />
+      <label>勤務表シート名</label>
+      <input id="manageSheet" value="入力シート【現場配布用】" />
+      <div class="note">現場が記入する「入力シート【現場配布用】」を既定にしています。「管理用シート」を指定することもできます（列の配置は自動判別します）。</div>
       <label>マスタ設定シート名</label>
       <input id="masterSheet" value="マスタ設定" />
       <label>遅刻・早退の許容（分）</label>
@@ -71,7 +72,7 @@
       <input id="pctTolerance" type="number" value="5" min="0" step="1" />
       <label>1日の標準所定時間（時間・「有4」等の判定に使用）</label>
       <input id="standardHours" type="number" value="8" min="1" step="0.5" />
-      <label class="chk"><input id="includeDispatch" type="checkbox" checked /> 「派遣」行もタイミー照合の枠として数える</label>
+      <label class="chk"><input id="includeDispatch" type="checkbox" /> 「派遣」行もタイミー照合の枠として数える</label>
       <label class="chk"><input id="splitMonthBoundary" type="checkbox" checked /> 月をまたぐ夜勤を月末24:00で分割して計上</label>
       <label class="chk"><input id="mergeShifted" type="checkbox" checked /> 予定と実績の「1日ずれ」を1件にまとめる</label>
       <details class="aliasAdvanced">
@@ -88,7 +89,7 @@
         <button class="danger" id="forgetBtn">保存した設定を消す</button>
       </div>
       <div id="status" class="status">ファイルを選択して「比較実行」を押してください。</div>
-      <div class="note">同じ職員名が複数行ある場合は同じ職員として統合します。「派遣」を含む行は日別ズレ・月間集計からは除外し、タイミー照合の枠としてのみ扱います（設定で切替可）。</div>
+      <div class="note">同じ職員名が複数行ある場合は同じ職員として統合します。「派遣」を含む行は日別ズレ・月間集計からは除外し、タイミー照合の枠としてのみ扱います（設定で切替可）。シート下部のシフト別集計行は職員として扱いません。</div>
     </div>
   </section>
 
@@ -146,7 +147,7 @@
 </main>
 <script id="tool-logic">
 /* ============================================================================
- * シフト・勤怠CSV・タイミー明細 照合ツール v2.17
+ * シフト・勤怠CSV・タイミー明細 照合ツール v2.18
  *
  * v2.14 からの修正（A群=タイミー照合 / B群=日別・月間 / C群=無警告で壊れる箇所）
  *
@@ -204,9 +205,19 @@
  *      勤務表のCU列(総労働勤務時間)とDE列(日中勤務時間数)を全16シフトで再現して確認済み。
  * F-2 勤務表のCU列と、シフト記入から積み上げた予定時間を突き合わせて食い違いを出す。
  *      勤務表側の数式ずれ・記入漏れ・数式エラーによる欠落を検出できる。
+ *
+ * --- v2.18 で追加 ---
+ * G-1 比較対象を「管理用シート」から「入力シート【現場配布用】」に変更。
+ *      2つのシートは列も間隔もまったく違う（管理用=氏名M列・日付2列おき・月間時間CU列、
+ *      入力=氏名C列・日付1列ずつ・月間時間なし）ため、列位置の決め打ちをやめ、
+ *      日付が並ぶ行を手がかりにレイアウトを自動判別する。年月も日付見出し行から取る。
+ * G-2 入力シートの下部にはシフト別の日次集計行（「日」「パ夜」…）と、日付見出しより
+ *      上の週見出し行（「第1週」…）がある。これらを職員行として拾わないようにした。
+ * G-3 入力シートには月間時間の列が無いため、その場合はシフト記入から積み上げた
+ *      時間を予定時間として使う。
  * ==========================================================================*/
 
-const APP_VERSION = 'v2.17';
+const APP_VERSION = 'v2.18';
 
 /* --------------------------------------------------------------------------
  * 定数
@@ -450,37 +461,97 @@ function detectMasterLayout(rows, warn){
   warn('マスタ設定シートで「開始」「終了」の見出しが見つからないため、既定の列位置で処理します');
   return null;
 }
-// 管理用シート：氏名・職種・日付列・月間時間列の位置を見出しから割り出す。
-function detectScheduleLayout(rows, warn){
-  for(let r=0; r<Math.min(rows.length,40); r++){
-    const row=rows[r] || [];
-    const nameCol=row.findIndex(v=>cellText(v)==='氏名');
-    if(nameCol<0) continue;
-    const roleCol=row.findIndex(v=>cellText(v)==='職種');
-    let firstDay=-1, step=0;
-    for(let c=nameCol+1;c<row.length;c++){
-      if(typeof row[c]==='number' && row[c]>30000){
-        if(firstDay<0) firstDay=c; else { step=c-firstDay; break; }
-      }
-    }
-    let cuCol=-1;
-    for(let rr=r; rr<Math.min(r+3, rows.length); rr++){
-      const idx=(rows[rr]||[]).findIndex(v=>/時間指標|総労働/.test(cellText(v)));
-      if(idx>0){ cuCol=idx; break; }
-    }
-    const layout={ headerRow:r, name:nameCol, role:roleCol>=0?roleCol:COL.B, type:COL.AE,
-                   firstDay: firstDay>=0?firstDay:COL.AI, step: step>0?step:2,
-                   cu: cuCol>=0?cuCol:COL.CU };
-    const diffs=[];
-    if(layout.name!==COL.M) diffs.push(`氏名列=${layout.name}`);
-    if(layout.firstDay!==COL.AI) diffs.push(`日付開始列=${layout.firstDay}`);
-    if(layout.step!==2) diffs.push(`日付列の間隔=${layout.step}`);
-    if(layout.cu!==COL.CU) diffs.push(`月間時間列=${layout.cu}`);
-    if(diffs.length) warn(`管理用シートのレイアウトが既定と違うため、見出しから検出した位置を使いました（${diffs.join('、')}）`);
-    return layout;
+// 勤務表シートのレイアウト検出。
+// 「管理用シート」と「入力シート【現場配布用】」では列も間隔もまったく違うため、
+// 列位置を決め打ちにせず、日付が並んでいる行を手がかりに構造を割り出す。
+//
+//                     氏名   職種   日付の開始   日付の間隔   月間時間
+//   管理用シート        M(12)  B(1)   AI(34)      2列おき      CU(98)
+//   入力シート          C(2)   B(1)   F(5)        1列ずつ      なし
+//
+// 1) Excelの日付シリアルが10個以上並ぶ行を「日付見出し行」とする
+// 2) その行の最初の日付列と、日付列どうしの最頻の間隔を取る
+// 3) 日付見出し行より下で、日付列にシフトが入っている行を「データ行」とする
+// 4) データ行に対して値が最も重複しない左側の列を「氏名列」とする
+//    （職種は重複が多く、氏名はほぼ一意なので区別できる）
+const DATE_SERIAL_MIN = 30000, DATE_SERIAL_MAX = 80000;
+const isDateSerial = v => (typeof v === 'number' && v >= DATE_SERIAL_MIN && v <= DATE_SERIAL_MAX);
+
+function detectScheduleLayout(rows, warn, opts){
+  const maxDays = (opts && opts.maxDays) || 31;
+  let hdr = null;
+  for(let r=0; r<Math.min(rows.length, 40); r++){
+    const row = rows[r] || [];
+    const cols = [];
+    for(let c=0; c<row.length; c++) if(isDateSerial(row[c])) cols.push(c);
+    if(cols.length < 10) continue;
+    const gaps = {};
+    for(let i=1; i<cols.length; i++){ const g = cols[i]-cols[i-1]; gaps[g] = (gaps[g]||0)+1; }
+    const step = Number(Object.entries(gaps).sort((a,b)=>b[1]-a[1])[0][0]);
+    if(!(step >= 1 && step <= 4)) continue;
+    if(!hdr || cols.length > hdr.count) hdr = {headerRow:r, firstDay:cols[0], step, count:cols.length};
   }
-  warn('管理用シートで「氏名」の見出しが見つからないため、既定の列位置で処理します');
-  return null;
+  if(!hdr){
+    warn('勤務表シートで日付の並ぶ行が見つからないため、既定の列位置（管理用シートの配置）で処理します');
+    return null;
+  }
+
+  const dayCols = Array.from({length:maxDays}, (_,i)=>hdr.firstDay + i*hdr.step);
+  // シフト記号は文字列。シート下部の人員配置や日次集計は数値なので、
+  // 「日付列に文字列が入っている行」だけをデータ行とみなす。
+  const shiftCount = r => dayCols.reduce((n,c)=>{
+    const v = (rows[r]||[])[c];
+    if(v==null || typeof v === 'number') return n;
+    const t = String(v).trim();
+    return n + (t !== '' && t !== '0' && !/^\d+(\.\d+)?$/.test(t) ? 1 : 0);
+  }, 0);
+  const dataRows = [];
+  for(let r=hdr.headerRow+1; r<rows.length; r++) if(shiftCount(r) > 0) dataRows.push(r);
+  if(!dataRows.length){
+    warn('勤務表シートにシフトの入った行が見つかりませんでした');
+    return null;
+  }
+
+  // 氏名列：値が入っていて、かつ最も重複しない列
+  let name = -1, nameScore = -1, roleCand = [];
+  for(let c=0; c<hdr.firstDay; c++){
+    const vals = dataRows
+      .map(r => String((rows[r]||[])[c] ?? '').trim())
+      .filter(v => v && !/^\d+(\.\d+)?$/.test(v));
+    if(vals.length < dataRows.length*0.6) continue;
+    const score = new Set(vals).size / vals.length;
+    roleCand.push({c, fill:vals.length, score});
+    if(score > nameScore){ nameScore = score; name = c; }
+  }
+  if(name < 0){
+    warn('勤務表シートで氏名の列を特定できませんでした');
+    return null;
+  }
+  // 職種列：氏名以外で最も値が埋まっている列（重複が多いほうを優先）
+  const role = roleCand.filter(x => x.c !== name)
+                       .sort((a,b)=> b.fill - a.fill || a.score - b.score)[0]?.c ?? -1;
+
+  const at = re => {
+    for(let r=hdr.headerRow-1; r<=hdr.headerRow+2; r++){
+      const idx = (rows[r]||[]).findIndex(v => re.test(cellText(v)));
+      if(idx >= 0) return idx;
+    }
+    return -1;
+  };
+  const type = at(/^勤務形態$/);
+  const cu   = at(/時間指標|総労働/);
+
+  return {headerRow:hdr.headerRow, name, role, type, firstDay:hdr.firstDay, step:hdr.step, cu,
+          dayCount:hdr.count};
+}
+
+// 日付見出し行の先頭セルから年月を取る。シートの決め打ちセルより確実。
+function ymFromLayout(rows, lay){
+  if(!lay) return null;
+  const v = (rows[lay.headerRow]||[])[lay.firstDay];
+  if(!isDateSerial(v)) return null;
+  const d = excelSerialToDate(v).split('/').map(Number);
+  return (d[0] >= 2000 && d[0] <= 2100 && d[1] >= 1 && d[1] <= 12) ? {y:d[0], m:d[1]} : null;
 }
 
 function parseMaster(rows, warn){
@@ -535,22 +606,34 @@ function parseSchedule(sheet, master, ctx){
   const normName = v => { const k=baseNormName(v); return aliasMap[k] || k; };
   const containsDispatch = (...vals) => vals.some(v => normName(v).includes('派遣'));
 
-  // E-2: 見出しから実レイアウトを検出。見つからなければ既定の列位置にフォールバック。
-  const lay = detectScheduleLayout(rows, warn || (()=>{})) ||
-              {name:COL.M, role:COL.B, type:COL.AE, firstDay:COL.AI, step:2, cu:COL.CU};
+  // E-2/G-1: 日付行からレイアウトを検出。見つからなければ管理用シートの既定配置。
   const lastDay = daysInMonth(y,m);                 // B-9
+  const lay = ctx.layout || detectScheduleLayout(rows, warn || (()=>{}), {maxDays:lastDay}) ||
+              {name:COL.M, role:COL.B, type:COL.AE, firstDay:COL.AI, step:2, cu:COL.CU};
   const dayCols = Array.from({length:lastDay},(_,i)=>lay.firstDay + i*lay.step);
+  // G-2: 入力シートは下部にシフト別の日次集計行（「日」「パ夜」…）が並ぶ。
+  //      氏名欄がマスタのシフト名や数字だけの行は職員ではないので飛ばす。
+  const isTallyRow = n => {
+    const t = normShift(n);
+    if(!t) return true;
+    if(/^\d+(\.\d+)?$/.test(t)) return true;
+    return !!master[t];
+  };
 
   const normal={}, external=[], unknown=[], errorCells=[];
   const cuByName={}, metaByName={}, excludedKeys=new Set();
   const shiftHoursByName={};   // F-2: シフト記入から積み上げた予定労働時間
 
-  for(let r=0; r<rows.length; r++){
+  // データは必ず日付見出し行より下にある。上の見出し（「第1週」など）を拾わない。
+  const firstDataRow = (lay.headerRow ?? -1) + 1;
+  for(let r=firstDataRow; r<rows.length; r++){
     const row=rows[r]||[];
     const name=String(row[lay.name]||'').trim();
     const key=normName(name);
-    const role=String(row[lay.role]||'').trim(), type=String(row[lay.type]||'').trim();
+    const role=lay.role>=0 ? String(row[lay.role]||'').trim() : '';
+    const type=lay.type>=0 ? String(row[lay.type]||'').trim() : '';
     if(!key || key.includes('氏名') || key.includes('月間営業活動時間')) continue;
+    if(isTallyRow(name)) continue;
 
     const isDispatch = containsDispatch(name, role, type);
     const isTimee = name.includes('タイミー');
@@ -558,7 +641,8 @@ function parseSchedule(sheet, master, ctx){
     if(isDispatch) excludedKeys.add(key);
     // B-4: タイミー枠・派遣枠の予定時間を職員の月間集計に混ぜない。
     if(!isDispatch && !isTimee){
-      const cu=hourVal(row[lay.cu]);
+      // 入力シートには月間時間の列が無い。その場合はシフトからの積み上げを予定時間に使う。
+      const cu=lay.cu>=0 ? hourVal(row[lay.cu]) : 0;
       if(cu) cuByName[key]=(cuByName[key]||0)+cu;
       if(!metaByName[key]) metaByName[key]={施設名:facility, 職員名:name, 職種:role, 勤務形態:type};
     }
@@ -593,7 +677,8 @@ function parseSchedule(sheet, master, ctx){
       normal[key][dkey].push(record);
     });
   }
-  return {normal, external, unknown, errorCells, cuByName, metaByName, shiftHoursByName, excludedKeys, y, m};
+  return {normal, external, unknown, errorCells, cuByName, metaByName, shiftHoursByName,
+          excludedKeys, hasCuColumn: lay.cu>=0, layout:lay, y, m};
 }
 
 // A-2: 夜勤入りと翌日の明けを1サイクルに畳む。
@@ -985,7 +1070,11 @@ function compareMonthly(schedule, kintai, tol, y, m, splitBoundary){
   const keys=new Set([...Object.keys(schedule.cuByName), ...Object.keys(actual)]);
   return [...keys].map(key=>{
     const meta=schedule.metaByName[key] || {};
-    const planned=Math.round((schedule.cuByName[key]||0)*100)/100;
+    const fromShiftsRaw=Math.round((schedule.shiftHoursByName?.[key]||0)*100)/100;
+    // G-3: 月間時間の列を持たないシート（入力シート）ではシフトからの積み上げを予定とする。
+    const planned=schedule.hasCuColumn===false
+      ? fromShiftsRaw
+      : Math.round((schedule.cuByName[key]||0)*100)/100;
     const act=actual[key]||0;
     const diff=Math.round((act-planned)*100)/100;
     const plannedDays=Object.entries(schedule.normal[key]||{})
@@ -995,7 +1084,7 @@ function compareMonthly(schedule, kintai, tol, y, m, splitBoundary){
     const allow=Math.max(hourTol, planned*(pctTol/100));
     // F-2: 勤務表のCU列（月間時間）と、シフト記入から積み上げた時間の食い違いを見る。
     // ずれる場合、勤務表側のCU列の数式かシフト記入のどちらかが実態と合っていない。
-    const fromShifts=Math.round((schedule.shiftHoursByName?.[key]||0)*100)/100;
+    const fromShifts=fromShiftsRaw;
     const cuGap=Math.round((fromShifts-planned)*100)/100;
     const hints=[];
     if(planned===0 && act>0) hints.push('勤務表に予定時間がありませんが打刻があります');
@@ -1138,7 +1227,7 @@ if (typeof module !== 'undefined' && module.exports) {
     compareTimeeCounts, compareTimeeDetails, inferFacility, facilityBase, facilityFromText,
     parseStoreMap, inferYearMonth, parseYmFromSheet, DEFAULT_FACILITIES,
     signedDiffMin, leaveHours, isPartialLeave, mergeShiftedDays, aggregateIssues,
-    plannedShiftHours, daytimeHours,
+    plannedShiftHours, daytimeHours, ymFromLayout,
     detectScheduleLayout, detectMasterLayout
   };
 }
@@ -1234,7 +1323,7 @@ if (typeof document !== 'undefined') (function(){
     try { return new TextDecoder('shift_jis').decode(buf); } catch(e) { return new TextDecoder('utf-8').decode(buf); }
   }
   function normSheetName(v){ return String(v||'').normalize('NFKC').replace(/\s+/g,'').trim(); }
-  function sheetInput(id, fallback){ return String($(id)?.value||'').normalize('NFKC').trim() || fallback; }
+  function sheetInput(id, fallback){ return String($(id)?.value||'').trim() || fallback; }
   // C-6: 数式エラーセルの位置を拾えるようにして返す。
   function readWorkbookRows(wb, sheetName){
     const wanted=String(sheetName||'').normalize('NFKC').trim();
@@ -1276,7 +1365,7 @@ if (typeof document !== 'undefined') (function(){
       const groups=groupFiles();
 
       const all={daily:[], monthly:[], timeeCount:[], timee:[], unknown:[], master:[]};
-      const nameSet=new Set(), facilitySet=new Set();
+      const nameSet=new Set(), facilitySet=new Set(), usedSheets=[];
 
       for(const group of groups){
         // C-3: どのExcelにも紐づかないCSVを黙って捨てない。
@@ -1297,15 +1386,19 @@ if (typeof document !== 'undefined') (function(){
             master=parsed.master;
             all.master.push(...parsed.list.map(r=>({施設名:item.facility, ...r})));
 
-            const sheetYm=parseYmFromSheet(readWorkbookRows(wb,sheetInput('manageSheet','管理用シート')).rows);
+            const sheetName=sheetInput('manageSheet','入力シート【現場配布用】');
+            const sheet=readWorkbookRows(wb, sheetName);
+            // レイアウトは1度だけ検出し、年月も日付見出し行から取る（決め打ちセルより確実）。
+            const layout=detectScheduleLayout(sheet.rows, warn, {maxDays:31});
+            const sheetYm=ymFromLayout(sheet.rows, layout) || parseYmFromSheet(sheet.rows);
             const fileYm=inferYearMonth(item.file);
             let ym=fileYm||sheetYm;
             if(!ym){ ym={y:new Date().getFullYear(), m:new Date().getMonth()+1}; warn(`${item.file.name}: 年月を判定できないため ${monthKey(ym)} として処理しました`); }
             else if(fileYm && sheetYm && monthKey(fileYm)!==monthKey(sheetYm)){
               warn(`${item.facility}: 勤務表シート上の年月 ${monthKey(sheetYm)} とファイル名の年月 ${monthKey(fileYm)} が違うため、ファイル名を優先しました`);
             }
-            const sheet=readWorkbookRows(wb,sheetInput('manageSheet','管理用シート'));
-            schedules.push(parseSchedule(sheet, master, {facility:item.facility, y:ym.y, m:ym.m, aliasMap, includeDispatch, warn}));
+            usedSheets.push(`${item.facility}: 「${sheetName}」 氏名列 ${layout?layout.name:'既定'} / 日付 ${layout?layout.firstDay:'既定'}列から${layout?layout.step:2}列ずつ / 月間時間列 ${layout&&layout.cu>=0?layout.cu:'なし'}`);
+            schedules.push(parseSchedule(sheet, master, {facility:item.facility, y:ym.y, m:ym.m, aliasMap, includeDispatch, warn, layout}));
           }catch(e){
             warn(`${item.file.name}: 読み込みに失敗したためスキップしました（${e.message}）`);
           }
@@ -1370,6 +1463,7 @@ if (typeof document !== 'undefined') (function(){
         `タイミー明細照合: ${state.timee.length}件\n`+
         `未登録シフト: ${state.unknown.length}件\n`+
         `マスタ読込: ${state.master.length}件`+
+        (usedSheets.length?`\n\n使用シート:\n・`+usedSheets.join('\n・'):'')+
         (logs.length?`\n\n警告 ${logs.length}件:\n・`+logs.join('\n・'):'');
     }catch(e){
       state.warnings=logs.map((w,i)=>({番号:i+1, 内容:w, 判定:'警告'}));
@@ -1379,7 +1473,8 @@ if (typeof document !== 'undefined') (function(){
   }
 
   function mergeSchedules(items){
-    const out={normal:{}, external:[], unknown:[], errorCells:[], cuByName:{}, metaByName:{}, shiftHoursByName:{}, excludedKeys:new Set(), y:items[0]?.y, m:items[0]?.m};
+    const out={normal:{}, external:[], unknown:[], errorCells:[], cuByName:{}, metaByName:{}, shiftHoursByName:{},
+               excludedKeys:new Set(), hasCuColumn:items.some(s=>s.hasCuColumn), y:items[0]?.y, m:items[0]?.m};
     items.forEach(s=>{
       Object.entries(s.normal||{}).forEach(([key, byDate])=>{
         out.normal[key] ||= {};
