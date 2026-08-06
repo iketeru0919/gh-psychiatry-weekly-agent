@@ -2017,11 +2017,19 @@ class Component extends DCLogic {
       isFaxView: view === 'fax',
       viewTabs,
 
-      // FAX紙面を印刷するときは、アプリのヘッダーや警告バナーまで一緒に刷らない。
-      // 属性値が undefined ならReactが属性ごと落とすので、[data-print-hide] に
-      // 当たらなくなる＝FAX表示のときだけ隠れる。
-      hideOnFaxPrint: view === 'fax' ? '' : undefined,
-      faxPageClass: view === 'fax' ? 'ss-page ss-page--fax' : 'ss-page',
+      // 月カレンダー／FAXを印刷するときは、アプリのヘッダーや警告バナーを刷らない。
+      // どちらも「紙面そのもの」を出す表示で、画面用のUIは紙の上では邪魔になる。
+      // 属性値が undefined なら React が属性ごと落とすので [data-print-hide] に
+      // 当たらなくなる＝この2表示のときだけ隠れる。
+      hideOnSheetPrint: (view === 'fax' || view === 'month') ? '' : undefined,
+      pageClass: view === 'fax' ? 'ss-page ss-page--fax'
+        : view === 'month' ? 'ss-page ss-page--cal'
+          : 'ss-page',
+      printButtonLabel: view === 'month' ? 'カレンダーを印刷'
+        : view === 'fax' ? 'FAX用紙を印刷'
+          : '印刷',
+      calPrintTitle: currentMonthLabel + '　ショートステイ・体験利用',
+      calPrintSub: master.facilityName + '　' + master.buildingLabel,
 
       faxTitle: '短期入所　空き状況のご案内',
       faxMonthLabel: currentMonthLabel,

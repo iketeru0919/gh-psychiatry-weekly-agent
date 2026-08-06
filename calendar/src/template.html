@@ -22,8 +22,9 @@
   .ss-table td { padding: 8px 10px; border-bottom: 1px solid oklch(0.93 0.008 75); vertical-align: top; }
   .ss-table tbody tr:hover { background: oklch(0.98 0.006 75); }
 
-  /* 現場ではスマホから見ることがある。7列固定のままだと日付が潰れて読めない。 */
-  @media (max-width: 860px) {
+  /* 画面用の折り返し。print には効かせない（紙は常に7列で組む）。
+     screen を付けずに書くと、印刷時にも幅次第で1列に潰れてカレンダーの形が壊れる。 */
+  @media screen and (max-width: 860px) {
     .ss-page { padding: 18px 12px 60px !important; }
     .ss-title { font-size: 24px !important; }
     .ss-kpi { grid-template-columns: repeat(2, 1fr) !important; }
@@ -73,26 +74,91 @@
   .fax-out { background: #d9d9d9; }
   .fax-legend-box { display: inline-flex; width: 9mm; height: 6mm; border: 2px solid #000; align-items: center; justify-content: center; font-size: 10pt; font-weight: 900; }
 
+  /* 画面にだけ出す／紙にだけ出す 要素の切り替え。 */
+  .ss-print-only { display: none; }
+  .cal-print-head { display: none; }
+
+  /* 用紙の向きは表示ごとに固定する。名前付きページを使えば、利用者が印刷ダイアログで
+     毎回向きを選び直す必要がない。月カレンダーは7列を紙幅いっぱいに使いたいので横向き。 */
   @page { size: A4 portrait; margin: 8mm; }
+  @page calendar-page { size: A4 landscape; margin: 7mm; }
 
   @media print {
     [data-print-hide] { display: none !important; }
     body { background: white; }
     [data-print-area] { padding: 0 !important; max-width: none !important; }
-    .ss-cell { break-inside: avoid; }
     .ss-table { font-size: 10.5px; }
     .ss-table tr { break-inside: avoid; }
-    /* FAX表示のときは、紙面以外の画面部品を一切刷らない。 */
+    .ss-print-only { display: block; }
+
+    /* ── FAX表示：紙面以外の画面部品を一切刷らない ── */
     .ss-page--fax > *:not(.fax-block) { display: none !important; }
     .fax-sheet { width: auto; margin: 0; padding: 0; border: 0; box-shadow: none; break-inside: avoid; }
     .fax-page-break { break-after: page; }
+
+    /* ── 月カレンダー表示：そのまま現場に貼れる壁掛けカレンダーとして出す ──
+       セル等はインラインstyleで組まれているので、紙面用の上書きには !important が要る。 */
+    .ss-page--cal { page: calendar-page; }
+    .ss-page--cal > *:not(.cal-block) { display: none !important; }
+
+    .cal-print-head {
+      display: flex; align-items: baseline; justify-content: space-between;
+      gap: 6mm; padding: 0 0 1mm; margin-bottom: 1.2mm; border-bottom: 1.2pt solid #000;
+    }
+    .cal-print-title { font-size: 14pt; font-weight: 900; letter-spacing: .03em; line-height: 1.2; }
+    .cal-print-sub { font-size: 9.5pt; font-weight: 700; }
+
+    /* 罫線をセル同士で共有させると、隙間のない“カレンダーらしい”枠になる。 */
+    .ss-weekday-row { gap: 0 !important; margin-bottom: 0 !important; }
+    .ss-weekday {
+      font-size: 9pt !important; padding: 0.7mm 0 !important;
+      border: 0.8pt solid #000 !important; border-right-width: 0 !important;
+      background: #f0f0f0;
+    }
+    .ss-weekday-row > *:last-child { border-right-width: 0.8pt !important; }
+    .ss-month-grid { gap: 0 !important; }
+    .ss-cell {
+      min-height: 0 !important; border-radius: 0 !important;
+      border: 0.8pt solid #000 !important; border-top-width: 0 !important; border-right-width: 0 !important;
+      padding: 0.8mm 1mm !important; gap: 0.4mm !important;
+      opacity: 1 !important; break-inside: avoid;
+    }
+    /* 各行の右端セルだけ右罫線を描く（隣接セルとの二重線を避けるため） */
+    .ss-month-grid > *:nth-child(7n) { border-right-width: 0.8pt !important; }
+    .ss-daynum { font-size: 9.5pt !important; line-height: 1.1 !important; }
+    .ss-lane { gap: 0.3mm !important; }
+    .ss-roomlabel { font-size: 5.8pt !important; color: #444 !important; line-height: 1.1 !important; }
+    .ss-chip {
+      border-radius: 0.6mm !important; padding: 0.5mm 0.9mm !important;
+      font-size: 6.8pt !important; line-height: 1.2 !important;
+      border-left-width: 1mm !important; break-inside: avoid;
+    }
+    /* 白黒プリンタでも読めるよう、紙の上では本文を黒に寄せる。
+       区分の色は左端の帯にだけ残す（色刷りなら色でも区別できる）。 */
+    .ss-chip div, .ss-chip span { color: #000 !important; }
+    /* 滞在中チップの食事表示は、セル下部の「食数」行と内容が重複する。
+       紙面は行数が命なので、まとめて出している方だけ残す。 */
+    .ss-chip-meals { display: none !important; }
+    .ss-screen-only { display: none !important; }
+    /* 背景オフだと色の四角が消えて凡例が意味不明になる。枠線で形だけは残す。 */
+    .ss-swatch { border: 0.5pt solid #333 !important; }
+    /* 貼り出す頃には「今日」ではない。紙の上では誤解のもとなので出さない。 */
+    .ss-today-badge { display: none !important; }
+    /* 当月外のマスは日付だけ残す。部屋名と「空」まで刷ると紙面が煩雑になる。 */
+    .ss-cell--out .ss-lane, .ss-cell--out .ss-mealsum { display: none !important; }
+    /* 印刷ダイアログの「背景のグラフィック」は既定でオフ。塗りが出ない前提で、
+       枠線と文字だけでも判別できるようにしておく。 */
+    .ss-pickup-badge { border: 0.5pt solid #666 !important; color: #000 !important; font-size: 6pt !important; }
+    .ss-vacant { font-size: 6pt; color: #999; line-height: 1.1; }
+    .ss-mealsum { font-size: 6pt !important; padding-top: 0.5mm !important; color: #555 !important; line-height: 1.2 !important; }
+    .ss-legend { margin-top: 1.5mm !important; font-size: 7.5pt !important; gap: 4mm !important; }
   }
 </style>
 </helmet>
 <div style="min-height:100vh;background:oklch(0.975 0.006 75);color:oklch(0.28 0.01 75);">
-  <div data-print-area="" class="{{ faxPageClass }}" style="max-width:1440px;margin:0 auto;padding:36px 44px 80px;">
+  <div data-print-area="" class="{{ pageClass }}" style="max-width:1440px;margin:0 auto;padding:36px 44px 80px;">
 
-    <div data-print-hide="{{ hideOnFaxPrint }}" style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:20px;gap:20px;flex-wrap:wrap;">
+    <div data-print-hide="{{ hideOnSheetPrint }}" style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:20px;gap:20px;flex-wrap:wrap;">
       <div>
         <div style="font-size:13px;letter-spacing:.1em;font-weight:500;color:{{ primaryAccent }};margin-bottom:6px;">{{ facilityName }} ／ {{ buildingLabel }}</div>
         <div class="ss-title" style="font-size:32px;font-weight:900;letter-spacing:.02em;">ショートステイ・体験利用 管理表</div>
@@ -102,13 +168,13 @@
         <div style="font-size:22px;font-weight:700;">{{ totalCount }}<span style="font-size:13px;font-weight:500;color:oklch(0.5 0.01 75);"> 件</span><span style="font-size:12px;font-weight:500;color:oklch(0.62 0.01 75);"> ／ 入退所記録 {{ recordCount }} 件</span></div>
         <div data-print-hide="" style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;flex-wrap:wrap;">
           <button sc-camel-on-click="{{ openSettings }}" style="padding:8px 16px;border-radius:8px;border:1px solid oklch(0.85 0.01 75);background:none;color:oklch(0.45 0.01 75);font-weight:700;font-size:13px;cursor:pointer;">マスタ設定</button>
-          <button sc-camel-on-click="{{ printCalendar }}" style="padding:8px 16px;border-radius:8px;border:1px solid {{ primaryAccent }};background:none;color:{{ primaryAccent }};font-weight:700;font-size:13px;cursor:pointer;">印刷</button>
+          <button sc-camel-on-click="{{ printCalendar }}" style="padding:8px 16px;border-radius:8px;border:1px solid {{ primaryAccent }};background:none;color:{{ primaryAccent }};font-weight:700;font-size:13px;cursor:pointer;">{{ printButtonLabel }}</button>
         </div>
       </div>
     </div>
 
     <sc-if value="{{ hasConflicts }}" hint-placeholder-val="{{ false }}">
-      <div data-print-hide="{{ hideOnFaxPrint }}" style="margin-bottom:14px;padding:11px 15px;border-radius:10px;background:oklch(0.96 0.06 25);border:1px solid oklch(0.78 0.13 25);color:oklch(0.44 0.16 25);font-size:12.5px;font-weight:600;">⚠ {{ conflictMessage }}</div>
+      <div data-print-hide="{{ hideOnSheetPrint }}" style="margin-bottom:14px;padding:11px 15px;border-radius:10px;background:oklch(0.96 0.06 25);border:1px solid oklch(0.78 0.13 25);color:oklch(0.44 0.16 25);font-size:12.5px;font-weight:600;">⚠ {{ conflictMessage }}</div>
     </sc-if>
     <sc-if value="{{ storageNotice }}" hint-placeholder-val="{{ false }}">
       <div data-print-hide="" style="margin-bottom:14px;padding:10px 15px;border-radius:10px;background:oklch(0.97 0.02 250);border:1px solid oklch(0.86 0.04 250);color:oklch(0.4 0.07 250);font-size:12.5px;">{{ storageNotice }}</div>
@@ -211,10 +277,14 @@
 
     <!-- ── 月カレンダー ────────────────────────────────────────── -->
     <sc-if value="{{ isMonthView }}" hint-placeholder-val="{{ true }}">
-      <div>
+      <div class="cal-block">
+        <div class="cal-print-head">
+          <div class="cal-print-title">{{ calPrintTitle }}</div>
+          <div class="cal-print-sub">{{ calPrintSub }}</div>
+        </div>
         <div class="ss-weekday-row" style="display:grid;grid-template-columns:repeat(7,1fr);gap:10px;margin-bottom:8px;">
           <sc-for list="{{ weekdayHeaders }}" as="w" hint-placeholder-count="7">
-            <div style="text-align:center;font-size:12px;font-weight:700;padding:4px 0;color:{{ w.color }};">{{ w.label }}</div>
+            <div class="ss-weekday" style="text-align:center;font-size:12px;font-weight:700;padding:4px 0;color:{{ w.color }};">{{ w.label }}</div>
           </sc-for>
         </div>
 
@@ -222,17 +292,17 @@
           <sc-for list="{{ calendarCells }}" as="c" hint-placeholder-count="42">
             <div class="ss-cell {{ c.outClass }}" style="min-height:{{ cellMinHeight }};border-radius:16px;padding:10px;display:flex;flex-direction:column;gap:8px;background:{{ c.cellBg }};border:{{ c.cellBorderWidth }} solid {{ c.cellBorder }};opacity:{{ c.cellOpacity }};position:relative;">
               <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
-                <span style="font-size:13px;font-weight:700;color:{{ c.dateColor }};">{{ c.dayNum }}</span>
+                <span class="ss-daynum" style="font-size:13px;font-weight:700;color:{{ c.dateColor }};">{{ c.dayNum }}</span>
                 <sc-if value="{{ c.isToday }}" hint-placeholder-val="{{ false }}">
-                  <span style="font-size:9.5px;font-weight:800;padding:2px 7px;border-radius:999px;background:{{ primaryAccent }};color:white;">{{ c.todayBadge }}</span>
+                  <span class="ss-today-badge" style="font-size:9.5px;font-weight:800;padding:2px 7px;border-radius:999px;background:{{ primaryAccent }};color:white;">{{ c.todayBadge }}</span>
                 </sc-if>
               </div>
 
               <sc-for list="{{ c.lanes }}" as="lane" hint-placeholder-count="2">
-                <div style="display:flex;flex-direction:column;gap:4px;">
+                <div class="ss-lane" style="display:flex;flex-direction:column;gap:4px;">
                   <div style="display:flex;align-items:center;gap:5px;">
                     <sc-if value="{{ lane.showLabel }}" hint-placeholder-val="{{ false }}">
-                      <span style="font-size:9.5px;font-weight:700;color:oklch(0.6 0.01 75);letter-spacing:.03em;">{{ lane.roomName }}</span>
+                      <span class="ss-roomlabel" style="font-size:9.5px;font-weight:700;color:oklch(0.6 0.01 75);letter-spacing:.03em;">{{ lane.roomName }}</span>
                     </sc-if>
                     <sc-if value="{{ lane.hasConflict }}" hint-placeholder-val="{{ false }}">
                       <span title="同じ部屋で期間が重なっています" style="font-size:9px;font-weight:800;padding:1px 6px;border-radius:999px;background:oklch(0.92 0.1 25);color:oklch(0.45 0.17 25);">重複</span>
@@ -240,15 +310,15 @@
                   </div>
 
                   <sc-for list="{{ lane.stayingChips }}" as="st" hint-placeholder-count="0">
-                    <div sc-camel-on-click="{{ st.onOpen }}" title="{{ st.tooltip }}" style="border-radius:9px;background:{{ st.bg }};border-left:3px {{ st.borderStyle }} {{ st.color }};padding:5px 7px;cursor:pointer;font-size:11.5px;line-height:1.4;" style-hover="filter:brightness(0.97);">
+                    <div class="ss-chip ss-chip--stay" sc-camel-on-click="{{ st.onOpen }}" title="{{ st.tooltip }}" style="border-radius:9px;background:{{ st.bg }};border-left:3px {{ st.borderStyle }} {{ st.color }};padding:5px 7px;cursor:pointer;font-size:11.5px;line-height:1.4;" style-hover="filter:brightness(0.97);">
                       <span style="font-weight:700;color:{{ st.color }};">滞在中</span>
                       <div style="font-weight:500;color:oklch(0.42 0.01 75);">{{ st.name }}</div>
-                      <div style="font-size:9.5px;color:oklch(0.62 0.01 75);">{{ st.mealLabel }}</div>
+                      <div class="ss-chip-meals" style="font-size:9.5px;color:oklch(0.62 0.01 75);">{{ st.mealLabel }}</div>
                     </div>
                   </sc-for>
 
                   <sc-for list="{{ lane.reservations }}" as="r" hint-placeholder-count="0">
-                    <div sc-camel-on-click="{{ r.onEdit }}" title="{{ r.tooltip }}" style="border-radius:9px;background:{{ r.bg }};border-left:3px {{ r.borderStyle }} {{ r.color }};padding:5px 7px;cursor:pointer;font-size:11.5px;line-height:1.4;position:relative;" style-hover="filter:brightness(0.97);">
+                    <div class="ss-chip" sc-camel-on-click="{{ r.onEdit }}" title="{{ r.tooltip }}" style="border-radius:9px;background:{{ r.bg }};border-left:3px {{ r.borderStyle }} {{ r.color }};padding:5px 7px;cursor:pointer;font-size:11.5px;line-height:1.4;position:relative;" style-hover="filter:brightness(0.97);">
                       <div style="display:flex;justify-content:space-between;gap:4px;">
                         <span style="font-weight:700;color:{{ r.color }};">{{ r.typeLabel }} {{ r.time }}</span>
                         <sc-if value="{{ r.hasNotes }}" hint-placeholder-val="{{ false }}">
@@ -258,13 +328,14 @@
                       <div style="font-weight:500;color:oklch(0.3 0.01 75);">{{ r.name }}</div>
                       <sc-if value="{{ r.showPickup }}" hint-placeholder-val="{{ false }}">
                         <div style="display:flex;margin-top:3px;">
-                          <span style="font-size:9.5px;padding:1px 5px;border-radius:4px;background:{{ r.pickupBg }};color:{{ r.pickupColor }};font-weight:700;margin-left:auto;">送迎{{ r.pickupLabel }}</span>
+                          <span class="ss-pickup-badge" style="font-size:9.5px;padding:1px 5px;border-radius:4px;background:{{ r.pickupBg }};color:{{ r.pickupColor }};font-weight:700;margin-left:auto;">送迎{{ r.pickupLabel }}</span>
                         </div>
                       </sc-if>
                     </div>
                   </sc-for>
 
                   <sc-if value="{{ lane.isEmpty }}" hint-placeholder-val="{{ false }}">
+                    <span class="ss-print-only ss-vacant">空</span>
                     <button data-print-hide="" class="ss-add" sc-camel-on-click="{{ lane.onAdd }}" style="text-align:left;border:1px dashed oklch(0.88 0.008 75);background:none;border-radius:8px;padding:5px 7px;font-size:10.5px;color:oklch(0.68 0.008 75);cursor:pointer;" style-hover="border-color:{{ primaryAccent }};color:{{ primaryAccent }};">空室 ＋ 追加</button>
                   </sc-if>
                   <sc-if value="{{ lane.hasReservations }}" hint-placeholder-val="{{ false }}">
@@ -274,17 +345,17 @@
               </sc-for>
 
               <sc-if value="{{ c.hasMeals }}" hint-placeholder-val="{{ false }}">
-                <div style="margin-top:auto;padding-top:5px;border-top:1px dashed oklch(0.91 0.008 75);font-size:9.5px;color:oklch(0.6 0.01 75);">食数 {{ c.mealSummary }}</div>
+                <div class="ss-mealsum" style="margin-top:auto;padding-top:5px;border-top:1px dashed oklch(0.91 0.008 75);font-size:9.5px;color:oklch(0.6 0.01 75);">食数 {{ c.mealSummary }}</div>
               </sc-if>
             </div>
           </sc-for>
         </div>
 
-        <div style="display:flex;gap:16px;margin-top:22px;font-size:11.5px;color:oklch(0.5 0.01 75);flex-wrap:wrap;">
+        <div class="ss-legend" style="display:flex;gap:16px;margin-top:22px;font-size:11.5px;color:oklch(0.5 0.01 75);flex-wrap:wrap;">
           <sc-for list="{{ legendCategories }}" as="lc" hint-placeholder-count="3">
-            <span><span style="display:inline-block;width:9px;height:9px;border-radius:3px;background:{{ lc.color }};margin-right:5px;"></span>{{ lc.label }}</span>
+            <span><span class="ss-swatch" style="display:inline-block;width:9px;height:9px;border-radius:3px;background:{{ lc.color }};margin-right:5px;"></span>{{ lc.label }}</span>
           </sc-for>
-          <span><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:oklch(0.68 0.16 55);margin-right:6px;"></span>備考あり（マウスを乗せると内容表示）</span>
+          <span><span class="ss-swatch" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:oklch(0.68 0.16 55);margin-right:6px;"></span>備考あり<span class="ss-screen-only">（マウスを乗せると内容表示）</span></span>
           <span><span style="display:inline-block;width:12px;height:0;border-top:2px dashed oklch(0.6 0.01 75);margin-right:6px;vertical-align:middle;"></span>破線＝仮予約・調整中</span>
         </div>
       </div>
