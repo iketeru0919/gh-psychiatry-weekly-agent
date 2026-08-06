@@ -660,6 +660,63 @@
       </div>
 
       <div>
+        <div style="font-size:13px;font-weight:700;margin-bottom:4px;">施設連絡先（FAX帳票の送信元として印字されます）</div>
+        <div style="font-size:11px;color:oklch(0.6 0.01 75);margin-bottom:10px;line-height:1.6;">帳票のヘッダーと送信状に使います。空欄の項目は印字されません。</div>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <div style="display:grid;grid-template-columns:130px 1fr;gap:8px;">
+            <input type="text" value="{{ facilityPostalCode }}" sc-camel-on-change="{{ onPostalCodeChange }}" placeholder="〒430-0000" style="padding:8px 10px;border-radius:8px;border:1px solid oklch(0.87 0.01 75);font-size:13.5px;" style-focus="border-color:{{ primaryAccent }};outline:none;">
+            <input type="text" value="{{ facilityAddress }}" sc-camel-on-change="{{ onAddressChange }}" placeholder="住所（例：静岡県浜松市中央区○○町1-2-3）" style="padding:8px 10px;border-radius:8px;border:1px solid oklch(0.87 0.01 75);font-size:13.5px;" style-focus="border-color:{{ primaryAccent }};outline:none;">
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
+            <label style="font-size:11px;font-weight:700;color:oklch(0.5 0.01 75);">電話番号<input type="tel" value="{{ facilityTel }}" sc-camel-on-change="{{ onTelChange }}" placeholder="053-000-0000" style="display:block;width:100%;margin-top:4px;padding:8px;border-radius:8px;border:1px solid oklch(0.87 0.01 75);font-size:13px;"></label>
+            <label style="font-size:11px;font-weight:700;color:oklch(0.5 0.01 75);">FAX番号<input type="tel" value="{{ facilityFax }}" sc-camel-on-change="{{ onFaxChange }}" placeholder="053-000-0001" style="display:block;width:100%;margin-top:4px;padding:8px;border-radius:8px;border:1px solid oklch(0.87 0.01 75);font-size:13px;"></label>
+            <label style="font-size:11px;font-weight:700;color:oklch(0.5 0.01 75);">担当者名<input type="text" value="{{ facilityContactPerson }}" sc-camel-on-change="{{ onContactPersonChange }}" placeholder="例：山田 太郎" style="display:block;width:100%;margin-top:4px;padding:8px;border-radius:8px;border:1px solid oklch(0.87 0.01 75);font-size:13px;"></label>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+          <div style="font-size:13px;font-weight:700;">FAX送付先マスタ</div>
+          <button sc-camel-on-click="{{ addFaxRecipient }}" style="border:none;background:none;color:{{ primaryAccent }};font-weight:700;font-size:13px;cursor:pointer;">＋ 追加</button>
+        </div>
+        <div style="font-size:11px;color:oklch(0.6 0.01 75);margin-bottom:10px;line-height:1.6;">相談支援事業所・給食業者・ご家族など、FAXの送り先を登録しておきます。<strong>番号を都度手入力せず一覧から選ぶ</strong>ことで、誤送信を防ぎます。</div>
+        <sc-if value="{{ faxRecipientsEmpty }}" hint-placeholder-val="{{ true }}">
+          <div style="font-size:12px;color:oklch(0.62 0.01 75);padding:12px;border:1px dashed oklch(0.86 0.01 75);border-radius:10px;text-align:center;">まだ登録がありません。「＋ 追加」から登録してください。</div>
+        </sc-if>
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          <sc-for list="{{ faxRecipientRows }}" as="fr" hint-placeholder-count="0">
+            <div style="border:1px solid oklch(0.9 0.01 75);border-radius:11px;padding:11px 12px;background:oklch(0.99 0.003 75);">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;">
+                <span style="font-size:11px;font-weight:700;color:oklch(0.55 0.01 75);">{{ fr.title }}</span>
+                <button sc-camel-on-click="{{ fr.onRemove }}" style="border:none;background:none;color:oklch(0.6 0.05 25);font-size:16px;cursor:pointer;padding:0 4px;">×</button>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                <label style="font-size:11px;font-weight:700;color:oklch(0.5 0.01 75);">事業所名<input type="text" value="{{ fr.name }}" sc-camel-on-change="{{ fr.onNameChange }}" placeholder="○○相談支援事業所" style="display:block;width:100%;margin-top:4px;padding:7px 9px;border-radius:8px;border:1px solid oklch(0.87 0.01 75);font-size:13px;"></label>
+                <label style="font-size:11px;font-weight:700;color:oklch(0.5 0.01 75);">担当者<input type="text" value="{{ fr.contact }}" sc-camel-on-change="{{ fr.onContactChange }}" placeholder="○○ 様" style="display:block;width:100%;margin-top:4px;padding:7px 9px;border-radius:8px;border:1px solid oklch(0.87 0.01 75);font-size:13px;"></label>
+                <label style="font-size:11px;font-weight:700;color:oklch(0.5 0.01 75);">FAX番号<input type="tel" value="{{ fr.fax }}" sc-camel-on-change="{{ fr.onFaxChange }}" placeholder="053-000-0000" style="display:block;width:100%;margin-top:4px;padding:7px 9px;border-radius:8px;border:1px solid oklch(0.87 0.01 75);font-size:13px;"></label>
+                <label style="font-size:11px;font-weight:700;color:oklch(0.5 0.01 75);">電話番号<input type="tel" value="{{ fr.tel }}" sc-camel-on-change="{{ fr.onTelChange }}" placeholder="任意" style="display:block;width:100%;margin-top:4px;padding:7px 9px;border-radius:8px;border:1px solid oklch(0.87 0.01 75);font-size:13px;"></label>
+              </div>
+              <label style="display:block;font-size:11px;font-weight:700;color:oklch(0.5 0.01 75);margin-top:8px;">備考<input type="text" value="{{ fr.note }}" sc-camel-on-change="{{ fr.onNoteChange }}" placeholder="送付するもの、送付タイミングなど" style="display:block;width:100%;margin-top:4px;padding:7px 9px;border-radius:8px;border:1px solid oklch(0.87 0.01 75);font-size:13px;"></label>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+
+      <div>
+        <div style="font-size:13px;font-weight:700;margin-bottom:4px;">定型文（予約確認書に差し込み）</div>
+        <div style="font-size:11px;color:oklch(0.6 0.01 75);margin-bottom:10px;line-height:1.6;">予約確認書を作成したときに、下の内容がそのまま本文へ入ります。予約ごとの個別事項は、各予約の「備考」に書いてください。</div>
+        <div style="display:flex;flex-direction:column;gap:12px;">
+          <label style="font-size:11.5px;font-weight:700;color:oklch(0.5 0.01 75);">持ち物
+            <textarea value="{{ boilerplateBelongings }}" sc-camel-on-change="{{ onBelongingsChange }}" rows="3" placeholder="受給者証、内服薬、着替え など" style="display:block;width:100%;margin-top:4px;padding:9px 10px;border-radius:9px;border:1px solid oklch(0.87 0.01 75);font-size:13px;line-height:1.7;resize:vertical;" style-focus="border-color:{{ primaryAccent }};outline:none;"></textarea>
+          </label>
+          <label style="font-size:11.5px;font-weight:700;color:oklch(0.5 0.01 75);">注意事項
+            <textarea value="{{ boilerplateNotices }}" sc-camel-on-change="{{ onNoticesChange }}" rows="5" placeholder="1行につき1項目で書くと、帳票上で箇条書きになります" style="display:block;width:100%;margin-top:4px;padding:9px 10px;border-radius:9px;border:1px solid oklch(0.87 0.01 75);font-size:13px;line-height:1.7;resize:vertical;" style-focus="border-color:{{ primaryAccent }};outline:none;"></textarea>
+          </label>
+        </div>
+      </div>
+
+      <div>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
           <div style="font-size:13px;font-weight:700;">部屋マスタ</div>
           <button sc-camel-on-click="{{ addRoom }}" style="border:none;background:none;color:{{ primaryAccent }};font-weight:700;font-size:13px;cursor:pointer;">＋ 追加</button>

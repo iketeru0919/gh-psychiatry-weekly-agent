@@ -91,6 +91,21 @@ function defaultMaster() {
     defaultCheckinTime: '16:00',
     defaultCheckoutTime: '09:00',
     operator: '',
+    // ── FAX帳票用 ──────────────────────────────────────────────
+    // 送信元として帳票の頭に刷り込む施設の連絡先。
+    postalCode: '',
+    address: '',
+    tel: '',
+    fax: '',
+    contactPerson: '',
+    // 送付先（相談支援事業所・給食業者・家族など）。誤送信を避けるため、
+    // 番号は都度手入力せずここから選ぶ運用にする。
+    faxRecipients: [],
+    // 予約確認書に差し込む定型文。施設ごとに違うので編集できるようにする。
+    boilerplate: {
+      belongings: '受給者証・保険証、内服薬（お薬手帳）、着替え、洗面用具、タオル、上履き',
+      notices: '・お薬は1回分ずつ分包し、お名前をご記入ください。\n・貴重品はお預かりできません。\n・体調に変化がある場合は、事前にご連絡ください。',
+    },
   };
 }
 
@@ -439,6 +454,26 @@ function normalizeMaster(savedMaster) {
   master.defaultCheckinTime = master.defaultCheckinTime || base.defaultCheckinTime;
   master.defaultCheckoutTime = master.defaultCheckoutTime || base.defaultCheckoutTime;
   master.operator = master.operator || '';
+
+  // FAX帳票用の項目。既存の保存データには無いので補完する。
+  ['postalCode', 'address', 'tel', 'fax', 'contactPerson'].forEach((k) => {
+    master[k] = typeof master[k] === 'string' ? master[k] : '';
+  });
+  if (!Array.isArray(master.faxRecipients)) master.faxRecipients = [];
+  master.faxRecipients = master.faxRecipients.map((r) => ({
+    id: (r && r.id) || uid('f'),
+    name: (r && r.name) || '',
+    contact: (r && r.contact) || '',
+    fax: (r && r.fax) || '',
+    tel: (r && r.tel) || '',
+    note: (r && r.note) || '',
+  }));
+  // 空文字は「意図して消した」なので既定値へ戻さない。未設定のときだけ埋める。
+  const bp = master.boilerplate || {};
+  master.boilerplate = {
+    belongings: typeof bp.belongings === 'string' ? bp.belongings : base.boilerplate.belongings,
+    notices: typeof bp.notices === 'string' ? bp.notices : base.boilerplate.notices,
+  };
   // この画面は1部屋につき1名の運用。定員は部屋数から導出し、二重管理を防ぐ。
   master.capacity = master.rooms.length;
   return master;
@@ -913,6 +948,21 @@ class Component extends DCLogic {
       data: mapRecords(s.data, (r) => (r.pickup === gone.label ? { ...r, pickup: pickupOptions[0].label } : r)),
     };
   });
+
+  // ── FAX送付先マスタ ──────────────────────────────────────────────
+  addFaxRecipient = () => this.setState((s) => ({
+    master: { ...s.master, faxRecipients: [...s.master.faxRecipients, { id: uid('f'), name: '', contact: '', fax: '', tel: '', note: '' }] },
+  }));
+  updateFaxRecipient = (idx, patch) => this.setState((s) => ({
+    master: { ...s.master, faxRecipients: s.master.faxRecipients.map((r, i) => (i === idx ? { ...r, ...patch } : r)) },
+  }));
+  removeFaxRecipient = (idx) => this.setState((s) => ({
+    master: { ...s.master, faxRecipients: s.master.faxRecipients.filter((_, i) => i !== idx) },
+  }));
+
+  updateBoilerplate = (patch) => this.setState((s) => ({
+    master: { ...s.master, boilerplate: { ...s.master.boilerplate, ...patch } },
+  }));
 
   updateRoom = (idx, val) => this.setState((s) => {
     const rooms = s.master.rooms.map((r, i) => (i === idx ? { ...r, name: val } : r));
@@ -2017,6 +2067,36 @@ class Component extends DCLogic {
       onDefaultCheckoutChange: (e) => this.updateMaster({ defaultCheckoutTime: e.target.value }),
       operator: master.operator,
       onOperatorChange: (e) => this.updateMaster({ operator: e.target.value }),
+
+      // FAX帳票の送信元として刷り込む施設連絡先
+      facilityPostalCode: master.postalCode,
+      facilityAddress: master.address,
+      facilityTel: master.tel,
+      facilityFax: master.fax,
+      facilityContactPerson: master.contactPerson,
+      onPostalCodeChange: (e) => this.updateMaster({ postalCode: e.target.value }),
+      onAddressChange: (e) => this.updateMaster({ address: e.target.value }),
+      onTelChange: (e) => this.updateMaster({ tel: e.target.value }),
+      onFaxChange: (e) => this.updateMaster({ fax: e.target.value }),
+      onContactPersonChange: (e) => this.updateMaster({ contactPerson: e.target.value }),
+
+      faxRecipientRows: master.faxRecipients.map((r, idx) => ({
+        idx, name: r.name, contact: r.contact, fax: r.fax, tel: r.tel, note: r.note,
+        title: r.name || '（事業所名未入力）',
+        onNameChange: (e) => this.updateFaxRecipient(idx, { name: e.target.value }),
+        onContactChange: (e) => this.updateFaxRecipient(idx, { contact: e.target.value }),
+        onFaxChange: (e) => this.updateFaxRecipient(idx, { fax: e.target.value }),
+        onTelChange: (e) => this.updateFaxRecipient(idx, { tel: e.target.value }),
+        onNoteChange: (e) => this.updateFaxRecipient(idx, { note: e.target.value }),
+        onRemove: () => this.removeFaxRecipient(idx),
+      })),
+      addFaxRecipient: this.addFaxRecipient,
+      faxRecipientsEmpty: master.faxRecipients.length === 0,
+
+      boilerplateBelongings: master.boilerplate.belongings,
+      boilerplateNotices: master.boilerplate.notices,
+      onBelongingsChange: (e) => this.updateBoilerplate({ belongings: e.target.value }),
+      onNoticesChange: (e) => this.updateBoilerplate({ notices: e.target.value }),
 
       openSettings: this.openSettings,
       closeSettings: this.closeSettings,
