@@ -28,7 +28,7 @@
     label.chk{display:flex;align-items:center;gap:8px;font-weight:600;margin:10px 0 0} label.chk input{width:auto;margin:0}
     button{border:0;border-radius:9px;padding:10px 14px;cursor:pointer;font-weight:700}.primary{background:var(--accent);color:#fff}.secondary{background:#e5e7eb;color:#111827}.danger{background:#fee2e2;color:#991b1b}
     .actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.status{padding:10px 12px;border-radius:8px;background:#f3f4f6;font-size:13px;margin-top:10px;white-space:pre-wrap;max-height:280px;overflow:auto}
-    .summary{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin:16px 0}.kpi{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px}.kpi .num{font-size:24px;font-weight:800}.kpi .lbl{font-size:12px;color:var(--muted)}
+    .summary{display:grid;grid-template-columns:repeat(7,1fr);gap:10px;margin:16px 0}.kpi{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px}.kpi .num{font-size:24px;font-weight:800}.kpi .lbl{font-size:12px;color:var(--muted)}
     .tabs{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0}.tab{background:#fff;border:1px solid var(--line)}.tab.active{background:#111827;color:#fff}
     .tableWrap{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:auto;max-height:560px}.toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:10px 0}.toolbar input{max-width:360px;border:1px solid var(--line);border-radius:8px;padding:9px}.toolbar select{max-width:180px}
     table{border-collapse:collapse;width:100%;font-size:12px;min-width:980px} th,td{border-bottom:1px solid #edf0f5;padding:7px 8px;text-align:left;white-space:nowrap} th{position:sticky;top:0;background:#f9fafb;z-index:1} tr:hover td{background:#f8fafc}
@@ -124,6 +124,7 @@
       <button class="secondary" data-dl="monthly">月間集計CSV</button>
       <button class="secondary" data-dl="timeeCount">タイミー枠数CSV</button>
       <button class="secondary" data-dl="timee">タイミー明細照合CSV</button>
+      <button class="secondary" data-dl="staffMatch">氏名の突合CSV</button>
       <button class="secondary" data-dl="unknown">未登録シフトCSV</button>
       <button class="secondary" data-dl="warnings">警告CSV</button>
     </div>
@@ -132,6 +133,7 @@
       <button class="tab" data-tab="monthly">月間集計</button>
       <button class="tab" data-tab="timeeCount">タイミー枠数</button>
       <button class="tab" data-tab="timee">タイミー明細照合</button>
+      <button class="tab" data-tab="staffMatch">氏名の突合</button>
       <button class="tab" data-tab="unknown">未登録シフト</button>
       <button class="tab" data-tab="warnings">警告</button>
       <button class="tab" data-tab="master">読込マスタ</button>
@@ -147,7 +149,7 @@
 </main>
 <script id="tool-logic">
 /* ============================================================================
- * シフト・勤怠CSV・タイミー明細 照合ツール v2.18
+ * シフト・勤怠CSV・タイミー明細 照合ツール v2.19
  *
  * v2.14 からの修正（A群=タイミー照合 / B群=日別・月間 / C群=無警告で壊れる箇所）
  *
@@ -215,9 +217,26 @@
  *      上の週見出し行（「第1週」…）がある。これらを職員行として拾わないようにした。
  * G-3 入力シートには月間時間の列が無いため、その場合はシフト記入から積み上げた
  *      時間を予定時間として使う。
+ *
+ * --- v2.19 で追加（6施設の実データで確認）---
+ * H-1 氏名欄が「日勤合計」「夜勤+深夜」のようなラベルの集計行を職員として扱っていた。
+ *      集計行は日付セルが数値、職員行はシフト記号（文字列）。6施設のマスタを確認したが
+ *      数字だけのシフト名は存在しないため、この判定で安全に除外できる。
+ * H-2 勤務表と勤怠CSVで氏名が突合できない職員を「氏名の突合」タブに出し、
+ *      末尾の枝番を落とした形と編集距離で候補を提示する。1名2行の書き方が施設ごとに
+ *      違う（(A)(B) / ① / （〜明け） / 同名2行）ため、決め打ちでは吸収できない。
+ * I-1 打刻をイベント列に分解し、時刻順に「出勤 → 次の退勤」で対にする。
+ *      v2.18 までは「出勤だけの行」と「退勤だけの行」を対にしていたため、連続夜勤で
+ *      1行に出勤と退勤が両方入る日に当たると夜勤1回ぶん（約13時間）が欠落していた。
+ * I-2 予定時間を「勤務予定」と「休暇」に分け、判定は勤務予定で行う。
+ *      有給・振休は予定に入るが打刻には現れないため、そのままでは差分になっていた。
+ * J-1 同じ施設グループの複数Excelに同一職員・同一日・同一シフトの記入があると
+ *      二重計上していた（西浅田Ⅰ/Ⅱで509件）。ファイル間の重複だけを1件にまとめる。
+ * J-2 マスタを施設グループ内で統合する。西浅田はⅠが①系、Ⅱがⅱ系のシフトだけ
+ *      時刻を持っており、片方だけでは残り半分が0時間になっていた。
  * ==========================================================================*/
 
-const APP_VERSION = 'v2.18';
+const APP_VERSION = 'v2.19';
 
 /* --------------------------------------------------------------------------
  * 定数
@@ -600,6 +619,25 @@ function inferYearMonth(file){
 }
 const monthKey = ym => ym && ym.y && ym.m ? `${ym.y}/${ym.m}` : '';
 
+// J-2: 同じ施設グループに複数のExcelがある場合（西浅田Ⅰ/Ⅱ など）、
+//   マスタが分かれていることがある。実データでは Ⅰ が①系（1棟）、Ⅱ が ⅱ系（2棟）の
+//   シフトだけ時刻を持ち、片方だけで読むと残り半分が0時間になっていた。
+//   時刻を持つ定義を優先して統合し、定義が食い違う場合は警告する。
+function mergeMasters(base, add, warn, label){
+  const out = base ? {...base} : {};
+  Object.entries(add||{}).forEach(([k,v])=>{
+    const cur=out[k];
+    if(!cur){ out[k]=v; return; }
+    const curHas = cur.start!=null || cur.end!=null;
+    const newHas = v.start!=null || v.end!=null;
+    if(!curHas && newHas){ out[k]=v; return; }
+    if(curHas && newHas && (cur.start!==v.start || cur.end!==v.end) && warn){
+      warn(`シフト「${k}」の定義がファイル間で違います（${minToTime(cur.start)}〜${minToTime(cur.end)} と ${minToTime(v.start)}〜${minToTime(v.end)}${label?` / ${label}`:''}）。先に読んだ定義を使います`);
+    }
+  });
+  return out;
+}
+
 function parseSchedule(sheet, master, ctx){
   const rows = sheet.rows, errs = sheet.errs || new Set();
   const { facility, y, m, aliasMap, includeDispatch, warn } = ctx;
@@ -613,16 +651,28 @@ function parseSchedule(sheet, master, ctx){
   const dayCols = Array.from({length:lastDay},(_,i)=>lay.firstDay + i*lay.step);
   // G-2: 入力シートは下部にシフト別の日次集計行（「日」「パ夜」…）が並ぶ。
   //      氏名欄がマスタのシフト名や数字だけの行は職員ではないので飛ばす。
-  const isTallyRow = n => {
+  const isTallyRowByName = n => {
     const t = normShift(n);
     if(!t) return true;
     if(/^\d+(\.\d+)?$/.test(t)) return true;
     return !!master[t];
   };
+  // H-1: 氏名欄が「日勤合計」「夜勤+深夜」のようなラベルの集計行は上の判定をすり抜ける。
+  //      集計行は日付セルに数値が入り、職員行はシフト記号（文字列）が入る。
+  //      6施設のマスタを確認したが、数字だけのシフト名は存在しない。
+  const isTallyRowByValues = row => {
+    let num=0, txt=0;
+    for(const c of dayCols){
+      const v = row[c];
+      if(v==null || String(v).trim()==='') continue;
+      if(typeof v === 'number') num++; else txt++;
+    }
+    return num>0 && txt===0;
+  };
 
   const normal={}, external=[], unknown=[], errorCells=[];
   const cuByName={}, metaByName={}, excludedKeys=new Set();
-  const shiftHoursByName={};   // F-2: シフト記入から積み上げた予定労働時間
+  let tallyRows=0;
 
   // データは必ず日付見出し行より下にある。上の見出し（「第1週」など）を拾わない。
   const firstDataRow = (lay.headerRow ?? -1) + 1;
@@ -633,7 +683,8 @@ function parseSchedule(sheet, master, ctx){
     const role=lay.role>=0 ? String(row[lay.role]||'').trim() : '';
     const type=lay.type>=0 ? String(row[lay.type]||'').trim() : '';
     if(!key || key.includes('氏名') || key.includes('月間営業活動時間')) continue;
-    if(isTallyRow(name)) continue;
+    if(isTallyRowByName(name)) continue;
+    if(isTallyRowByValues(row)){ tallyRows++; continue; }
 
     const isDispatch = containsDispatch(name, role, type);
     const isTimee = name.includes('タイミー');
@@ -649,6 +700,7 @@ function parseSchedule(sheet, master, ctx){
 
     dayCols.forEach((ci,idx)=>{
       const day=idx+1;
+      if(typeof row[ci] === 'number') return;   // H-1: 数値のセルはシフトではない
       const shift=String(row[ci]||'').trim();
       const dkey=`${y}/${m}/${day}`;
       // C-6: 数式エラーセル(#REF! など)は sheet_to_json が空文字で返すため、
@@ -671,14 +723,14 @@ function parseSchedule(sheet, master, ctx){
         external.push({...record, 枠名:name, 枠種別:isTimee?'タイミー':'派遣'});
         return;
       }
-      shiftHoursByName[key]=(shiftHoursByName[key]||0)+plannedShiftHours(shift, master);
       normal[key] ||= {};
       normal[key][dkey] ||= [];
       normal[key][dkey].push(record);
     });
   }
-  return {normal, external, unknown, errorCells, cuByName, metaByName, shiftHoursByName,
-          excludedKeys, hasCuColumn: lay.cu>=0, layout:lay, y, m};
+  if(tallyRows) warn(`${facility}: 日付欄が数値だけの行 ${tallyRows} 行を集計行として除外しました`);
+  return {normal, external, unknown, errorCells, cuByName, metaByName,
+          excludedKeys, hasCuColumn: lay.cu>=0, layout:lay, tallyRows, y, m};
 }
 
 // A-2: 夜勤入りと翌日の明けを1サイクルに畳む。
@@ -862,60 +914,71 @@ function workHours(startMin, endMin, breakH=0){ return Math.max(0, ((endMin-star
 function isNightInClock(min){ return min>=15*60 && min<24*60; }
 function isNightOutClock(min){ return min>=5*60 && min<11*60; }
 
-// B-5: 月をまたぐ夜勤の扱い。
-//  splitBoundary=true のとき、勤務表の「末◯◯」「初◯◯」と同じく月末24:00で分割する。
-//   - 月末の入り  … 出勤〜24:00 だけを当月に計上（翌朝分は翌月）
-//   - 月初の明け  … 0:00〜退勤 を当月に計上（v2.14 は丸ごと捨てていた）
-//  深夜休憩は 0時以降に取ることが多いため、分割時は明け側から控除する。
+// I-1: 打刻をイベント列に分解し、時刻順に「出勤 → 次の退勤」で対にする。
+//   v2.18 までは「出勤だけの行」と「退勤だけの行」を対にしていたため、
+//   連続夜勤で 1行に出勤と退勤が両方入る日（＝前夜の明け＋その夜の入り）に
+//   当たると、夜勤1回ぶん（約13時間）が丸ごと欠落していた。
+//   実データでは 宇都宮11行 / 気賀28行 / 高丘3行 / 西浅田14行 / 南中丸6行 で発生。
+//
+// B-5: 月をまたぐ夜勤は、勤務表の「末◯◯」「初◯◯」と同じく月末24:00で分割する。
+//   - 月末の入り … 出勤〜24:00 だけを当月に計上（翌朝分は翌月）
+//   - 月初の明け … 0:00〜退勤 を当月に計上
+//   深夜休憩は0時以降に取ることが多いため、分割時は明け側から控除する。
 function actualMonthlyHours(byName, y, m, splitBoundary){
-  const lastDay = daysInMonth(y,m);
-  const out={}, notes={};
+  const hours={}, notes={}, issues={};
+  const isIn = d => inMonth(d, y, m);
   Object.entries(byName).forEach(([key, list])=>{
-    const rows = list.filter(r => inMonth(r.日付, y, m));
-    const sorted=[...rows].sort((a,b)=>dayIndex(a.日付)-dayIndex(b.日付));
-    const used=new Set(); let total=0; const note=[];
-    sorted.forEach((r,i)=>{
-      if(used.has(i)) return;
-      const day = ymdOf(r.日付)?.[2];
-      if(r.inMin!=null && r.outMin!=null){
-        let end=r.outMin;
-        if(end<r.inMin) end+=1440;
-        total+=workHours(r.inMin,end,breakHours(r.コメント));
-        used.add(i); return;
+    const ev=[];
+    list.forEach(r=>{
+      const di=dayIndex(r.日付);
+      if(!isFinite(di)) return;
+      if(r.inMin!=null)  ev.push({t:di*1440+r.inMin,  kind:'IN',  日付:r.日付, 時刻:r.出勤, c:r.コメント});
+      if(r.outMin!=null) ev.push({t:di*1440+r.outMin, kind:'OUT', 日付:r.日付, 時刻:r.退勤, c:r.コメント});
+    });
+    ev.sort((a,b)=>a.t-b.t);
+
+    let total=0, open=null;
+    const note=[], bad=[];
+    ev.forEach(e=>{
+      if(e.kind==='IN'){
+        if(open && isIn(open.日付)) bad.push(`${open.日付} ${open.時刻||''} の出勤に対応する退勤がありません`);
+        open=e;
+        return;
       }
-      if(r.inMin!=null && r.outMin==null){
-        if(!isNightInClock(r.inMin)) return;
-        for(let j=i+1;j<sorted.length;j++){
-          if(used.has(j)) continue;
-          const n=sorted[j];
-          const diff=dayIndex(n.日付)-dayIndex(r.日付);
-          if(diff>1.5) break;
-          if(diff>0 && n.inMin==null && n.outMin!=null && isNightOutClock(n.outMin)){
-            total+=workHours(r.inMin,1440+n.outMin,breakHours(n.コメント)||breakHours(r.コメント));
-            used.add(i); used.add(j); return;
-          }
-        }
-        const commentOut=commentOutMin(r.コメント);
-        if(day===lastDay && splitBoundary){
-          total+=workHours(r.inMin,1440,0);                    // 当月分は 24:00 まで
-          used.add(i); note.push(`${r.日付} の夜勤は24:00で分割`);
-          return;
-        }
-        if(commentOut!=null && isNightOutClock(commentOut)){
-          total+=workHours(r.inMin,1440+commentOut,breakHours(r.コメント));
-          used.add(i);
+      if(!open){
+        // 月初1日の退勤だけは前月から続く夜勤の明けとみなし、当月ぶん（0:00〜退勤）を計上する。
+        // それ以外の「出勤のない退勤」は打刻漏れなので警告に回す。
+        if(!isIn(e.日付)) return;
+        if(splitBoundary && ymdOf(e.日付)?.[2]===1){
+          const midnight=Math.floor(e.t/1440)*1440;
+          total+=Math.max(0,(e.t-midnight)/60 - breakHours(e.c));
+          note.push(`${e.日付} の退勤を0:00から計上`);
+        } else {
+          bad.push(`${e.日付} ${e.時刻||''} の退勤に対応する出勤がありません`);
         }
         return;
       }
-      if(r.inMin==null && r.outMin!=null && isNightOutClock(r.outMin) && day===1 && splitBoundary){
-        total+=workHours(0, r.outMin, breakHours(r.コメント)); // 前月夜勤の当月分
-        used.add(i); note.push(`${r.日付} の夜勤明けを0:00から計上`);
-      }
+      if(isIn(open.日付)) total+=Math.max(0,(e.t-open.t)/60 - (breakHours(e.c)||breakHours(open.c)));
+      open=null;
     });
-    out[key]=Math.round(total*100)/100;
+    if(open && isIn(open.日付)){
+      const endOfDay=(Math.floor(open.t/1440)+1)*1440;
+      const commentOut=commentOutMin(open.c);
+      // 月末の出勤だけを「翌月へまたぐ夜勤」とみなす。月中の未対応は打刻漏れ。
+      if(splitBoundary && ymdOf(open.日付)?.[2]===daysInMonth(y,m)){
+        total+=Math.max(0,(endOfDay-open.t)/60);
+        note.push(`${open.日付} の夜勤を24:00で分割`);
+      } else if(commentOut!=null){
+        total+=Math.max(0,(endOfDay+commentOut-open.t)/60 - breakHours(open.c));
+      } else {
+        bad.push(`${open.日付} ${open.時刻||''} の出勤に対応する退勤がありません`);
+      }
+    }
+    hours[key]=Math.round(total*100)/100;
     notes[key]=note;
+    issues[key]=bad;
   });
-  return {hours:out, notes};
+  return {hours, notes, issues};
 }
 
 /* --------------------------------------------------------------------------
@@ -1063,45 +1126,147 @@ function mergeShiftedDays(rows){
 // D-1: 差分だけでは原因が分からず、許容0.25時間では実質全員が要確認になる。
 // 予定・実績の「日数」を並べて原因が見えるようにし、許容は
 // 「時間」と「予定に対する割合」のどちらか緩い方で判定する。
-function compareMonthly(schedule, kintai, tol, y, m, splitBoundary){
+function compareMonthly(schedule, kintai, tol, y, m, splitBoundary, warn){
   const hourTol = tol.hour ?? 0.25;
   const pctTol  = tol.pct ?? 0;
-  const {hours:actual, notes} = actualMonthlyHours(kintai.byName, y, m, splitBoundary);
-  const keys=new Set([...Object.keys(schedule.cuByName), ...Object.keys(actual)]);
-  return [...keys].map(key=>{
+  const {hours:actual, notes, issues} = actualMonthlyHours(kintai.byName, y, m, splitBoundary);
+  const keys=new Set([...Object.keys(schedule.cuByName), ...Object.keys(schedule.shiftHoursByName||{}), ...Object.keys(actual)]);
+  let unpaired=0;
+  const rows=[...keys].map(key=>{
     const meta=schedule.metaByName[key] || {};
-    const fromShiftsRaw=Math.round((schedule.shiftHoursByName?.[key]||0)*100)/100;
+    const fromShifts=Math.round((schedule.shiftHoursByName?.[key]||0)*100)/100;
     // G-3: 月間時間の列を持たないシート（入力シート）ではシフトからの積み上げを予定とする。
     const planned=schedule.hasCuColumn===false
-      ? fromShiftsRaw
+      ? fromShifts
       : Math.round((schedule.cuByName[key]||0)*100)/100;
+    // I-2: 有給・振休は打刻に現れないので、判定は「勤務予定」で行う。
+    const leave=Math.round((schedule.leaveHoursByName?.[key]||0)*100)/100;
+    const work=Math.round((planned-leave)*100)/100;
     const act=actual[key]||0;
-    const diff=Math.round((act-planned)*100)/100;
+    const diff=Math.round((act-work)*100)/100;
     const plannedDays=Object.entries(schedule.normal[key]||{})
       .filter(([d,list])=>inMonth(d,y,m) && list.some(x=>!isOffShift(x.シフト) && x.kind!=='off')).length;
     const actualDays=new Set((kintai.byName[key]||[])
       .filter(r=>inMonth(r.日付,y,m) && (r.inMin!=null||r.outMin!=null)).map(r=>r.日付)).size;
-    const allow=Math.max(hourTol, planned*(pctTol/100));
-    // F-2: 勤務表のCU列（月間時間）と、シフト記入から積み上げた時間の食い違いを見る。
-    // ずれる場合、勤務表側のCU列の数式かシフト記入のどちらかが実態と合っていない。
-    const fromShifts=fromShiftsRaw;
-    const cuGap=Math.round((fromShifts-planned)*100)/100;
+    const allow=Math.max(hourTol, work*(pctTol/100));
+    const cuGap=schedule.hasCuColumn===false ? 0 : Math.round((fromShifts-planned)*100)/100;
+    const bad=(issues[key]||[]);
+    unpaired+=bad.length;
     const hints=[];
-    if(planned===0 && act>0) hints.push('勤務表に予定時間がありませんが打刻があります');
-    else if(act===0 && planned>0) hints.push('予定はありますが打刻がありません');
+    if(work===0 && act>0) hints.push('勤務表に勤務予定がありませんが打刻があります');
+    else if(act===0 && work>0) hints.push('勤務予定はありますが打刻がありません');
     else if(Math.abs(plannedDays-actualDays)>=3) hints.push(`予定 ${plannedDays}日 / 打刻 ${actualDays}日 と日数が食い違っています`);
     if(Math.abs(cuGap)>=1) hints.push(`勤務表の月間時間 ${planned}h とシフト記入から積み上げた ${fromShifts}h が ${cuGap>0?'+':''}${cuGap}h ずれています`);
+    if(diff>allow) hints.push(`予定より ${Math.round(diff*100)/100}h 多く働いています（残業の可能性）`);
     return {施設名:meta.施設名 || kintai.byName[key]?.[0]?.施設名 || '',
             職員名:meta.職員名 || kintai.byName[key]?.[0]?.職員名 || key,
             職種:meta.職種||'', 勤務形態:meta.勤務形態||'',
-            勤務表CU時間:planned, シフト積上時間:fromShifts, 積上差:cuGap, 予定勤務日数:plannedDays,
+            予定時間:planned, うち休暇:leave, 勤務予定:work, 予定勤務日数:plannedDays,
             CSV実績概算時間:act, 実績打刻日数:actualDays,
-            差分:diff, 差分率:planned ? Math.round(diff/planned*1000)/10 + '%' : '',
+            差分:diff, 差分率:work ? Math.round(diff/work*1000)/10 + '%' : '',
             許容:Math.round(allow*100)/100,
             判定:Math.abs(diff)<=allow?'OK':'要確認',
-            内容:[...hints, ...(notes[key]||[])].join(' ') ||
-                 'CSV実績は出勤・退勤打刻をペアリングして概算。コメントの休憩を控除。'};
+            内容:[...hints, ...bad, ...(notes[key]||[])].join(' ') ||
+                 'CSV実績は出勤・退勤打刻を時系列で対にして概算。コメントの休憩を控除。'};
   }).sort((a,b)=>String(a.職員名).localeCompare(String(b.職員名),'ja'));
+  if(unpaired && warn) warn(`対応する相手が見つからない打刻が ${unpaired} 件あります（月間集計タブの内容欄に記載）`);
+  return rows;
+}
+
+/* --------------------------------------------------------------------------
+ * H-2: 勤務表と勤怠CSVで氏名が突合できない職員を洗い出し、似た名前を提示する。
+ *   1名2行の書き方が施設ごとに違い（(A)(B)／①／（〜明け）／同名2行）、
+ *   ローマ字とカタカナの併用もあるため、決め打ちでの吸収は難しい。
+ *   候補を出して「同一人物名設定」に登録してもらう方が確実で安全。
+ * ------------------------------------------------------------------------*/
+function levenshtein(a, b){
+  if(a===b) return 0;
+  const prev=Array.from({length:b.length+1},(_,j)=>j);
+  for(let i=1;i<=a.length;i++){
+    let diag=prev[0];
+    prev[0]=i;
+    for(let j=1;j<=b.length;j++){
+      const tmp=prev[j];
+      prev[j]=Math.min(prev[j]+1, prev[j-1]+1, diag+(a[i-1]===b[j-1]?0:1));
+      diag=tmp;
+    }
+  }
+  return prev[b.length];
+}
+// 末尾の枝番・区分（(A) ① （明け） など）を落とした形。突合の第2候補に使う。
+function stripNameSuffix(name){
+  let s=String(name||'').trim();
+  // 氏名全体が括弧で囲まれている場合（（宮崎　一徳明け） など）は外側を外す
+  if(/^[（(].*[)）]$/.test(s)) s=s.slice(1,-1).trim();
+  return s
+    .replace(/[（(][^（()）]{0,4}[)）]$/,'')   // 末尾の (A) （B） (1) など
+    .replace(/[①-⑳]+$/,'')                  // 末尾の丸数字
+    .replace(/[\s　]*(明けのみ|明け|明)$/,'') // 末尾の「明け」
+    .trim();
+}
+function reconcileStaff(schedule, kintai, aliasMap){
+  const norm = v => { const k=baseNormName(v); return aliasMap?.[k] || k; };
+  const xl=Object.keys(schedule.normal||{});
+  const cs=Object.keys(kintai.byName||{});
+  const csSet=new Set(cs);
+  const onlyXl=xl.filter(k=>!csSet.has(k));
+  const onlyCs=cs.filter(k=>!xl.includes(k));
+  const rows=[];
+  const nameOf = k => (schedule.metaByName[k]||{}).職員名 || k;
+  onlyXl.forEach(k=>{
+    const shifts=Object.values(schedule.normal[k]||{}).reduce((n,l)=>n+l.length,0);
+    // ① 末尾の枝番を落として一致するか
+    const stripped=norm(stripNameSuffix(nameOf(k)));
+    let cand=null, why='';
+    if(stripped && csSet.has(stripped)){ cand=stripped; why='末尾の枝番を除くと一致'; }
+    else {
+      // ② 編集距離が近いもの
+      const best=onlyCs.map(c=>({c, d:levenshtein(k, c)})).sort((a,b)=>a.d-b.d)[0];
+      if(best && best.d<=Math.max(1, Math.floor(Math.min(k.length,best.c.length)/4))){
+        cand=best.c; why=`${best.d}文字違い`;
+      }
+    }
+    rows.push({施設名:(schedule.metaByName[k]||{}).施設名||'', 区分:'勤務表のみ', 氏名:nameOf(k),
+      シフト数:shifts, 打刻日数:'',
+      候補:cand ? (kintai.byName[cand][0].職員名) : '', 根拠:why,
+      判定: cand ? '候補あり' : '候補なし',
+      内容: cand ? '「同一人物名設定」に登録すると突合できます'
+                 : '勤怠CSVに対応する氏名がありません。別のタイムカードを使っていないか確認してください'});
+  });
+  const matched=new Set(rows.map(r=>r.候補).filter(Boolean));
+  onlyCs.forEach(k=>{
+    const nm=kintai.byName[k][0].職員名;
+    if(matched.has(nm)) return;
+    const days=new Set(kintai.byName[k].filter(r=>r.inMin!=null||r.outMin!=null).map(r=>r.日付)).size;
+    rows.push({施設名:kintai.byName[k][0].施設名||'', 区分:'勤怠CSVのみ', 氏名:nm,
+      シフト数:'', 打刻日数:days, 候補:'', 根拠:'',
+      判定: days ? '候補なし' : '打刻なし',
+      内容: days ? '勤務表に対応する氏名がありません' : '打刻が無いため影響はありません'});
+  });
+  return rows.sort((a,b)=>String(a.区分).localeCompare(String(b.区分),'ja') || String(a.氏名).localeCompare(String(b.氏名),'ja'));
+}
+
+/* --------------------------------------------------------------------------
+ * I-2: 予定時間を「勤務」と「休暇」に分けて積み上げる。
+ *   有給・振休は勤務表の予定には入るが打刻には現れないため、そのままでは
+ *   実績との差になってしまう。判定は「勤務予定（＝予定−休暇）」で行う。
+ *   施設グループの統合（J-1）で重複を除いた後に呼ぶ必要があるため、
+ *   parseSchedule ではなくここで計算する。
+ * ------------------------------------------------------------------------*/
+function computePlannedHours(schedule, master){
+  const work={}, leave={};
+  Object.entries(schedule.normal || {}).forEach(([key, byDate])=>{
+    Object.values(byDate).forEach(list=>list.forEach(s=>{
+      const h = plannedShiftHours(s.シフト, master);
+      if(isOffShift(s.シフト)) leave[key]=(leave[key]||0)+h;
+      else                     work[key] =(work[key] ||0)+h;
+    }));
+  });
+  const total={};
+  new Set([...Object.keys(work), ...Object.keys(leave)]).forEach(k=>{
+    total[k]=Math.round(((work[k]||0)+(leave[k]||0))*100)/100;
+  });
+  return {workHoursByName:work, leaveHoursByName:leave, shiftHoursByName:total};
 }
 
 /* --------------------------------------------------------------------------
@@ -1228,6 +1393,7 @@ if (typeof module !== 'undefined' && module.exports) {
     parseStoreMap, inferYearMonth, parseYmFromSheet, DEFAULT_FACILITIES,
     signedDiffMin, leaveHours, isPartialLeave, mergeShiftedDays, aggregateIssues,
     plannedShiftHours, daytimeHours, ymFromLayout,
+    computePlannedHours, reconcileStaff, levenshtein, stripNameSuffix, mergeMasters,
     detectScheduleLayout, detectMasterLayout
   };
 }
@@ -1236,7 +1402,7 @@ if (typeof document !== 'undefined') (function(){
   const $ = id => document.getElementById(id);
   const aliasStoreKey='shiftCheckerNameAliases';
   const storeMapKey='shiftCheckerStoreMap';
-  let state = { daily:[], monthly:[], timeeCount:[], timee:[], unknown:[], warnings:[], master:[], current:'daily', nameOptions:[], facilities:[] };
+  let state = { daily:[], monthly:[], timeeCount:[], timee:[], staffMatch:[], unknown:[], warnings:[], master:[], current:'daily', nameOptions:[], facilities:[] };
   let aliasMap = {};
 
   $('verLabel').textContent = APP_VERSION;
@@ -1364,7 +1530,7 @@ if (typeof document !== 'undefined') (function(){
       const known=knownFacilityList();
       const groups=groupFiles();
 
-      const all={daily:[], monthly:[], timeeCount:[], timee:[], unknown:[], master:[]};
+      const all={daily:[], monthly:[], timeeCount:[], timee:[], staffMatch:[], unknown:[], master:[]};
       const nameSet=new Set(), facilitySet=new Set(), usedSheets=[];
 
       for(const group of groups){
@@ -1377,14 +1543,15 @@ if (typeof document !== 'undefined') (function(){
         if(!group.kintai.length){ warn(`${group.base}: タイムカード実績CSVが見つかりません`); continue; }
 
         // C-5: Excel 1枚の失敗で全施設を止めない。
-        const schedules=[]; let master=null;
+        // J-2: マスタは施設グループ内で統合してから使う。1つのファイルだけでは
+        //      定義が欠けていることがある（西浅田Ⅰ=①系 / Ⅱ=ⅱ系）。
+        const loaded=[]; let master={};
         for(const item of group.excels){
           try{
             facilitySet.add(item.facility);
             const wb=XLSX.read(await readArrayBuffer(item.file),{type:'array',cellDates:false});
             const parsed=parseMaster(readWorkbookRows(wb,sheetInput('masterSheet','マスタ設定')).rows, warn);
-            master=parsed.master;
-            all.master.push(...parsed.list.map(r=>({施設名:item.facility, ...r})));
+            master=mergeMasters(master, parsed.master, warn, item.facility);
 
             const sheetName=sheetInput('manageSheet','入力シート【現場配布用】');
             const sheet=readWorkbookRows(wb, sheetName);
@@ -1398,14 +1565,23 @@ if (typeof document !== 'undefined') (function(){
               warn(`${item.facility}: 勤務表シート上の年月 ${monthKey(sheetYm)} とファイル名の年月 ${monthKey(fileYm)} が違うため、ファイル名を優先しました`);
             }
             usedSheets.push(`${item.facility}: 「${sheetName}」 氏名列 ${layout?layout.name:'既定'} / 日付 ${layout?layout.firstDay:'既定'}列から${layout?layout.step:2}列ずつ / 月間時間列 ${layout&&layout.cu>=0?layout.cu:'なし'}`);
-            schedules.push(parseSchedule(sheet, master, {facility:item.facility, y:ym.y, m:ym.m, aliasMap, includeDispatch, warn, layout}));
+            loaded.push({item, sheet, layout, ym});
           }catch(e){
             warn(`${item.file.name}: 読み込みに失敗したためスキップしました（${e.message}）`);
           }
         }
-        if(!schedules.length) continue;
+        if(!loaded.length) continue;
+        // 統合したマスタで読み直す
+        const schedules=loaded.map(x=>parseSchedule(x.sheet, master,
+          {facility:x.item.facility, y:x.ym.y, m:x.ym.m, aliasMap, includeDispatch, warn, layout:x.layout}));
+        all.master.push(...Object.values(master)
+          .filter((v,i,arr)=>arr.findIndex(z=>z.shift===v.shift)===i)
+          .map(v=>({施設名:group.base, シフト:v.shift, 開始:minToTime(v.start), 終了:minToTime(v.end),
+                    休憩開始:minToTime(v.breakStart), 休憩終了:minToTime(v.breakEnd),
+                    時間:v.hours||expectedHours(v), 判定:classifyShift(v, v.shift)})));
 
-        const schedule=mergeSchedules(schedules);
+        const schedule=mergeSchedules(schedules, warn);
+        Object.assign(schedule, computePlannedHours(schedule, master));   // I-2
         const {y,m}=schedule;
 
         const kintais=[];
@@ -1435,7 +1611,12 @@ if (typeof document !== 'undefined') (function(){
         all.unknown.push(...aggregateIssues(schedule.unknown, schedule.errorCells));
         const daily=compareDaily(schedule,kintai,tol,y,m,warn);
         all.daily.push(...(doMergeShifted ? mergeShiftedDays(daily) : daily));
-        all.monthly.push(...compareMonthly(schedule,kintai,hourTol,y,m,splitBoundary));
+        all.monthly.push(...compareMonthly(schedule,kintai,hourTol,y,m,splitBoundary,warn));
+        // H-2: 氏名が突合できない職員を洗い出す
+        const sm=reconcileStaff(schedule, kintai, aliasMap);
+        all.staffMatch.push(...sm);
+        const ng=sm.filter(r=>r.判定!=='打刻なし').length;
+        if(ng) warn(`${group.base}: 氏名が突合できない職員が ${ng} 名います（「氏名の突合」タブを確認してください）`);
 
         if(timeeRows.length || schedule.external.length){
           const mismatched=[...new Set(timeeRows.filter(r=>facilityBase(r.施設名)!==group.base).map(r=>r.施設名))];
@@ -1447,7 +1628,7 @@ if (typeof document !== 'undefined') (function(){
       }
 
       state.daily=all.daily; state.monthly=all.monthly; state.timeeCount=all.timeeCount; state.timee=all.timee;
-      state.unknown=all.unknown; state.master=all.master;
+      state.staffMatch=all.staffMatch; state.unknown=all.unknown; state.master=all.master;
       state.warnings=logs.map((w,i)=>({番号:i+1, 内容:w, 判定:'警告'}));
       state.nameOptions=[...nameSet].sort((a,b)=>a.localeCompare(b,'ja'));
       state.facilities=[...facilitySet].sort((a,b)=>a.localeCompare(b,'ja'));
@@ -1461,6 +1642,7 @@ if (typeof document !== 'undefined') (function(){
         `月間集計: ${state.monthly.length}名（要確認 ${state.monthly.filter(r=>r.判定!=='OK').length}名）\n`+
         `タイミー枠数: ${state.timeeCount.length}区分（不一致 ${timeeGap}区分）\n`+
         `タイミー明細照合: ${state.timee.length}件\n`+
+        `氏名の未突合: ${state.staffMatch.filter(r=>r.判定!=='打刻なし').length}名\n`+
         `未登録シフト: ${state.unknown.length}件\n`+
         `マスタ読込: ${state.master.length}件`+
         (usedSheets.length?`\n\n使用シート:\n・`+usedSheets.join('\n・'):'')+
@@ -1472,22 +1654,43 @@ if (typeof document !== 'undefined') (function(){
     }
   }
 
-  function mergeSchedules(items){
-    const out={normal:{}, external:[], unknown:[], errorCells:[], cuByName:{}, metaByName:{}, shiftHoursByName:{},
+  // J-1: 同じ施設グループに複数のExcelがあると、同じ勤務表が二重に入ることがある。
+  //   実データでは西浅田Ⅰ/Ⅱで同一職員・同一日の記入が509件すべて一致していた。
+  //   そのまま足すと予定が2倍になるため、職員×日付×シフトが同じものは1件にまとめる。
+  function mergeSchedules(items, warn){
+    const out={normal:{}, external:[], unknown:[], errorCells:[], cuByName:{}, metaByName:{},
                excludedKeys:new Set(), hasCuColumn:items.some(s=>s.hasCuColumn), y:items[0]?.y, m:items[0]?.m};
+    let dupShift=0, dupSlot=0;
+    const seenSlot=new Map();   // キー → 最初に登録したファイルの施設名
     items.forEach(s=>{
       Object.entries(s.normal||{}).forEach(([key, byDate])=>{
         out.normal[key] ||= {};
-        Object.entries(byDate).forEach(([d, list])=>{ out.normal[key][d] ||= []; out.normal[key][d].push(...list); });
+        Object.entries(byDate).forEach(([d, list])=>{
+          out.normal[key][d] ||= [];
+          list.forEach(rec=>{
+            const dup=out.normal[key][d].some(x=>normShift(x.シフト)===normShift(rec.シフト) && x.施設名!==rec.施設名);
+            if(dup){ dupShift++; return; }
+            out.normal[key][d].push(rec);
+          });
+        });
       });
-      Object.entries(s.shiftHoursByName||{}).forEach(([k,v])=>{ out.shiftHoursByName[k]=(out.shiftHoursByName[k]||0)+v; });
-      out.external.push(...(s.external||[]));
+      (s.external||[]).forEach(e=>{
+        // 同じファイル内に同名の枠が複数あるのは正常（南中丸の「夜勤タイミー」など）。
+        // 別ファイル由来の同一枠だけを重複として落とす。
+        const k=[e.枠名, e.日付, normShift(e.シフト)].join('|');
+        const from=seenSlot.get(k);
+        if(from!==undefined && from!==e.施設名){ dupSlot++; return; }
+        if(from===undefined) seenSlot.set(k, e.施設名);
+        out.external.push(e);
+      });
       out.unknown.push(...(s.unknown||[]));
       out.errorCells.push(...(s.errorCells||[]));
       Object.entries(s.cuByName||{}).forEach(([k,v])=>{ out.cuByName[k]=(out.cuByName[k]||0)+v; });
       Object.entries(s.metaByName||{}).forEach(([k,v])=>{ if(!out.metaByName[k]) out.metaByName[k]=v; });
       (s.excludedKeys||new Set()).forEach(k=>out.excludedKeys.add(k));
     });
+    if(dupShift && warn) warn(`同じ施設グループの複数のExcelに、同一職員・同一日・同一シフトの記入が ${dupShift} 件重複していました。1件にまとめています`);
+    if(dupSlot && warn) warn(`タイミー・派遣の枠が ${dupSlot} 件重複していました。1件にまとめています`);
     return out;
   }
   function mergeKintai(items){
@@ -1515,9 +1718,10 @@ if (typeof document !== 'undefined') (function(){
     const badMonthly=state.monthly.filter(r=>r.判定!=='OK').length;
     const timeeGap=state.timeeCount.filter(r=>r.判定!=='OK').length;
     const timeeBad=state.timee.filter(r=>r.判定!=='OK').length;
+    const staffNg=state.staffMatch.filter(r=>r.判定!=='打刻なし').length;
     $('summary').innerHTML=[
       ['日別ズレ',state.daily.length],['月間要確認',badMonthly],['タイミー枠数不一致',timeeGap],
-      ['タイミー明細ズレ',timeeBad],['未登録シフト',state.unknown.length],['警告',state.warnings.length]
+      ['タイミー明細ズレ',timeeBad],['氏名の未突合',staffNg],['未登録シフト',state.unknown.length],['警告',state.warnings.length]
     ].map(([l,n])=>`<div class="kpi"><div class="num">${n}</div><div class="lbl">${l}</div></div>`).join('');
   }
   function renderFacilityOptions(){
@@ -1560,13 +1764,14 @@ if (typeof document !== 'undefined') (function(){
     // ブラウザは download 属性に非ASCII文字が含まれると値ごと無視し、
     // ファイル名が「download」（拡張子なし）になってしまう。ASCII名にする。
     a.download={daily:'daily-diff.csv',monthly:'monthly-summary.csv',timeeCount:'timee-slot-count.csv',
-                timee:'timee-detail.csv',unknown:'shift-issues.csv',warnings:'warnings.csv'}[type]||'result.csv';
+                timee:'timee-detail.csv',staffMatch:'staff-match.csv',unknown:'shift-issues.csv',
+                warnings:'warnings.csv'}[type]||'result.csv';
     // 一部のブラウザは DOM に無いアンカーの download 属性を無視するため、追加してから押す。
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(()=>URL.revokeObjectURL(url), 1000);
   }
   function clearResults(){
-    state={daily:[],monthly:[],timeeCount:[],timee:[],unknown:[],warnings:[],master:[],current:'daily',
+    state={daily:[],monthly:[],timeeCount:[],timee:[],staffMatch:[],unknown:[],warnings:[],master:[],current:'daily',
            nameOptions:state.nameOptions||[],facilities:state.facilities||[]};
     document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('active', b.dataset.tab==='daily'));
     $('filterText').value=''; $('statusFilter').value='';

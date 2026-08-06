@@ -189,6 +189,57 @@ ok(L.signedDiffMin(23 * 60, 10) === 70, 'D-5 0時をまたいでも符号つき�
   ok(sch.hasCuColumn === false, 'G-3 月間時間の列が無いシートを判別', 'hasCuColumn=' + sch.hasCuColumn);
 }
 
+// I-1 連続夜勤（同じ行に出勤と退勤が両方ある日）
+{
+  const mk = (d, i, o, c) => ({ 日付: d, inMin: i, outMin: o, 出勤: '', 退勤: '', コメント: c || '' });
+  const r = L.actualMonthlyHours({ A: [
+    mk('2026/7/20', 17 * 60 + 45, null),
+    mk('2026/7/21', 17 * 60 + 44, 9 * 60 + 2, '休憩深夜2時間'),
+    mk('2026/7/22', null, 9 * 60 + 4, '休憩深夜2時間')] }, 2026, 7, true);
+  ok(Math.abs(r.hours.A - 26.62) < 0.05, 'I-1 明け＋入りが同じ行にある夜勤を2回分として計上',
+    r.hours.A + 'h（v2.18は13.3h）');
+  const r2 = L.actualMonthlyHours({ A: [mk('2026/7/5', 9 * 60, 18 * 60, '休憩1時間')] }, 2026, 7, true);
+  ok(r2.hours.A === 8, 'I-1 通常の日勤は従来どおり', r2.hours.A + 'h');
+  const r3 = L.actualMonthlyHours({ A: [mk('2026/7/5', 22 * 60, null)] }, 2026, 7, true);
+  ok(r3.issues.A.length === 1, 'I-1 相手のいない打刻を警告として返す', r3.issues.A[0]);
+}
+
+// I-2 休暇を勤務予定から分ける
+{
+  const master = { '日': { start: 540, end: 1080, breakStart: 780, breakEnd: 840, hours: 8 } };
+  const sch = { normal: { A: { '2026/7/1': [{ シフト: '日' }], '2026/7/2': [{ シフト: '有10' }] } } };
+  const p = L.computePlannedHours(sch, master);
+  ok(p.workHoursByName.A === 8 && p.leaveHoursByName.A === 10 && p.shiftHoursByName.A === 18,
+    'I-2 予定18h = 勤務8h + 休暇10h に分解', JSON.stringify(p));
+}
+
+// H-2 氏名の突合
+{
+  const sch = { normal: { '旭里香(A)': { '2026/7/1': [{ シフト: '日' }] }, 'THANDARAYE': { '2026/7/1': [{ シフト: '日' }] } },
+                metaByName: { '旭里香(A)': { 職員名: '旭　里香（A）' }, 'THANDARAYE': { 職員名: 'THANDAR　AYE' } } };
+  const kin = { byName: { '旭里香': [{ 職員名: '旭　里香', 日付: '2026/7/1', inMin: 540, outMin: 1080 }],
+                          'THANDERAYE': [{ 職員名: 'THANDER　AYE', 日付: '2026/7/1', inMin: 540, outMin: 1080 }] } };
+  const r = L.reconcileStaff(sch, kin, {});
+  const a = r.find(x => x.氏名 === '旭　里香（A）'), b = r.find(x => x.氏名 === 'THANDAR　AYE');
+  ok(a && a.候補 === '旭　里香', 'H-2 末尾の(A)を落として候補を提示', a && a.根拠);
+  ok(b && b.候補 === 'THANDER　AYE', 'H-2 1文字違いを編集距離で提示', b && b.根拠);
+  ok(L.stripNameSuffix('（宮崎　一徳明け）') === '宮崎　一徳' && L.stripNameSuffix('松本錠二①') === '松本錠二',
+    'H-2 施設ごとに違う枝番の書き方を落とせる');
+}
+
+// J-2 マスタの統合
+{
+  const A = { '①明初正': { start: 0, end: 600 }, 'ⅱ夜正': { start: null, end: null } };
+  const B = { '①明初正': { start: null, end: null }, 'ⅱ夜正': { start: 960, end: 1440 } };
+  const warns = [];
+  const M = L.mergeMasters(A, B, m => warns.push(m), 'テスト');
+  ok(M['①明初正'].start === 0 && M['ⅱ夜正'].start === 960,
+    'J-2 時刻を持つ定義を優先して統合', `①明初正=${M['①明初正'].start} ⅱ夜正=${M['ⅱ夜正'].start}`);
+  const w2 = [];
+  L.mergeMasters({ 'X': { start: 540, end: 1080 } }, { 'X': { start: 600, end: 1080 } }, m => w2.push(m));
+  ok(w2.length === 1, 'J-2 定義が食い違う場合は警告する', w2[0] && w2[0].slice(0, 50) + '…');
+}
+
 console.log(`\n  ${pass} passed / ${fail} failed\n`);
 
 /* ------------------------------------------------------------ 実データ検証 */
@@ -235,6 +286,7 @@ if (!ym) { console.error('年月を判定できませんでした'); process.exi
 const { y, m } = ym;
 
 const sch = L.parseSchedule(sheet, master, { facility: '(単一施設)', y, m, aliasMap, includeDispatch: false, warn, layout });
+Object.assign(sch, L.computePlannedHours(sch, master));
 const kin = L.parseKintai(readTextSmart(kintaiPath), {
   facility: '(単一施設)', excludedKeys: sch.excludedKeys, aliasMap, warn, fileName: path.basename(kintaiPath)
 });
@@ -252,7 +304,8 @@ const slots = L.buildExternalSlots(sch.external, master, y, m);
 const TOL = { late: 15, over: 60, standardHours: 8 };
 const dailyRaw = L.compareDaily(sch, kin, TOL, y, m, warn);
 const daily = L.mergeShiftedDays(dailyRaw);
-const monthly = L.compareMonthly(sch, kin, { hour: 0.25, pct: 5 }, y, m, true);
+const monthly = L.compareMonthly(sch, kin, { hour: 0.25, pct: 5 }, y, m, true, warn);
+const staffMatch = L.reconcileStaff(sch, kin, aliasMap);
 const issues = L.aggregateIssues(sch.unknown, sch.errorCells);
 const GROUP = '(単一施設)';
 const counts = L.compareTimeeCounts(slots, tim, GROUP);
@@ -264,15 +317,19 @@ console.log(`  レイアウト          氏名列 ${layout && layout.name} / 職
 console.log('='.repeat(74));
 console.log(`  日別ズレ            ${daily.length}件（1日ずれ集約前 ${dailyRaw.length}件 / うち日ずれ ${daily.filter(r => r.判定 === '日ずれ').length}件）`);
 console.log(`  月間集計            ${monthly.length}名（要確認 ${monthly.filter(r => r.判定 !== 'OK').length}名）`);
-console.log(`  CU列とシフト積上の差 ${monthly.filter(r => Math.abs(r.積上差) >= 1).length}名`);
+console.log(`  氏名の未突合        ${staffMatch.filter(r => r.判定 !== '打刻なし').length}名`);
 console.log(`  未登録シフト/エラー ${issues.length}種（延べ ${issues.reduce((a, r) => a + r.件数, 0)}件）`);
 console.log(`  タイミー枠          ${slots.length}件（タイミー ${slots.filter(s => s.枠種別 === 'タイミー').length} / 派遣 ${slots.filter(s => s.枠種別 === '派遣').length}）`);
 console.log(`  タイミー明細        ${tim.length}件`);
 
 console.log('\n■ 月間集計');
-console.log('  職員名        予定CU  積上   差  予定日  実績   打刻日     差分   許容  判定');
+console.log('  職員名         予定  休暇 勤務予定 予定日   実績  打刻日     差分   許容  判定');
 monthly.forEach(r => console.log(
-  `  ${String(r.職員名).padEnd(12)}${String(r.勤務表CU時間).padStart(6)}${String(r.シフト積上時間).padStart(6)}${String(r.積上差).padStart(5)}${String(r.予定勤務日数).padStart(6)}${String(r.CSV実績概算時間).padStart(8)}${String(r.実績打刻日数).padStart(6)}${String(r.差分).padStart(9)}${String(r.許容).padStart(6)}  ${r.判定}`));
+  `  ${String(r.職員名).padEnd(13).slice(0,13)}${String(r.予定時間).padStart(5)}${String(r.うち休暇).padStart(6)}${String(r.勤務予定).padStart(8)}${String(r.予定勤務日数).padStart(6)}${String(r.CSV実績概算時間).padStart(8)}${String(r.実績打刻日数).padStart(6)}${String(r.差分).padStart(9)}${String(r.許容).padStart(6)}  ${r.判定}`));
+if (staffMatch.length) {
+  console.log('\n■ 氏名の突合');
+  staffMatch.forEach(r => console.log(`  ${r.区分}  ${String(r.氏名).padEnd(16).slice(0,16)} ${r.判定}${r.候補 ? '  → 候補「' + r.候補 + '」(' + r.根拠 + ')' : ''}`));
+}
 
 if (counts.length) {
   console.log('\n■ タイミー枠数照合（レベル1）');
