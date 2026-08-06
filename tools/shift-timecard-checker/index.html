@@ -4,9 +4,19 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>シフト・勤怠CSV・タイミー明細 照合ツール</title>
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"
-          integrity="sha384-woC747s5rroPa2S1JXvSSJFHtxq1nLBOaLbnhpF/lRnGXR4t7T1J8n7VkO0i9pDG"
-          crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <!-- Excel読込ライブラリ(SheetJS)。
+       このHTMLと同じ場所に xlsx.full.min.js を置けばそれを使い、無ければCDNから読む。
+       ローカルに置くとオフラインでも動き、CDN側の差し替えの影響も受けない。 -->
+  <script src="./xlsx.full.min.js"></script>
+  <script>
+    if (!window.XLSX) {
+      var s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+      s.crossOrigin = 'anonymous';
+      s.referrerPolicy = 'no-referrer';
+      document.head.appendChild(s);
+    }
+  </script>
   <style>
     :root{--bg:#f6f7fb;--card:#fff;--line:#dfe3ea;--text:#1f2937;--muted:#6b7280;--accent:#2563eb;--bad:#b91c1c;--warn:#b45309;--ok:#047857;--soft:#eef2ff}
     *{box-sizing:border-box} body{margin:0;background:var(--bg);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--text)}
@@ -51,12 +61,19 @@
       <input id="manageSheet" value="管理用シート" />
       <label>マスタ設定シート名</label>
       <input id="masterSheet" value="マスタ設定" />
-      <label>時刻ズレ許容範囲（分）</label>
+      <label>遅刻・早退の許容（分）</label>
       <input id="tolerance" type="number" value="15" min="0" step="1" />
+      <label>早出・残業の許容（分）</label>
+      <input id="overTolerance" type="number" value="60" min="0" step="5" />
       <label>月間・実働時間差の許容範囲（時間）</label>
       <input id="hourTolerance" type="number" value="0.25" min="0" step="0.25" />
+      <label>月間差分の許容率（％・予定時間に対して）</label>
+      <input id="pctTolerance" type="number" value="5" min="0" step="1" />
+      <label>1日の標準所定時間（時間・「有4」等の判定に使用）</label>
+      <input id="standardHours" type="number" value="8" min="1" step="0.5" />
       <label class="chk"><input id="includeDispatch" type="checkbox" checked /> 「派遣」行もタイミー照合の枠として数える</label>
       <label class="chk"><input id="splitMonthBoundary" type="checkbox" checked /> 月をまたぐ夜勤を月末24:00で分割して計上</label>
+      <label class="chk"><input id="mergeShifted" type="checkbox" checked /> 予定と実績の「1日ずれ」を1件にまとめる</label>
       <details class="aliasAdvanced">
         <summary>タイミー明細の店舗ID → 施設名 対応表</summary>
         <textarea id="storeMap" placeholder="例：273268=宇都宮"></textarea>
@@ -68,6 +85,7 @@
         <button class="primary" id="runBtn">比較実行</button>
         <button class="secondary" id="sampleBtn">読込状況確認</button>
         <button class="danger" id="clearBtn">結果クリア</button>
+        <button class="danger" id="forgetBtn">保存した設定を消す</button>
       </div>
       <div id="status" class="status">ファイルを選択して「比較実行」を押してください。</div>
       <div class="note">同じ職員名が複数行ある場合は同じ職員として統合します。「派遣」を含む行は日別ズレ・月間集計からは除外し、タイミー照合の枠としてのみ扱います（設定で切替可）。</div>
@@ -90,7 +108,8 @@
       <button class="primary" id="addAliasBtn" type="button">追加して再比較</button>
     </div>
     <div id="aliasList" class="aliasList"></div>
-    <div class="note">旧字体・異体字（髙／高、﨑／崎、澤／沢 など）は自動で同一視します。ここでの設定は、それでも一致しない表記ゆれ用です。</div>
+    <div class="note">旧字体・異体字（髙／高、﨑／崎、澤／沢 など）は自動で同一視します。ここでの設定は、それでも一致しない表記ゆれ用です。<br>
+      この設定と店舗ID対応表は、氏名を含むためこの端末のブラウザに保存されます。共用端末では「保存した設定を消す」で消してください。</div>
     <details class="aliasAdvanced">
       <summary>直接編集</summary>
       <textarea id="nameAliases" placeholder="例：ソタンダキョー=SAWTHANDARKYAW&#10;エーエーアウン=AHEAHEAUNG"></textarea>
@@ -125,9 +144,9 @@
     <div class="tableWrap"><table id="resultTable"></table></div>
   </section>
 </main>
-<script>
+<script id="tool-logic">
 /* ============================================================================
- * シフト・勤怠CSV・タイミー明細 照合ツール v2.15
+ * シフト・勤怠CSV・タイミー明細 照合ツール v2.16
  *
  * v2.14 からの修正（A群=タイミー照合 / B群=日別・月間 / C群=無警告で壊れる箇所）
  *
@@ -160,9 +179,25 @@
  * C-5 Excel1枚の失敗で全施設の処理が止まっていた。施設単位で継続する。
  * C-6 数式エラーセル(#REF! 等)を「マスタ未登録シフト」として報告していた。分離する。
  * C-7 ファイル名からの年月推定が緩すぎた。妥当性を検証し、駄目ならシートを使う。
+ *
+ * --- v2.16 で追加 ---
+ * D-1 月間の差分だけでは原因が分からず、許容0.25時間では実質全員が要確認だった。
+ *      予定/実績の日数を並べ、許容は「時間」と「予定に対する割合」の緩い方で判定する。
+ * D-2 「有4」のような部分有給を終日休みとして扱い、打刻があると誤検出していた。
+ * D-3 受診・振8・振10 を休み系シフトとして扱う。
+ * D-4 予定と実績が1日ずれているだけのケースが2件に分かれていた。1件にまとめる。
+ * D-5 早出・残業が常態のため許容15分では日別が膨らんでいた。
+ *      遅刻・早退と早出・残業で別々の許容範囲を持つ。
+ * E-2 列位置・行範囲のハードコードが崩れても気付けなかった。見出しから検出し警告する。
+ * E-4 未登録シフト・数式エラーが出現回数ぶん重複していた。シフト単位に集約する。
+ * E-6 氏名を含む設定がブラウザに残り続けていた。消すボタンと注意書きを追加。
+ * E-7 CSVのダウンロード名に非ASCII文字があるとブラウザが無視し、
+ *      「download」（拡張子なし）で保存されていた。ASCII名にする。
+ * E-1 CDNのSRIは、配信元のハッシュを検証できないまま付けると読み込み自体が失敗する。
+ *      推測値を置くのはやめ、ローカルに置いた xlsx.full.min.js を優先して読む方式にした。
  * ==========================================================================*/
 
-const APP_VERSION = 'v2.15';
+const APP_VERSION = 'v2.16';
 
 /* --------------------------------------------------------------------------
  * 定数
@@ -273,6 +308,26 @@ function timeDiffMin(a,b){
   const d=Math.abs(a-b);
   return Math.min(d, Math.abs(a+1440-b), Math.abs(a-(b+1440)));
 }
+// D-5: 「実績 − 予定」を符号つきで返す（正=遅い、負=早い）。0時をまたぐ場合は
+// ±12時間の範囲に畳む。早出・残業と遅刻・早退を別の許容範囲で見るために使う。
+function signedDiffMin(planned, actual){
+  if(planned==null || actual==null) return null;
+  let d = actual - planned;
+  while(d >  720) d -= 1440;
+  while(d < -720) d += 1440;
+  return d;
+}
+
+// D-2: 「有4」「有8」のような時間数つきの休暇シフト。
+// 標準所定時間より短ければ部分有給とみなし、その日に打刻があっても異常としない。
+function leaveHours(shift){
+  const m = normShift(shift).match(/^(?:有|振|特|代|年)(\d+(?:\.\d+)?)$/);
+  return m ? Number(m[1]) : null;
+}
+function isPartialLeave(shift, standardHours){
+  const h = leaveHours(shift);
+  return h != null && h > 0 && h < (standardHours || 8);
+}
 
 /* --------------------------------------------------------------------------
  * 同一人物名（B-10: Union-Find で推移的に統合）
@@ -352,19 +407,76 @@ function classifyShift(m, shift){
 // タイミー照合で使う区分。明けは入りと1サイクルにまとめるので枠としては数えない。
 function slotKubun(kind){ return kind==='nightIn' ? '夜勤' : kind==='day' ? '日勤' : null; }
 
+// E-2: 列位置・行範囲のハードコードは勤務表のフォーマットが変わると黙って壊れる。
+// 見出しから実際のレイアウトを検出し、既定値と違えば検出値を使って警告する。
+const cellText = v => String(v ?? '').replace(/\s/g,'').trim();
+function detectMasterLayout(rows, warn){
+  for(let r=0; r<Math.min(rows.length,40); r++){
+    const row=rows[r] || [];
+    const at = t => row.findIndex(v => cellText(v)===t);
+    const start=at('開始'), end=at('終了');
+    if(start>0 && end>start){
+      const bs=at('休憩開始'), be=at('休憩終了');
+      const layout={ from:r+1, to:r+1+(MASTER_ROW_TO-MASTER_ROW_FROM), shift:0, start, end,
+                     breakStart: bs>0?bs:MASTER_COL.breakStart, breakEnd: be>0?be:MASTER_COL.breakEnd,
+                     hours: MASTER_COL.hours };
+      if(layout.from!==MASTER_ROW_FROM || start!==MASTER_COL.start || end!==MASTER_COL.end){
+        warn(`マスタ設定のレイアウトが既定と違うため、見出しから検出した位置を使いました（開始列=${start} 終了列=${end} 先頭行=${layout.from+1}）`);
+      }
+      return layout;
+    }
+  }
+  warn('マスタ設定シートで「開始」「終了」の見出しが見つからないため、既定の列位置で処理します');
+  return null;
+}
+// 管理用シート：氏名・職種・日付列・月間時間列の位置を見出しから割り出す。
+function detectScheduleLayout(rows, warn){
+  for(let r=0; r<Math.min(rows.length,40); r++){
+    const row=rows[r] || [];
+    const nameCol=row.findIndex(v=>cellText(v)==='氏名');
+    if(nameCol<0) continue;
+    const roleCol=row.findIndex(v=>cellText(v)==='職種');
+    let firstDay=-1, step=0;
+    for(let c=nameCol+1;c<row.length;c++){
+      if(typeof row[c]==='number' && row[c]>30000){
+        if(firstDay<0) firstDay=c; else { step=c-firstDay; break; }
+      }
+    }
+    let cuCol=-1;
+    for(let rr=r; rr<Math.min(r+3, rows.length); rr++){
+      const idx=(rows[rr]||[]).findIndex(v=>/時間指標|総労働/.test(cellText(v)));
+      if(idx>0){ cuCol=idx; break; }
+    }
+    const layout={ headerRow:r, name:nameCol, role:roleCol>=0?roleCol:COL.B, type:COL.AE,
+                   firstDay: firstDay>=0?firstDay:COL.AI, step: step>0?step:2,
+                   cu: cuCol>=0?cuCol:COL.CU };
+    const diffs=[];
+    if(layout.name!==COL.M) diffs.push(`氏名列=${layout.name}`);
+    if(layout.firstDay!==COL.AI) diffs.push(`日付開始列=${layout.firstDay}`);
+    if(layout.step!==2) diffs.push(`日付列の間隔=${layout.step}`);
+    if(layout.cu!==COL.CU) diffs.push(`月間時間列=${layout.cu}`);
+    if(diffs.length) warn(`管理用シートのレイアウトが既定と違うため、見出しから検出した位置を使いました（${diffs.join('、')}）`);
+    return layout;
+  }
+  warn('管理用シートで「氏名」の見出しが見つからないため、既定の列位置で処理します');
+  return null;
+}
+
 function parseMaster(rows, warn){
   const master={}; const list=[];
-  for(let r=MASTER_ROW_FROM; r<MASTER_ROW_TO && r<rows.length; r++){
+  const lay = detectMasterLayout(rows, warn || (()=>{})) ||
+              {from:MASTER_ROW_FROM, to:MASTER_ROW_TO, ...MASTER_COL};
+  for(let r=lay.from; r<lay.to && r<rows.length; r++){
     const row=rows[r] || [];
-    const raw=row[MASTER_COL.shift];
+    const raw=row[lay.shift];
     if(isBlank(raw)) continue;
     const key=normShift(raw);
     if(!key) continue;
     const m=normalizeMasterEnd({
       shift:key, raw:String(raw),
-      start:timeToMin(row[MASTER_COL.start]), end:timeToMin(row[MASTER_COL.end]),
-      breakStart:timeToMin(row[MASTER_COL.breakStart]), breakEnd:timeToMin(row[MASTER_COL.breakEnd]),
-      hours:hourVal(row[MASTER_COL.hours])
+      start:timeToMin(row[lay.start]), end:timeToMin(row[lay.end]),
+      breakStart:timeToMin(row[lay.breakStart]), breakEnd:timeToMin(row[lay.breakEnd]),
+      hours:hourVal(row[lay.hours])
     });
     if(master[key] && warn) warn(`マスタ設定にシフト「${key}」が重複しています。先に出てきた行を使います`);
     if(!master[key]) master[key]=m;
@@ -402,17 +514,20 @@ function parseSchedule(sheet, master, ctx){
   const normName = v => { const k=baseNormName(v); return aliasMap[k] || k; };
   const containsDispatch = (...vals) => vals.some(v => normName(v).includes('派遣'));
 
+  // E-2: 見出しから実レイアウトを検出。見つからなければ既定の列位置にフォールバック。
+  const lay = detectScheduleLayout(rows, warn || (()=>{})) ||
+              {name:COL.M, role:COL.B, type:COL.AE, firstDay:COL.AI, step:2, cu:COL.CU};
   const lastDay = daysInMonth(y,m);                 // B-9
-  const dayCols = Array.from({length:lastDay},(_,i)=>COL.AI + i*2);
+  const dayCols = Array.from({length:lastDay},(_,i)=>lay.firstDay + i*lay.step);
 
   const normal={}, external=[], unknown=[], errorCells=[];
   const cuByName={}, metaByName={}, excludedKeys=new Set();
 
   for(let r=0; r<rows.length; r++){
     const row=rows[r]||[];
-    const name=String(row[COL.M]||'').trim();
+    const name=String(row[lay.name]||'').trim();
     const key=normName(name);
-    const role=String(row[COL.B]||'').trim(), type=String(row[COL.AE]||'').trim();
+    const role=String(row[lay.role]||'').trim(), type=String(row[lay.type]||'').trim();
     if(!key || key.includes('氏名') || key.includes('月間営業活動時間')) continue;
 
     const isDispatch = containsDispatch(name, role, type);
@@ -421,7 +536,7 @@ function parseSchedule(sheet, master, ctx){
     if(isDispatch) excludedKeys.add(key);
     // B-4: タイミー枠・派遣枠の予定時間を職員の月間集計に混ぜない。
     if(!isDispatch && !isTimee){
-      const cu=hourVal(row[COL.CU]);
+      const cu=hourVal(row[lay.cu]);
       if(cu) cuByName[key]=(cuByName[key]||0)+cu;
       if(!metaByName[key]) metaByName[key]={施設名:facility, 職員名:name, 職種:role, 勤務形態:type};
     }
@@ -698,9 +813,40 @@ function actualMonthlyHours(byName, y, m, splitBoundary){
 /* --------------------------------------------------------------------------
  * 比較：日別
  * ------------------------------------------------------------------------*/
+// D-5: 早出・残業は常態なので、遅刻/早退とは別の許容範囲で見る。
+//   lateTol … 予定より遅い出勤（遅刻）・予定より早い退勤（早退）
+//   overTol … 予定より早い出勤（早出）・予定より遅い退勤（残業）
+// 打刻が複数あるときは予定に最も近いものを採用する。
+function nearestSignedDiff(planned, actuals){
+  let best=null;
+  actuals.forEach(v=>{
+    const d=signedDiffMin(planned, v);
+    if(d==null) return;
+    if(best===null || Math.abs(d)<Math.abs(best)) best=d;
+  });
+  return best;
+}
+function checkClockIn(planned, ins, lateTol, overTol, msg){
+  const d=nearestSignedDiff(planned, ins);
+  if(d===null) return false;
+  if(d>lateTol){ msg.push(`出勤 ${d}分遅い`); return true; }
+  if(-d>overTol){ msg.push(`出勤 ${-d}分早い`); return true; }
+  return false;
+}
+function checkClockOut(planned, outs, lateTol, overTol, msg){
+  const d=nearestSignedDiff(planned, outs);
+  if(d===null) return false;
+  if(-d>lateTol){ msg.push(`退勤 ${-d}分早い`); return true; }
+  if(d>overTol){ msg.push(`退勤 ${d}分遅い`); return true; }
+  return false;
+}
+
 function compareDaily(schedule, kintai, tol, y, m, warn){
+  const lateTol = tol.late ?? 15;
+  const overTol = tol.over ?? lateTol;
+  const standardHours = tol.standardHours ?? 8;
   const rows=[];
-  let outOfMonth=0;
+  let outOfMonth=0, partialLeave=0;
   const allKeys = new Set([...Object.keys(schedule.normal), ...Object.keys(kintai.map)]);
   allKeys.forEach(key=>{
     const dates = new Set([...(Object.keys(schedule.normal[key]||{})), ...(Object.keys(kintai.map[key]||{}))]);
@@ -712,9 +858,11 @@ function compareDaily(schedule, kintai, tol, y, m, warn){
       }
       const shifts = schedule.normal[key]?.[d] || [];
       const clocks = kintai.map[key]?.[d] || [];
+      const csvIn  = clocks.map(c=>c.出勤).filter(Boolean).join(' / ');
+      const csvOut = clocks.map(c=>c.退勤).filter(Boolean).join(' / ');
       if(shifts.length===0 && clocks.some(c=>c.inMin!=null || c.outMin!=null)){
         rows.push({施設名:clocks[0].施設名||'', 職員名:clocks[0].職員名, 日付:d, シフト:'空欄', 予定開始:'', 予定終了:'',
-                   CSV出勤:clocks.map(c=>c.出勤).filter(Boolean).join(' / '), CSV退勤:clocks.map(c=>c.退勤).filter(Boolean).join(' / '),
+                   CSV出勤:csvIn, CSV退勤:csvOut,
                    判定:'要確認', 内容:'空欄＝休み扱いですが、CSVに打刻があります'});
         return;
       }
@@ -722,45 +870,94 @@ function compareDaily(schedule, kintai, tol, y, m, warn){
         const m2=s.master, cls=s.kind;
         const ins=clocks.map(c=>c.inMin).filter(v=>v!=null), outs=clocks.map(c=>c.outMin).filter(v=>v!=null);
         let status='OK', msg=[];
-        if(isOffShift(s.シフト)){
-          if(ins.length || outs.length){ status='要確認'; msg.push('休み系シフトですが打刻があります'); }
+        // D-2: 「有4」のような部分有給は、その日に打刻があっても異常ではない。
+        if(isPartialLeave(s.シフト, standardHours)){
+          partialLeave++;
+        } else if(isOffShift(s.シフト)){
+          if(ins.length || outs.length){
+            status='要確認';
+            const h=leaveHours(s.シフト);
+            msg.push(h!=null ? `休暇（${h}時間）の予定ですが打刻があります` : '休み系シフトですが打刻があります');
+          }
         } else if(!m2){ status='未登録'; msg.push('シフトがマスタ未登録'); }
         else if(cls==='off'){
           if(ins.length || outs.length){ status='要確認'; msg.push('休み系シフトですが打刻があります'); }
         } else if(cls==='nightIn'){
           if(!ins.length){ status='要確認'; msg.push('夜勤入り・出勤打刻なし'); }
-          else { const best=Math.min(...ins.map(v=>timeDiffMin(v,m2.start))); if(best>tol){ status='ズレ'; msg.push(`出勤 ${best}分ズレ`); } }
+          else if(checkClockIn(m2.start, ins, lateTol, overTol, msg)) status='ズレ';
         } else if(cls==='nightOut'){
           if(!outs.length){ status='要確認'; msg.push('夜勤明け・退勤打刻なし'); }
-          else { const best=Math.min(...outs.map(v=>timeDiffMin(v,m2.end))); if(best>tol){ status='ズレ'; msg.push(`退勤 ${best}分ズレ`); } }
+          else if(checkClockOut(m2.end, outs, lateTol, overTol, msg)) status='ズレ';
         } else {
           if(!ins.length && !outs.length){ status='要確認'; msg.push('勤務予定ですが打刻がありません'); }
           else {
             if(m2.start!=null){
               if(!ins.length){ status='要確認'; msg.push('出勤打刻なし'); }
-              else { const best=Math.min(...ins.map(v=>diffMin(v,m2.start))); if(best>tol){ status='ズレ'; msg.push(`出勤 ${best}分ズレ`); } }
+              else if(checkClockIn(m2.start, ins, lateTol, overTol, msg)) status = status==='OK' ? 'ズレ' : status;
             }
             if(m2.end!=null){
               if(!outs.length){ status='要確認'; msg.push('退勤打刻なし'); }
-              else { const best=Math.min(...outs.map(v=>diffMin(v,m2.end))); if(best>tol){ status='ズレ'; msg.push(`退勤 ${best}分ズレ`); } }
+              else if(checkClockOut(m2.end, outs, lateTol, overTol, msg)) status = status==='OK' ? 'ズレ' : status;
             }
           }
         }
         if(status!=='OK') rows.push({施設名:s.施設名||'', 職員名:s.職員名, 日付:d, シフト:s.シフト,
           予定開始:minToTime(m2?.start), 予定終了:minToTime(m2?.end),
-          CSV出勤:clocks.map(c=>c.出勤).filter(Boolean).join(' / '), CSV退勤:clocks.map(c=>c.退勤).filter(Boolean).join(' / '),
-          判定:status, 内容:msg.join('、')});
+          CSV出勤:csvIn, CSV退勤:csvOut, 判定:status, 内容:msg.join('、')});
       });
     });
   });
   if(outOfMonth) warn(`勤務表(${y}/${m})の対象外の日付に打刻が ${outOfMonth} 日分あり、日別ズレからは除外しました`);
-  return rows.sort((a,b)=>String(a.職員名).localeCompare(String(b.職員名),'ja') || dayIndex(a.日付)-dayIndex(b.日付));
+  if(partialLeave) warn(`部分有給（有4 など、標準所定 ${standardHours} 時間未満の休暇）が ${partialLeave} 件あり、打刻の有無を判定しませんでした`);
+  return sortDaily(rows);
+}
+const sortDaily = rows => rows.sort((a,b)=>
+  String(a.職員名).localeCompare(String(b.職員名),'ja') || dayIndex(a.日付)-dayIndex(b.日付));
+
+// D-4: 予定と実績が1日ずれているだけのケースは、v2.15 までは
+// 「予定日に打刻なし」と「隣の日は空欄なのに打刻あり」の2件に分かれていた。
+// 同一人物で隣り合う日のペアを1件の「日ずれ」にまとめる。
+function mergeShiftedDays(rows){
+  const isMissing = r => r.シフト!=='空欄' && /打刻なし|打刻がありません/.test(r.内容||'');
+  const isStray   = r => r.シフト==='空欄';
+  // 「出勤が無い予定」には出勤打刻のある日、「退勤が無い予定」には退勤打刻のある日だけを
+  // 結び付ける。種類を見ないと、夜勤入りの予定に前日の退勤打刻を当ててしまう。
+  const needsIn  = r => /出勤打刻なし|打刻がありません/.test(r.内容||'');
+  const needsOut = r => /退勤打刻なし|打刻がありません/.test(r.内容||'');
+  const fits = (miss, stray) =>
+    (needsIn(miss)  && !!stray.CSV出勤) ||
+    (needsOut(miss) && !!stray.CSV退勤);
+  const byPerson={};
+  rows.forEach((r,i)=>{ (byPerson[r.職員名] ||= []).push(i); });
+  const removed=new Set(), merged=[];
+  Object.values(byPerson).forEach(idxs=>{
+    const missing=idxs.filter(i=>isMissing(rows[i]));
+    const stray=idxs.filter(i=>isStray(rows[i]));
+    missing.forEach(i=>{
+      if(removed.has(i)) return;
+      const a=rows[i];
+      const j=stray.find(j=>!removed.has(j)
+        && Math.abs(dayIndex(rows[j].日付)-dayIndex(a.日付))===1
+        && fits(a, rows[j]));
+      if(j===undefined) return;
+      const b=rows[j];
+      removed.add(i); removed.add(j);
+      merged.push({...a, CSV出勤:b.CSV出勤, CSV退勤:b.CSV退勤, 判定:'日ずれ',
+        内容:`予定は ${a.日付} の「${a.シフト}」ですが、打刻は ${b.日付}（${b.CSV出勤||'-'}〜${b.CSV退勤||'-'}）にあります`});
+    });
+  });
+  return sortDaily(rows.filter((_,i)=>!removed.has(i)).concat(merged));
 }
 
 /* --------------------------------------------------------------------------
  * 比較：月間
  * ------------------------------------------------------------------------*/
-function compareMonthly(schedule, kintai, hourTol, y, m, splitBoundary){
+// D-1: 差分だけでは原因が分からず、許容0.25時間では実質全員が要確認になる。
+// 予定・実績の「日数」を並べて原因が見えるようにし、許容は
+// 「時間」と「予定に対する割合」のどちらか緩い方で判定する。
+function compareMonthly(schedule, kintai, tol, y, m, splitBoundary){
+  const hourTol = tol.hour ?? 0.25;
+  const pctTol  = tol.pct ?? 0;
   const {hours:actual, notes} = actualMonthlyHours(kintai.byName, y, m, splitBoundary);
   const keys=new Set([...Object.keys(schedule.cuByName), ...Object.keys(actual)]);
   return [...keys].map(key=>{
@@ -768,13 +965,47 @@ function compareMonthly(schedule, kintai, hourTol, y, m, splitBoundary){
     const planned=Math.round((schedule.cuByName[key]||0)*100)/100;
     const act=actual[key]||0;
     const diff=Math.round((act-planned)*100)/100;
+    const plannedDays=Object.entries(schedule.normal[key]||{})
+      .filter(([d,list])=>inMonth(d,y,m) && list.some(x=>!isOffShift(x.シフト) && x.kind!=='off')).length;
+    const actualDays=new Set((kintai.byName[key]||[])
+      .filter(r=>inMonth(r.日付,y,m) && (r.inMin!=null||r.outMin!=null)).map(r=>r.日付)).size;
+    const allow=Math.max(hourTol, planned*(pctTol/100));
+    const hints=[];
+    if(planned===0 && act>0) hints.push('勤務表に予定時間がありませんが打刻があります');
+    else if(act===0 && planned>0) hints.push('予定はありますが打刻がありません');
+    else if(Math.abs(plannedDays-actualDays)>=3) hints.push(`予定 ${plannedDays}日 / 打刻 ${actualDays}日 と日数が食い違っています`);
     return {施設名:meta.施設名 || kintai.byName[key]?.[0]?.施設名 || '',
             職員名:meta.職員名 || kintai.byName[key]?.[0]?.職員名 || key,
             職種:meta.職種||'', 勤務形態:meta.勤務形態||'',
-            勤務表CU時間:planned, CSV実績概算時間:act, 差分:diff,
-            判定:Math.abs(diff)<=hourTol?'OK':'要確認',
-            内容:['CSV実績は出勤・退勤打刻をペアリングして概算。コメントの休憩を控除。', ...(notes[key]||[])].join(' ')};
+            勤務表CU時間:planned, 予定勤務日数:plannedDays,
+            CSV実績概算時間:act, 実績打刻日数:actualDays,
+            差分:diff, 差分率:planned ? Math.round(diff/planned*1000)/10 + '%' : '',
+            許容:Math.round(allow*100)/100,
+            判定:Math.abs(diff)<=allow?'OK':'要確認',
+            内容:[...hints, ...(notes[key]||[])].join(' ') ||
+                 'CSV実績は出勤・退勤打刻をペアリングして概算。コメントの休憩を控除。'};
   }).sort((a,b)=>String(a.職員名).localeCompare(String(b.職員名),'ja'));
+}
+
+/* --------------------------------------------------------------------------
+ * E-4: 未登録シフト・数式エラーは出現回数ぶん重複するので、シフト単位に集約する。
+ * ------------------------------------------------------------------------*/
+function aggregateIssues(unknown, errorCells){
+  const map={};
+  const add=(種別,r,shift,内容)=>{
+    const k=[種別, r.施設名||'', shift].join('|');
+    const e = map[k] ||= {施設名:r.施設名||'', 種別, シフト:shift, 内容, 件数:0, 対象者:new Set(), 日付:[]};
+    e.件数++; e.対象者.add(r.職員名);
+    if(e.日付.length<5) e.日付.push(r.日付);
+  };
+  (unknown||[]).forEach(u=>add('マスタ未登録', u, u.シフト, u.内容));
+  (errorCells||[]).forEach(e=>add('数式エラー', e, e.セル値, e.内容));
+  return Object.values(map).map(e=>({
+    施設名:e.施設名, 種別:e.種別, シフト:e.シフト, 件数:e.件数,
+    対象者:[...e.対象者].join('、'),
+    日付例:e.日付.join('、') + (e.件数>e.日付.length ? ' ほか' : ''),
+    判定:'要確認', 内容:e.内容
+  })).sort((a,b)=>b.件数-a.件数);
 }
 
 /* --------------------------------------------------------------------------
@@ -877,7 +1108,9 @@ if (typeof module !== 'undefined' && module.exports) {
     parseSchedule, buildExternalSlots, parseCSV, rowsToObjects, requireHeaders, breakHours, commentOutMin,
     parseKintai, parseTimee, actualMonthlyHours, compareDaily, compareMonthly,
     compareTimeeCounts, compareTimeeDetails, inferFacility, facilityBase, facilityFromText,
-    parseStoreMap, inferYearMonth, parseYmFromSheet, DEFAULT_FACILITIES
+    parseStoreMap, inferYearMonth, parseYmFromSheet, DEFAULT_FACILITIES,
+    signedDiffMin, leaveHours, isPartialLeave, mergeShiftedDays, aggregateIssues,
+    detectScheduleLayout, detectMasterLayout
   };
 }
 
@@ -998,11 +1231,15 @@ if (typeof document !== 'undefined') (function(){
     try{
       refreshNameAliases();
       if(!fileList('excelFile').length || !fileList('kintaiFile').length) throw new Error('勤務表Excelとタイムカード実績CSVを選択してください。');
-      if(!window.XLSX) throw new Error('Excel読込ライブラリを読み込めません。インターネット接続を確認してください。');
+      if(!window.XLSX) throw new Error('Excel読込ライブラリ(SheetJS)を読み込めません。インターネット接続を確認するか、xlsx.full.min.js をこのHTMLと同じ場所に置いて開き直してください。');
       $('status').textContent='読み込み中...';
 
-      const tol=Number($('tolerance').value||15);
-      const hourTol=Number($('hourTolerance').value||0.25);
+      const tol={ late:Number($('tolerance').value||15),
+                  over:Number($('overTolerance').value||60),
+                  standardHours:Number($('standardHours').value||8) };
+      const hourTol={ hour:Number($('hourTolerance').value||0.25),
+                      pct:Number($('pctTolerance').value||0) };
+      const doMergeShifted=$('mergeShifted').checked;
       const includeDispatch=$('includeDispatch').checked;
       const splitBoundary=$('splitMonthBoundary').checked;
       const storeMap=parseStoreMap($('storeMap').value);
@@ -1072,8 +1309,10 @@ if (typeof document !== 'undefined') (function(){
         if(before!==timeeRows.length) warn(`タイミー明細のうち ${before-timeeRows.length} 件は ${y}/${m} 以外の日付のため除外しました`);
 
         collectNameOptions(schedule,kintai,timeeRows).forEach(n=>nameSet.add(n));
-        all.unknown.push(...schedule.unknown, ...schedule.errorCells.map(e=>({...e, シフト:e.セル値})));
-        all.daily.push(...compareDaily(schedule,kintai,tol,y,m,warn));
+        // E-4: 未登録シフトと数式エラーはシフト単位に集約して件数で示す。
+        all.unknown.push(...aggregateIssues(schedule.unknown, schedule.errorCells));
+        const daily=compareDaily(schedule,kintai,tol,y,m,warn);
+        all.daily.push(...(doMergeShifted ? mergeShiftedDays(daily) : daily));
         all.monthly.push(...compareMonthly(schedule,kintai,hourTol,y,m,splitBoundary));
 
         if(timeeRows.length || schedule.external.length){
@@ -1081,7 +1320,7 @@ if (typeof document !== 'undefined') (function(){
           if(mismatched.length) warn(`タイミー明細から読み取った施設名（${mismatched.join('、')}）がファイル名から判断した「${group.base}」と違います。「${group.base}」として照合しました`);
           const slots=buildExternalSlots(schedule.external, master||{}, y, m);
           all.timeeCount.push(...compareTimeeCounts(slots, timeeRows, group.base));
-          all.timee.push(...compareTimeeDetails(slots, timeeRows, tol, hourTol, group.base));
+          all.timee.push(...compareTimeeDetails(slots, timeeRows, tol.late, hourTol.hour, group.base));
         }
       }
 
@@ -1190,11 +1429,16 @@ if (typeof document !== 'undefined') (function(){
     const rows=state[type]||[];
     if(!rows.length){ alert('出力するデータがありません。'); return; }
     const blob=new Blob(['﻿'+toCsv(rows)],{type:'text/csv;charset=utf-8'});
+    const url=URL.createObjectURL(blob);
     const a=document.createElement('a');
-    a.href=URL.createObjectURL(blob);
-    a.download={daily:'日別ズレ一覧.csv',monthly:'職員別月間集計.csv',timeeCount:'タイミー枠数照合.csv',
-                timee:'タイミー明細照合.csv',unknown:'未登録シフト一覧.csv',warnings:'警告一覧.csv'}[type]||'result.csv';
-    a.click(); URL.revokeObjectURL(a.href);
+    a.href=url;
+    // ブラウザは download 属性に非ASCII文字が含まれると値ごと無視し、
+    // ファイル名が「download」（拡張子なし）になってしまう。ASCII名にする。
+    a.download={daily:'daily-diff.csv',monthly:'monthly-summary.csv',timeeCount:'timee-slot-count.csv',
+                timee:'timee-detail.csv',unknown:'shift-issues.csv',warnings:'warnings.csv'}[type]||'result.csv';
+    // 一部のブラウザは DOM に無いアンカーの download 属性を無視するため、追加してから押す。
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 1000);
   }
   function clearResults(){
     state={daily:[],monthly:[],timeeCount:[],timee:[],unknown:[],warnings:[],master:[],current:'daily',
@@ -1227,6 +1471,14 @@ if (typeof document !== 'undefined') (function(){
   $('clearBtn').addEventListener('click',clearResults);
   $('sampleBtn').addEventListener('click',checkSelected);
   $('addAliasBtn').addEventListener('click',addAliasFromSelects);
+  // E-6: 氏名を含む設定はブラウザに保存されるため、消す手段を用意する。
+  $('forgetBtn').addEventListener('click',()=>{
+    if(!confirm('この端末に保存した「同一人物名設定」と「店舗ID対応表」を消します。よろしいですか？')) return;
+    localStorage.removeItem(aliasStoreKey); localStorage.removeItem(storeMapKey);
+    $('nameAliases').value=''; $('storeMap').value='';
+    refreshNameAliases(); renderAliasList(); renderNameOptions();
+    $('status').textContent='この端末に保存した設定を消しました。';
+  });
 
   $('nameAliases').value = localStorage.getItem(aliasStoreKey) || '';
   $('storeMap').value = localStorage.getItem(storeMapKey) || '';

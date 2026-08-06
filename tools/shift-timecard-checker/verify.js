@@ -15,7 +15,11 @@ const path = require('path');
 
 function loadLogic() {
   const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
-  const code = html.split('<script>')[1].split('</script>')[0];
+  // ロジック本体は <script id="tool-logic"> に入っている。
+  // CDNフォールバック用の小さな <script> と取り違えないよう id で特定する。
+  const m = html.match(/<script id="tool-logic">([\s\S]*?)<\/script>/);
+  if (!m) throw new Error('tool-logic スクリプトが見つかりません');
+  const code = m[1];
   const sandbox = { module: { exports: {} }, console };
   sandbox.exports = sandbox.module.exports;
   vm.createContext(sandbox);
@@ -88,6 +92,52 @@ ok(L.inferFacility({ name: '【タイミー】RASIEL宇都宮_明細.csv' }, L.D
 // A-4 日跨ぎの時刻差
 ok(L.timeDiffMin(23 * 60, 10) === 70, 'A-4 23:00 と 0:10 の差は 70分', L.timeDiffMin(23 * 60, 10) + '分');
 
+// D-2 部分有給
+ok(L.leaveHours('有4') === 4 && L.leaveHours('有') === null, 'D-2 「有4」から休暇時間を取り出す', `有4→${L.leaveHours('有4')} / 有→${L.leaveHours('有')}`);
+ok(L.isPartialLeave('有4', 8) && !L.isPartialLeave('有8', 8) && !L.isPartialLeave('有13', 8),
+  'D-2 標準所定8hなら 有4 のみ部分有給', `有4=${L.isPartialLeave('有4', 8)} 有8=${L.isPartialLeave('有8', 8)} 有13=${L.isPartialLeave('有13', 8)}`);
+
+// D-3 休み系シフト
+ok(L.isOffShift('受診') && L.isOffShift('振8') && L.isOffShift('振10'),
+  'D-3 受診・振8・振10 を休み系として扱う');
+
+// D-5 早出・残業と遅刻・早退を区別
+ok(L.signedDiffMin(9 * 60, 8 * 60 + 24) === -36, 'D-5 予定9:00に8:24出勤 → -36分（早い）', L.signedDiffMin(9 * 60, 8 * 60 + 24));
+ok(L.signedDiffMin(18 * 60, 18 * 60 + 41) === 41, 'D-5 予定18:00に18:41退勤 → +41分（遅い）', L.signedDiffMin(18 * 60, 18 * 60 + 41));
+ok(L.signedDiffMin(23 * 60, 10) === 70, 'D-5 0時をまたいでも符号つきで求まる', L.signedDiffMin(23 * 60, 10));
+
+// D-4 1日ずれの集約
+{
+  const src = [
+    { 職員名: 'A', 日付: '2026/7/7', シフト: '深夜', 内容: '夜勤入り・出勤打刻なし', CSV出勤: '', CSV退勤: '', 判定: '要確認' },
+    { 職員名: 'A', 日付: '2026/7/6', シフト: '空欄', 内容: '空欄＝休み扱いですが、CSVに打刻があります', CSV出勤: '21:47', CSV退勤: '', 判定: '要確認' },
+    { 職員名: 'B', 日付: '2026/7/1', シフト: '日', 内容: '出勤打刻なし', CSV出勤: '', CSV退勤: '', 判定: '要確認' }
+  ];
+  const out = L.mergeShiftedDays(src);
+  ok(out.length === 2 && out.some(r => r.判定 === '日ずれ'), 'D-4 隣り合う「打刻なし」と「空欄+打刻あり」を1件に',
+    `${src.length}件 → ${out.length}件 / ${out.find(r => r.判定 === '日ずれ')?.内容 || ''}`);
+}
+
+// E-4 未登録シフト・エラーの集約
+{
+  const agg = L.aggregateIssues(
+    [{ 施設名: 'X', 職員名: 'A', 日付: '2026/7/1', シフト: '謎', 内容: 'マスタなし' },
+     { 施設名: 'X', 職員名: 'B', 日付: '2026/7/2', シフト: '謎', 内容: 'マスタなし' }],
+    [{ 施設名: 'X', 職員名: 'C', 日付: '2026/7/3', セル値: '#エラー', 内容: '数式エラー' }]);
+  ok(agg.length === 2 && agg[0].件数 === 2, 'E-4 シフト単位に集約して件数で示す',
+    agg.map(a => `${a.種別}:${a.シフト}×${a.件数}`).join(' / '));
+}
+
+// E-2 レイアウト自動検出
+{
+  const warns = [];
+  const rows = [[], ['職種', '', '氏名', 46204, '', 46205, '', '', '時間指標']];
+  const lay = L.detectScheduleLayout(rows, m => warns.push(m));
+  ok(lay && lay.name === 2 && lay.firstDay === 3 && lay.step === 2 && lay.cu === 8,
+    'E-2 見出しから氏名・日付・月間時間の列を検出', JSON.stringify(lay));
+  ok(warns.length > 0, 'E-2 既定と違えば警告する', warns[0]?.slice(0, 50) + '…');
+}
+
 console.log(`\n  ${pass} passed / ${fail} failed\n`);
 
 /* ------------------------------------------------------------ 実データ検証 */
@@ -146,8 +196,11 @@ if (timeePath) {
 }
 
 const slots = L.buildExternalSlots(sch.external, master, y, m);
-const daily = L.compareDaily(sch, kin, 15, y, m, warn);
-const monthly = L.compareMonthly(sch, kin, 0.25, y, m, true);
+const TOL = { late: 15, over: 60, standardHours: 8 };
+const dailyRaw = L.compareDaily(sch, kin, TOL, y, m, warn);
+const daily = L.mergeShiftedDays(dailyRaw);
+const monthly = L.compareMonthly(sch, kin, { hour: 0.25, pct: 5 }, y, m, true);
+const issues = L.aggregateIssues(sch.unknown, sch.errorCells);
 const GROUP = '(単一施設)';
 const counts = L.compareTimeeCounts(slots, tim, GROUP);
 const details = L.compareTimeeDetails(slots, tim, 15, 0.25, GROUP);
@@ -155,12 +208,16 @@ const details = L.compareTimeeDetails(slots, tim, 15, 0.25, GROUP);
 console.log('='.repeat(74));
 console.log(`■ 実データ検証  ${y}/${m}`);
 console.log('='.repeat(74));
-console.log(`  日別ズレ            ${daily.length}件`);
+console.log(`  日別ズレ            ${daily.length}件（1日ずれ集約前 ${dailyRaw.length}件 / うち日ずれ ${daily.filter(r => r.判定 === '日ずれ').length}件）`);
 console.log(`  月間集計            ${monthly.length}名（要確認 ${monthly.filter(r => r.判定 !== 'OK').length}名）`);
-console.log(`  未登録シフト        ${sch.unknown.length}件`);
-console.log(`  数式エラーセル      ${sch.errorCells.length}件`);
+console.log(`  未登録シフト/エラー ${issues.length}種（延べ ${issues.reduce((a, r) => a + r.件数, 0)}件）`);
 console.log(`  タイミー枠          ${slots.length}件（タイミー ${slots.filter(s => s.枠種別 === 'タイミー').length} / 派遣 ${slots.filter(s => s.枠種別 === '派遣').length}）`);
 console.log(`  タイミー明細        ${tim.length}件`);
+
+console.log('\n■ 月間集計');
+console.log('  職員名        予定CU  予定日数   実績   打刻日数     差分   許容  判定');
+monthly.forEach(r => console.log(
+  `  ${String(r.職員名).padEnd(12)}${String(r.勤務表CU時間).padStart(6)}${String(r.予定勤務日数).padStart(8)}${String(r.CSV実績概算時間).padStart(9)}${String(r.実績打刻日数).padStart(8)}${String(r.差分).padStart(9)}${String(r.許容).padStart(6)}  ${r.判定}${r.内容 && !r.内容.startsWith('CSV実績') ? '  ← ' + r.内容 : ''}`));
 
 if (counts.length) {
   console.log('\n■ タイミー枠数照合（レベル1）');
