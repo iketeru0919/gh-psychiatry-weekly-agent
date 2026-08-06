@@ -1,0 +1,1244 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>シフト・勤怠CSV・タイミー明細 照合ツール</title>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"
+          integrity="sha384-woC747s5rroPa2S1JXvSSJFHtxq1nLBOaLbnhpF/lRnGXR4t7T1J8n7VkO0i9pDG"
+          crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <style>
+    :root{--bg:#f6f7fb;--card:#fff;--line:#dfe3ea;--text:#1f2937;--muted:#6b7280;--accent:#2563eb;--bad:#b91c1c;--warn:#b45309;--ok:#047857;--soft:#eef2ff}
+    *{box-sizing:border-box} body{margin:0;background:var(--bg);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--text)}
+    header{background:#111827;color:#fff;padding:18px 24px} header h1{font-size:20px;margin:0 0 4px} header p{margin:0;color:#cbd5e1;font-size:13px}
+    main{max-width:1280px;margin:0 auto;padding:20px}
+    .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+    .card h2{font-size:16px;margin:0 0 12px}.card h3{font-size:14px;margin:0 0 10px;color:#374151}.note{font-size:12px;color:var(--muted);line-height:1.5;margin-top:8px}
+    label{display:block;font-size:12px;font-weight:600;margin:10px 0 5px} input,select,button,textarea{font:inherit} input[type=file],input[type=number],select,textarea{width:100%;border:1px solid var(--line);border-radius:8px;padding:9px;background:#fff} textarea{min-height:72px;resize:vertical;font-size:12px;line-height:1.45}
+    label.chk{display:flex;align-items:center;gap:8px;font-weight:600;margin:10px 0 0} label.chk input{width:auto;margin:0}
+    button{border:0;border-radius:9px;padding:10px 14px;cursor:pointer;font-weight:700}.primary{background:var(--accent);color:#fff}.secondary{background:#e5e7eb;color:#111827}.danger{background:#fee2e2;color:#991b1b}
+    .actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.status{padding:10px 12px;border-radius:8px;background:#f3f4f6;font-size:13px;margin-top:10px;white-space:pre-wrap;max-height:280px;overflow:auto}
+    .summary{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin:16px 0}.kpi{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px}.kpi .num{font-size:24px;font-weight:800}.kpi .lbl{font-size:12px;color:var(--muted)}
+    .tabs{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0}.tab{background:#fff;border:1px solid var(--line)}.tab.active{background:#111827;color:#fff}
+    .tableWrap{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:auto;max-height:560px}.toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:10px 0}.toolbar input{max-width:360px;border:1px solid var(--line);border-radius:8px;padding:9px}.toolbar select{max-width:180px}
+    table{border-collapse:collapse;width:100%;font-size:12px;min-width:980px} th,td{border-bottom:1px solid #edf0f5;padding:7px 8px;text-align:left;white-space:nowrap} th{position:sticky;top:0;background:#f9fafb;z-index:1} tr:hover td{background:#f8fafc}
+    .badge{display:inline-block;border-radius:999px;padding:2px 8px;font-weight:700;font-size:11px}.bOK{background:#dcfce7;color:#166534}.bWARN{background:#fef3c7;color:#92400e}.bBAD{background:#fee2e2;color:#991b1b}.bINFO{background:#dbeafe;color:#1e40af}
+    .aliasPanel{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px;margin:16px 0}.aliasPanel h2{font-size:16px;margin:0 0 12px}.aliasForm{display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end}.aliasList{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}.aliasItem{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:999px;background:#f9fafb;padding:5px 6px 5px 10px;font-size:12px}.aliasItem button{border-radius:999px;padding:2px 7px;background:#fee2e2;color:#991b1b}.aliasAdvanced{margin-top:12px}.aliasAdvanced summary{cursor:pointer;font-size:12px;color:var(--muted);font-weight:700}
+    .small{font-size:11px;color:var(--muted)} .hide{display:none}.wide{grid-column:1/-1}.pill{background:var(--soft);border:1px solid #c7d2fe;border-radius:999px;padding:3px 8px;font-size:12px}
+    @media(max-width:900px){.grid,.summary,.aliasForm{grid-template-columns:1fr}.toolbar{display:block}.toolbar input{max-width:none;width:100%;margin-top:8px}}
+  </style>
+</head>
+<body>
+<header>
+  <h1>シフト・勤怠CSV・タイミー明細 照合ツール <span id="verLabel"></span></h1>
+  <p>勤務表Excelの「管理用シート」と「マスタ設定」を基準に、勤怠CSV・タイミー明細CSVとのズレを確認します。</p>
+</header>
+<main>
+  <section class="grid">
+    <div class="card">
+      <h2>1. ファイル選択</h2>
+      <label>勤務表Excel（.xlsx・複数選択可）</label>
+      <input id="excelFile" type="file" accept=".xlsx,.xls" multiple />
+      <label>タイムカード実績CSV（複数選択可）</label>
+      <input id="kintaiFile" type="file" accept=".csv" multiple />
+      <label>タイミー利用明細CSV（任意・複数選択可）</label>
+      <input id="timeeFile" type="file" accept=".csv" multiple />
+      <div class="note">Excel読込にはSheetJS CDNを使用します。同じファイルを重複して選んだ場合は自動で1つにまとめます。</div>
+    </div>
+    <div class="card">
+      <h2>2. 設定</h2>
+      <label>管理用シート名</label>
+      <input id="manageSheet" value="管理用シート" />
+      <label>マスタ設定シート名</label>
+      <input id="masterSheet" value="マスタ設定" />
+      <label>時刻ズレ許容範囲（分）</label>
+      <input id="tolerance" type="number" value="15" min="0" step="1" />
+      <label>月間・実働時間差の許容範囲（時間）</label>
+      <input id="hourTolerance" type="number" value="0.25" min="0" step="0.25" />
+      <label class="chk"><input id="includeDispatch" type="checkbox" checked /> 「派遣」行もタイミー照合の枠として数える</label>
+      <label class="chk"><input id="splitMonthBoundary" type="checkbox" checked /> 月をまたぐ夜勤を月末24:00で分割して計上</label>
+      <details class="aliasAdvanced">
+        <summary>タイミー明細の店舗ID → 施設名 対応表</summary>
+        <textarea id="storeMap" placeholder="例：273268=宇都宮"></textarea>
+      </details>
+    </div>
+    <div class="card">
+      <h2>3. 実行</h2>
+      <div class="actions">
+        <button class="primary" id="runBtn">比較実行</button>
+        <button class="secondary" id="sampleBtn">読込状況確認</button>
+        <button class="danger" id="clearBtn">結果クリア</button>
+      </div>
+      <div id="status" class="status">ファイルを選択して「比較実行」を押してください。</div>
+      <div class="note">同じ職員名が複数行ある場合は同じ職員として統合します。「派遣」を含む行は日別ズレ・月間集計からは除外し、タイミー照合の枠としてのみ扱います（設定で切替可）。</div>
+    </div>
+  </section>
+
+  <section class="summary" id="summary"></section>
+
+  <section class="aliasPanel">
+    <h2>同一人物名設定</h2>
+    <div class="aliasForm">
+      <div>
+        <label>基準にする名前</label>
+        <select id="aliasCanonical"></select>
+      </div>
+      <div>
+        <label>同じ人として扱う名前</label>
+        <select id="aliasVariant"></select>
+      </div>
+      <button class="primary" id="addAliasBtn" type="button">追加して再比較</button>
+    </div>
+    <div id="aliasList" class="aliasList"></div>
+    <div class="note">旧字体・異体字（髙／高、﨑／崎、澤／沢 など）は自動で同一視します。ここでの設定は、それでも一致しない表記ゆれ用です。</div>
+    <details class="aliasAdvanced">
+      <summary>直接編集</summary>
+      <textarea id="nameAliases" placeholder="例：ソタンダキョー=SAWTHANDARKYAW&#10;エーエーアウン=AHEAHEAUNG"></textarea>
+    </details>
+  </section>
+
+  <section class="card wide">
+    <h2>結果</h2>
+    <div class="actions">
+      <button class="secondary" data-dl="daily">日別ズレCSV</button>
+      <button class="secondary" data-dl="monthly">月間集計CSV</button>
+      <button class="secondary" data-dl="timeeCount">タイミー枠数CSV</button>
+      <button class="secondary" data-dl="timee">タイミー明細照合CSV</button>
+      <button class="secondary" data-dl="unknown">未登録シフトCSV</button>
+      <button class="secondary" data-dl="warnings">警告CSV</button>
+    </div>
+    <div class="tabs">
+      <button class="tab active" data-tab="daily">日別ズレ</button>
+      <button class="tab" data-tab="monthly">月間集計</button>
+      <button class="tab" data-tab="timeeCount">タイミー枠数</button>
+      <button class="tab" data-tab="timee">タイミー明細照合</button>
+      <button class="tab" data-tab="unknown">未登録シフト</button>
+      <button class="tab" data-tab="warnings">警告</button>
+      <button class="tab" data-tab="master">読込マスタ</button>
+    </div>
+    <div class="toolbar">
+      <div class="small" id="countLabel">0件</div>
+      <select id="facilityFilter"></select>
+      <select id="statusFilter"></select>
+      <input id="filterText" placeholder="職員名・日付・判定で絞り込み" />
+    </div>
+    <div class="tableWrap"><table id="resultTable"></table></div>
+  </section>
+</main>
+<script>
+/* ============================================================================
+ * シフト・勤怠CSV・タイミー明細 照合ツール v2.15
+ *
+ * v2.14 からの修正（A群=タイミー照合 / B群=日別・月間 / C群=無警告で壊れる箇所）
+ *
+ * A-1 「派遣」行を完全除外していたためタイミー照合の分母が半減していた。
+ *      日別・月間からは従来どおり除外しつつ、タイミー照合の枠としては数える。
+ * A-2 夜勤を「入り」コマ単体で比較していた。入り＋翌日の明けを1サイクルに畳んで
+ *      予定時間を算出する（深夜2.0h+深夜明4.0h=6.0h が明細の実働6.0hと対応）。
+ * A-3 日勤／夜勤の区分を無視して日付だけで総当たりしていた。(日付×区分) で束ねる。
+ * A-4 ペアリング用スコアが日跨ぎ非対応だった。timeDiffMin に統一。
+ * A-5 hourTolerance が未使用だった。実働差の判定に使う。
+ * A-6 明細に前月・翌月分が混ざっても除外していなかった。勤務表の年月で絞る。
+ * A-7 施設をファイル名からしか推測していなかった。管理用店舗ID・求人タイトルを優先。
+ * A-8 タイミー枠の判定が氏名の「タイミー」文字列依存だった。シフト記号で区分を決める。
+ *
+ * B-1 コメントの休憩表記「1h」「2h」を控除できなかった（「時間」のみ対応）。
+ * B-2 旧字体・異体字（髙/高、﨑/崎 など）で同一人物が別人に分裂していた。
+ * B-3 終了0:00の夜勤（深夜・末深夜）が日勤と誤判定されていた。
+ * B-4 タイミー枠の予定時間が職員として月間集計に混入していた。
+ * B-5 月初の夜勤明けが実績から欠落していた（月末側だけ救済されていた）。
+ * B-6 氏名末尾の数字・丸数字を無条件に削除し別人・別枠を統合していた。
+ * B-7 勤怠CSVを勤務表の年月で絞っていなかった。
+ * B-8 getMaster のあいまい一致が緩く、別シフトの時刻を拾うことがあった。
+ * B-9 常に31日分の列を読み、存在しない日付（2/30 など）を生成していた。
+ * B-10 同一人物設定が推移的に効かなかった（A=B と B=C を別行に書くと壊れる）。
+ *
+ * C-1 CSVヘッダ名が違うと全行ドロップして無警告だった。必須ヘッダを検証する。
+ * C-2 日付を解釈できない行を無警告で捨てていた。件数を警告に出す。
+ * C-3 どのExcelにも紐づかないCSVを無警告で捨てていた。警告に出す。
+ * C-4 同じファイルを複数回選ぶと二重計上していた。重複を除去する。
+ * C-5 Excel1枚の失敗で全施設の処理が止まっていた。施設単位で継続する。
+ * C-6 数式エラーセル(#REF! 等)を「マスタ未登録シフト」として報告していた。分離する。
+ * C-7 ファイル名からの年月推定が緩すぎた。妥当性を検証し、駄目ならシートを使う。
+ * ==========================================================================*/
+
+const APP_VERSION = 'v2.15';
+
+/* --------------------------------------------------------------------------
+ * 定数
+ * ------------------------------------------------------------------------*/
+const COL = { B:1, M:12, AE:30, AI:34, CS:96, CT:97, CU:98 };
+const MASTER_ROW_FROM = 10, MASTER_ROW_TO = 113;
+const MASTER_COL = { shift:0, start:4, end:10, breakStart:14, breakEnd:20, hours:24 };
+
+// 休み系シフト。前方一致で判定するため、長いものを先に並べる。
+const OFF_SHIFT_WORDS = ['希休','公休','振休','特休','代休','年休','有休','常有','受診','休','有','欠','振'];
+
+// 旧字体・異体字 → 常用字体。氏名の表記ゆれ吸収用（NFKC では正規化されない）。
+const VARIANT_CHARS = {
+  '髙':'高','﨑':'崎','濵':'浜','濱':'浜','德':'徳','邊':'辺','邉':'辺','齋':'斎','齊':'斉',
+  '栁':'柳','桺':'柳','瀨':'瀬','眞':'真','淸':'清','惠':'恵','國':'国','嶋':'島','嶌':'島',
+  '廣':'広','澤':'沢','曾':'曽','籔':'薮','藪':'薮','槇':'槙','聰':'聡','萬':'万','冨':'富',
+  '寛':'寛','塲':'場','舘':'館','昮':'昭','𠮷':'吉','駈':'駆','曻':'昇','靏':'鶴','鶽':'隼'
+};
+
+// 夜勤入り → 対になる明けシフト。同じ行の翌日から見つからなかったときの控え。
+const NIGHT_PAIR_FALLBACK = {
+  '深夜':'深夜明','末深夜':'深夜明','初深夜':'深夜明',
+  'パ夜':'パ明け','末パ夜':'パ明け','初パ夜':'パ明け',
+  '正夜':'正明け','末正夜':'正明け','初正夜':'正明け'
+};
+
+/* --------------------------------------------------------------------------
+ * 汎用ユーティリティ
+ * ------------------------------------------------------------------------*/
+const pad2 = n => String(n).padStart(2,'0');
+const daysInMonth = (y,m) => new Date(y, m, 0).getDate();
+
+function applyVariantChars(s){
+  let out = s;
+  for(const [from,to] of Object.entries(VARIANT_CHARS)){
+    if(out.indexOf(from) >= 0) out = out.split(from).join(to);
+  }
+  return out;
+}
+
+// B-2/B-6: 異体字を吸収し、末尾は「括弧付きの連番」だけを落とす。
+// 「職員01」「タイミー日①」のような裸の数字は別物として残す。
+function baseNormName(v){
+  let s = String(v ?? '').normalize('NFKC').toUpperCase();
+  s = s.replace(/[\s ​-‍﻿　]/g,'');
+  s = applyVariantChars(s);
+  s = s.replace(/\([0-9]+\)$/,'');
+  return s.trim();
+}
+
+const normShift = v => String(v ?? '').replace(/[\s　]/g,'').replace(/（.*?）|\(.*?\)/g,'').trim();
+const isBlank = v => v===undefined || v===null || String(v).trim()==='' || String(v).trim()==='0';
+
+function isOffShift(shift){
+  const s = normShift(shift);
+  if(!s) return true;
+  return OFF_SHIFT_WORDS.some(k => s===k || s.startsWith(k));
+}
+
+function timeToMin(v){
+  if(v===undefined || v===null || v==='') return null;
+  if(typeof v === 'number') return Math.round(v*1440);
+  const s = String(v).trim();
+  if(!s) return null;
+  if(/^\d+(\.\d+)?$/.test(s)){
+    const n=Number(s);
+    if(n>=0 && n<=1.1) return Math.round(n*1440);
+    if(n<=24) return Math.round(n*60);
+  }
+  if(s === '24:00') return 1440;
+  const mm = s.match(/(\d{1,2}):(\d{2})/);
+  if(mm) return Number(mm[1])*60+Number(mm[2]);
+  return null;
+}
+function minToTime(min){
+  if(min===null || min===undefined || isNaN(min)) return '';
+  min = Math.round(min);
+  if(min===1440) return '24:00';
+  const sign = min<0 ? '-' : '';
+  min = Math.abs(min);
+  return sign+pad2(Math.floor(min/60)%24)+':'+pad2(min%60);
+}
+function hourVal(v){ const n = Number(String(v ?? '').replace(/,/g,'')); return isFinite(n) ? n : 0; }
+
+function excelSerialToDate(n){
+  const utc = Math.round((Number(n)-25569)*86400*1000);
+  const d = new Date(utc);
+  return `${d.getUTCFullYear()}/${d.getUTCMonth()+1}/${d.getUTCDate()}`;
+}
+// C-2: 解釈できなかった場合は null を返し、呼び出し側で件数を数えられるようにする。
+function dateKey(v){
+  if(v instanceof Date) return `${v.getFullYear()}/${v.getMonth()+1}/${v.getDate()}`;
+  const s = String(v ?? '').trim();
+  if(!s) return null;
+  if(/^\d+(\.\d+)?$/.test(s) && Number(s)>30000) return excelSerialToDate(Number(s));
+  const mm = s.match(/(\d{4})[\/\-年](\d{1,2})[\/\-月](\d{1,2})/);
+  if(mm) return `${+mm[1]}/${+mm[2]}/${+mm[3]}`;
+  return null;
+}
+const ymdOf = d => { const p=String(d||'').split('/').map(Number); return p.length===3 && p.every(isFinite) ? p : null; };
+const dayIndex = d => { const p=ymdOf(d); return p ? Date.UTC(p[0],p[1]-1,p[2])/86400000 : NaN; };
+const inMonth = (d,y,m) => { const p=ymdOf(d); return !!p && p[0]===y && p[1]===m; };
+
+function diffMin(a,b){ if(a==null || b==null) return null; return Math.abs(a-b); }
+// A-4: 0時をまたぐ差分を正しく扱う。
+function timeDiffMin(a,b){
+  if(a==null || b==null) return null;
+  const d=Math.abs(a-b);
+  return Math.min(d, Math.abs(a+1440-b), Math.abs(a-(b+1440)));
+}
+
+/* --------------------------------------------------------------------------
+ * 同一人物名（B-10: Union-Find で推移的に統合）
+ * ------------------------------------------------------------------------*/
+function buildAliasMap(text){
+  const parent = {};
+  const find = x => { if(parent[x]===undefined) parent[x]=x; return parent[x]===x ? x : (parent[x]=find(parent[x])); };
+  const union = (a,b) => { const ra=find(a), rb=find(b); if(ra!==rb) parent[rb]=ra; };
+  String(text||'').split(/\r?\n/).forEach(line=>{
+    const s=line.trim();
+    if(!s || s.startsWith('#')) return;
+    const parts=s.split(/[=,、]/).map(baseNormName).filter(Boolean);
+    if(parts.length<2) return;
+    parts.forEach(p => union(parts[0], p));
+  });
+  const map={};
+  Object.keys(parent).forEach(k => { map[k] = find(k); });
+  return map;
+}
+
+/* --------------------------------------------------------------------------
+ * マスタ設定
+ * ------------------------------------------------------------------------*/
+function shiftBaseCandidates(s){
+  const x=normShift(s); const set=new Set([x]);
+  ['有','欠','休','希休','常有','振8','振10'].forEach(k=>{ if(x.startsWith(k)) set.add(k); });
+  const rubyMap = {'有ユウ':'有','欠ケツ':'欠','休ヤス':'休','振8シン':'振8','振10シン':'振10','常有ツネユウ':'常有'};
+  Object.entries(rubyMap).forEach(([a,b])=>{ if(x===a) set.add(b); if(x===b) set.add(a); });
+  return [...set];
+}
+
+// B-8: 完全一致 → 別名候補 → 「シフト側がマスタ名で始まる」最長前方一致 の順。
+// v2.14 にあった逆方向（マスタ名がシフト側で始まる）は、"早" が "早番" を拾うなど
+// 誤った時刻を返すため廃止した。あいまい一致したときは warn に記録する。
+function getMaster(master, shift, warn){
+  const cands = shiftBaseCandidates(shift);
+  for(const c of cands) if(master[c]) return master[c];
+  const ns = normShift(shift);
+  if(!ns) return null;
+  const hits = Object.keys(master).filter(k => k && k!==ns && ns.startsWith(k)).sort((a,b)=>b.length-a.length);
+  if(hits.length){
+    if(warn) warn(`シフト「${ns}」はマスタに完全一致がないため「${hits[0]}」として扱いました`);
+    return master[hits[0]];
+  }
+  return null;
+}
+
+function expectedHours(m){
+  if(!m) return 0;
+  if(m.hours) return m.hours;
+  if(m.start==null || m.end==null) return 0;
+  let end=m.end, start=m.start;
+  if(end<start) end+=1440;
+  let h=(end-start)/60;
+  if(m.breakStart!=null && m.breakEnd!=null){
+    let be=m.breakEnd, bs=m.breakStart;
+    if(be<bs) be+=1440;
+    h -= Math.max(0,(be-bs)/60);
+  }
+  return Math.max(0,h);
+}
+
+// B-3: 終了が 0:00 の夜勤（深夜 22:00-0:00 など）を 24:00 とみなす。
+// これを parseMaster で正規化しておくことで classifyShift も expectedHours も正しくなる。
+function normalizeMasterEnd(m){
+  if(m.end===0 && m.start!=null && m.start>=12*60) m.end = 1440;
+  return m;
+}
+
+function classifyShift(m, shift){
+  const s=normShift(shift);
+  if(!m || (m.start==null && m.end==null)) return 'off';
+  if(s.includes('明') || (m.start!=null && m.start<=30 && m.end!=null && m.end<=12*60)) return 'nightOut';
+  if(s.includes('入') || m.end===1440 || (m.start!=null && m.start>=12*60 && m.end!=null && m.end>=23*60)) return 'nightIn';
+  return 'day';
+}
+// タイミー照合で使う区分。明けは入りと1サイクルにまとめるので枠としては数えない。
+function slotKubun(kind){ return kind==='nightIn' ? '夜勤' : kind==='day' ? '日勤' : null; }
+
+function parseMaster(rows, warn){
+  const master={}; const list=[];
+  for(let r=MASTER_ROW_FROM; r<MASTER_ROW_TO && r<rows.length; r++){
+    const row=rows[r] || [];
+    const raw=row[MASTER_COL.shift];
+    if(isBlank(raw)) continue;
+    const key=normShift(raw);
+    if(!key) continue;
+    const m=normalizeMasterEnd({
+      shift:key, raw:String(raw),
+      start:timeToMin(row[MASTER_COL.start]), end:timeToMin(row[MASTER_COL.end]),
+      breakStart:timeToMin(row[MASTER_COL.breakStart]), breakEnd:timeToMin(row[MASTER_COL.breakEnd]),
+      hours:hourVal(row[MASTER_COL.hours])
+    });
+    if(master[key] && warn) warn(`マスタ設定にシフト「${key}」が重複しています。先に出てきた行を使います`);
+    if(!master[key]) master[key]=m;
+    shiftBaseCandidates(key).forEach(k=>{ if(!master[k]) master[k]=m; });
+    list.push({シフト:m.shift, 開始:minToTime(m.start), 終了:minToTime(m.end), 休憩開始:minToTime(m.breakStart), 休憩終了:minToTime(m.breakEnd), 時間:m.hours||expectedHours(m), 判定:classifyShift(m,m.shift)});
+  }
+  return {master, list};
+}
+
+/* --------------------------------------------------------------------------
+ * 勤務表（管理用シート）
+ * ------------------------------------------------------------------------*/
+function parseYmFromSheet(rows){
+  const y = Number(rows?.[0]?.[6]) || Number(rows?.[1]?.[0]) || null;
+  const m = Number(rows?.[0]?.[14]) || Number(rows?.[1]?.[9]) || null;
+  return (y && m && y>=2000 && y<=2100 && m>=1 && m<=12) ? {y,m} : null;
+}
+// C-7: 4桁の数字ならなんでも拾っていたため、妥当な年月のときだけ採用する。
+function inferYearMonth(file){
+  const name=String(file?.name||'').normalize('NFKC');
+  const ok = ym => (ym && ym.y>=2015 && ym.y<=2100 && ym.m>=1 && ym.m<=12) ? ym : null;
+  let m=name.match(/(20\d{2})\D{0,3}([01]?\d)月/);
+  if(m) { const r=ok({y:+m[1], m:+m[2]}); if(r) return r; }
+  m=name.match(/(20\d{2})[.\-_・年]?([01]\d)(?!\d)/);
+  if(m) { const r=ok({y:+m[1], m:+m[2]}); if(r) return r; }
+  m=name.match(/(?:^|\D)([2-3]\d)([01]\d)(?!\d)/);
+  if(m) { const r=ok({y:2000+ +m[1], m:+m[2]}); if(r) return r; }
+  return null;
+}
+const monthKey = ym => ym && ym.y && ym.m ? `${ym.y}/${ym.m}` : '';
+
+function parseSchedule(sheet, master, ctx){
+  const rows = sheet.rows, errs = sheet.errs || new Set();
+  const { facility, y, m, aliasMap, includeDispatch, warn } = ctx;
+  const normName = v => { const k=baseNormName(v); return aliasMap[k] || k; };
+  const containsDispatch = (...vals) => vals.some(v => normName(v).includes('派遣'));
+
+  const lastDay = daysInMonth(y,m);                 // B-9
+  const dayCols = Array.from({length:lastDay},(_,i)=>COL.AI + i*2);
+
+  const normal={}, external=[], unknown=[], errorCells=[];
+  const cuByName={}, metaByName={}, excludedKeys=new Set();
+
+  for(let r=0; r<rows.length; r++){
+    const row=rows[r]||[];
+    const name=String(row[COL.M]||'').trim();
+    const key=normName(name);
+    const role=String(row[COL.B]||'').trim(), type=String(row[COL.AE]||'').trim();
+    if(!key || key.includes('氏名') || key.includes('月間営業活動時間')) continue;
+
+    const isDispatch = containsDispatch(name, role, type);
+    const isTimee = name.includes('タイミー');
+    // A-1: 派遣は日別・月間からは除外（タイムカードに現れない）。枠としては後段で使う。
+    if(isDispatch) excludedKeys.add(key);
+    // B-4: タイミー枠・派遣枠の予定時間を職員の月間集計に混ぜない。
+    if(!isDispatch && !isTimee){
+      const cu=hourVal(row[COL.CU]);
+      if(cu) cuByName[key]=(cuByName[key]||0)+cu;
+      if(!metaByName[key]) metaByName[key]={施設名:facility, 職員名:name, 職種:role, 勤務形態:type};
+    }
+
+    dayCols.forEach((ci,idx)=>{
+      const day=idx+1;
+      const shift=String(row[ci]||'').trim();
+      const dkey=`${y}/${m}/${day}`;
+      // C-6: 数式エラーセル(#REF! など)は sheet_to_json が空文字で返すため、
+      //      空欄判定より先に拾わないと「休み」として黙って消える。
+      if(errs.has(r+','+ci)){
+        errorCells.push({施設名:facility, 職員名:name, 日付:dkey, セル値:'#エラー', 内容:'勤務表に数式エラーのセルがあります（空欄＝休みとして扱われます）'});
+        return;
+      }
+      if(isBlank(shift)) return;
+      const mobj=getMaster(master, shift, warn);
+      const kind=classifyShift(mobj, shift);
+      const record={施設名:facility, 職員名:name, 職員キー:key, 職種:role, 勤務形態:type,
+                    日付:dkey, 日:day, シフト:shift, master:mobj, kind, row:r+1};
+      if(!mobj && !isOffShift(shift)){
+        unknown.push({施設名:facility, 職員名:name, 日付:dkey, シフト:shift, 内容:'マスタ設定シートに該当シフトが見つかりません'});
+      }
+      // A-8: 枠かどうかを氏名ではなく行の属性で決め、区分はシフト記号（マスタ）で決める。
+      if(isTimee || isDispatch){
+        if(isDispatch && !includeDispatch) return;
+        external.push({...record, 枠名:name, 枠種別:isTimee?'タイミー':'派遣'});
+        return;
+      }
+      normal[key] ||= {};
+      normal[key][dkey] ||= [];
+      normal[key][dkey].push(record);
+    });
+  }
+  return {normal, external, unknown, errorCells, cuByName, metaByName, excludedKeys, y, m};
+}
+
+// A-2: 夜勤入りと翌日の明けを1サイクルに畳む。
+// 予定時間 = 入りの予定時間 + 明けの予定時間（深夜2.0h + 深夜明4.0h = 6.0h）。
+function buildExternalSlots(external, master, y, m){
+  const byRow={};
+  external.forEach(e=>{ (byRow[e.row] ||= {})[e.日] = (byRow[e.row][e.日] || []).concat([e]); });
+  const slots=[];
+  external.forEach(e=>{
+    const kubun = slotKubun(e.kind);
+    if(!kubun) return;                                   // 明けは入り側に畳むので枠にしない
+    let hours = expectedHours(e.master);
+    let endMin = e.master?.end ?? null, pairCode = '';
+    if(e.kind==='nightIn'){
+      const next = (byRow[e.row]?.[e.日+1] || []).find(x => x.kind==='nightOut');
+      const pair = next ? next.master : master[NIGHT_PAIR_FALLBACK[normShift(e.シフト)]];
+      pairCode = next ? normShift(next.シフト) : (NIGHT_PAIR_FALLBACK[normShift(e.シフト)] || '');
+      if(pair){ hours += expectedHours(pair); endMin = pair.end; }
+    }
+    slots.push({
+      施設名:e.施設名, 日付:e.日付, 日:e.日, 区分:kubun, 枠名:e.枠名, 枠種別:e.枠種別,
+      シフト:e.シフト, 明けシフト:pairCode,
+      予定開始:minToTime(e.master?.start), 予定終了:minToTime(endMin),
+      start:e.master?.start ?? null, end:endMin,
+      予定時間:Math.round(hours*100)/100
+    });
+  });
+  return slots;
+}
+
+/* --------------------------------------------------------------------------
+ * CSV
+ * ------------------------------------------------------------------------*/
+function parseCSV(text){
+  const rows=[]; let row=[], cell='', q=false;
+  for(let i=0;i<text.length;i++){
+    const ch=text[i], nx=text[i+1];
+    if(q){ if(ch==='"' && nx==='"'){cell+='"';i++;} else if(ch==='"'){q=false;} else cell+=ch; }
+    else {
+      if(ch==='"') q=true;
+      else if(ch===','){row.push(cell);cell='';}
+      else if(ch==='\n'){row.push(cell); rows.push(row); row=[]; cell='';}
+      else if(ch!=='\r') cell+=ch;
+    }
+  }
+  if(cell!=='' || row.length){row.push(cell); rows.push(row);}
+  return rows;
+}
+const normHeader = h => String(h||'').replace(/^﻿/,'').normalize('NFKC').replace(/\s/g,'').trim();
+function rowsToObjects(rows){
+  const header = (rows[0]||[]).map(normHeader);
+  return rows.slice(1).map(r=>Object.fromEntries(header.map((h,i)=>[h, r[i] ?? ''])));
+}
+// C-1: 必須ヘッダが無いまま0件になるのを防ぐ。
+function requireHeaders(rows, required, label){
+  const header=(rows[0]||[]).map(normHeader);
+  const missing=required.filter(h=>!header.includes(normHeader(h)));
+  if(missing.length){
+    throw new Error(`${label}の列が見つかりません: ${missing.join('、')} / 実際の列: ${header.filter(Boolean).join('、')}`);
+  }
+  return header;
+}
+
+function normalizeComment(v){ return String(v||'').normalize('NFKC').replace(/\s+/g,''); }
+// B-1: 「休憩1h」「休憩深夜2h」「休憩1時間」いずれにも対応する。
+function breakHours(comment){
+  const s=normalizeComment(comment);
+  const m=s.match(/(?:休憩深夜|深夜休憩|休憩)(\d+(?:\.\d+)?)\s*(?:時間|hrs?|h)/i);
+  return m ? Number(m[1]) : 0;
+}
+function commentOutMin(comment){
+  const s=normalizeComment(comment);
+  const m=s.match(/退勤(\d{1,2})[:：](\d{2})/);
+  return m ? Number(m[1])*60+Number(m[2]) : null;
+}
+
+const KINTAI_REQUIRED = ['従業員氏名','年/月/日','出勤打刻','退勤打刻'];
+function parseKintai(text, ctx){
+  const { facility, excludedKeys, aliasMap, warn, fileName } = ctx;
+  const normName = v => { const k=baseNormName(v); return aliasMap[k] || k; };
+  const rows=parseCSV(text);
+  requireHeaders(rows, KINTAI_REQUIRED, `タイムカード実績CSV（${fileName}）`);
+  const objs=rowsToObjects(rows);
+  const map={}, byName={};
+  let badDate=0, dispatchSkipped=0;
+  objs.forEach(o=>{
+    const name=String(o['従業員氏名']||'').trim();
+    if(!name || name==='従業員氏名') return;            // 途中に繰り返し現れるヘッダ行
+    const key=normName(name);
+    if(normName(name).includes('派遣') || excludedKeys.has(key)){ dispatchSkipped++; return; }
+    const d=dateKey(o['年/月/日']);
+    if(!d){ if(String(o['年/月/日']||'').trim()) badDate++; return; }
+    const rec={施設名:facility, 職員名:name, 日付:d,
+               出勤:String(o['出勤打刻']||'').trim(), 退勤:String(o['退勤打刻']||'').trim(),
+               inMin:timeToMin(o['出勤打刻']), outMin:timeToMin(o['退勤打刻']),
+               コメント:o['コメント']||''};
+    map[key] ||= {}; map[key][d] ||= []; map[key][d].push(rec);
+    byName[key] ||= []; byName[key].push(rec);
+  });
+  if(badDate) warn(`${fileName}: 日付を解釈できない行が ${badDate} 件あり、集計から除外しました`);
+  return {map, byName};
+}
+
+const TIMEE_REQUIRED = ['求人日','姓','名','QRチェックイン時間','実働時間'];
+function parseTimee(text, ctx){
+  const { facility, storeMap, knownFacilities, warn, fileName } = ctx;
+  const rows=parseCSV(text);
+  requireHeaders(rows, TIMEE_REQUIRED, `タイミー利用明細CSV（${fileName}）`);
+  const objs=rowsToObjects(rows);
+  let badDate=0;
+  const out=[];
+  objs.forEach(o=>{
+    if(!o['求人日']) return;
+    const title=String(o['求人タイトル']||'');
+    if(baseNormName(o['姓']).includes('派遣') || baseNormName(o['名']).includes('派遣') || baseNormName(title).includes('派遣')) return;
+    const d=dateKey(o['求人日']);
+    if(!d){ badDate++; return; }
+    const inMin=timeToMin(o['QRチェックイン時間']);
+    // A-3/A-8: 求人タイトルの「夜勤」表記を第一の根拠に、無ければ開始時刻で判定する。
+    const kubun = /夜勤|夜間|ナイト/.test(title) ? '夜勤' : (inMin!=null && inMin>=15*60 ? '夜勤' : '日勤');
+    // A-7: 施設は「店舗ID対応表 → 求人タイトル → ファイル名」の順に決める。
+    const storeId=String(o['管理用店舗ID']||o['店舗ID（タイミー内管理ID）']||'').trim();
+    const fac = storeMap[storeId] || facilityFromText(title, knownFacilities) || facility;
+    out.push({
+      施設名:fac, 店舗ID:storeId, 求人日:d, 区分:kubun, 求人タイトル:title,
+      QR開始:String(o['QRチェックイン時間']||'').trim(), QR終了:String(o['QRチェックアウト時間']||'').trim(),
+      inMin, outMin:timeToMin(o['QRチェックアウト時間']),
+      休憩開始:String(o['休憩開始時間']||'').trim(), 休憩終了:String(o['休憩終了時間']||'').trim(),
+      実働時間:hourVal(o['実働時間']),
+      氏名:`${o['姓']||''}${o['名']||''}`, ワーカーID:String(o[normHeader('ワーカーID（ワーカーによって一意な値）')]||'').trim()
+    });
+  });
+  if(badDate) warn(`${fileName}: 求人日を解釈できない行が ${badDate} 件あり、集計から除外しました`);
+  return out;
+}
+
+/* --------------------------------------------------------------------------
+ * 施設名
+ * ------------------------------------------------------------------------*/
+const DEFAULT_FACILITIES = ['春日部','上西郷','南中丸','宇都宮','気賀','萩丘Ⅰ','萩丘Ⅱ','萩丘','西浅田Ⅰ','西浅田Ⅱ','西浅田','高丘'];
+function normalizeFacilityText(v){
+  const s=String(v||'').normalize('NFKC').replace(/\s+/g,'').replace(/[()（）]/g,'');
+  return s.replace(/ii$/i,'Ⅱ').replace(/i$/i,'Ⅰ');
+}
+function facilityBase(v){
+  return normalizeFacilityText(v).replace(/[ⅠⅡⅢⅣⅤⅰⅱⅲⅳⅴ]+$/,'').replace(/(?:I{1,3}|IV|V)$/,'');
+}
+function facilityFromText(text, known){
+  const t=normalizeFacilityText(text);
+  if(!t) return '';
+  const hit=[...known].sort((a,b)=>normalizeFacilityText(b).length-normalizeFacilityText(a).length)
+                      .find(k=>t.includes(normalizeFacilityText(k)));
+  return hit ? normalizeFacilityText(hit) : '';
+}
+function inferFacility(file, known){
+  const name=file.name || '';
+  let m=name.match(/【([^】]+)】/);
+  // 【タイミー】のような区分ラベルは施設名ではないので採用しない。
+  if(m && !/タイミー|勤怠|実績|明細|利用/.test(m[1])) return normalizeFacilityText(m[1]);
+  const hit=facilityFromText(name, known);
+  if(hit) return hit;
+  m=name.match(/RASIEL(.+?)(?:[-_.\s　]|$)/i);
+  if(m && normalizeFacilityText(m[1])) return normalizeFacilityText(m[1]);
+  return normalizeFacilityText(name.replace(/\.[^.]+$/,''));
+}
+function parseStoreMap(text){
+  const map={};
+  String(text||'').split(/\r?\n/).forEach(line=>{
+    const s=line.trim();
+    if(!s || s.startsWith('#')) return;
+    const m=s.split(/[=,、]/).map(x=>x.trim());
+    if(m.length>=2 && m[0]) map[m[0]]=normalizeFacilityText(m[1]);
+  });
+  return map;
+}
+
+/* --------------------------------------------------------------------------
+ * 実績時間の集計
+ * ------------------------------------------------------------------------*/
+function workHours(startMin, endMin, breakH=0){ return Math.max(0, ((endMin-startMin)/60) - (breakH||0)); }
+function isNightInClock(min){ return min>=15*60 && min<24*60; }
+function isNightOutClock(min){ return min>=5*60 && min<11*60; }
+
+// B-5: 月をまたぐ夜勤の扱い。
+//  splitBoundary=true のとき、勤務表の「末◯◯」「初◯◯」と同じく月末24:00で分割する。
+//   - 月末の入り  … 出勤〜24:00 だけを当月に計上（翌朝分は翌月）
+//   - 月初の明け  … 0:00〜退勤 を当月に計上（v2.14 は丸ごと捨てていた）
+//  深夜休憩は 0時以降に取ることが多いため、分割時は明け側から控除する。
+function actualMonthlyHours(byName, y, m, splitBoundary){
+  const lastDay = daysInMonth(y,m);
+  const out={}, notes={};
+  Object.entries(byName).forEach(([key, list])=>{
+    const rows = list.filter(r => inMonth(r.日付, y, m));
+    const sorted=[...rows].sort((a,b)=>dayIndex(a.日付)-dayIndex(b.日付));
+    const used=new Set(); let total=0; const note=[];
+    sorted.forEach((r,i)=>{
+      if(used.has(i)) return;
+      const day = ymdOf(r.日付)?.[2];
+      if(r.inMin!=null && r.outMin!=null){
+        let end=r.outMin;
+        if(end<r.inMin) end+=1440;
+        total+=workHours(r.inMin,end,breakHours(r.コメント));
+        used.add(i); return;
+      }
+      if(r.inMin!=null && r.outMin==null){
+        if(!isNightInClock(r.inMin)) return;
+        for(let j=i+1;j<sorted.length;j++){
+          if(used.has(j)) continue;
+          const n=sorted[j];
+          const diff=dayIndex(n.日付)-dayIndex(r.日付);
+          if(diff>1.5) break;
+          if(diff>0 && n.inMin==null && n.outMin!=null && isNightOutClock(n.outMin)){
+            total+=workHours(r.inMin,1440+n.outMin,breakHours(n.コメント)||breakHours(r.コメント));
+            used.add(i); used.add(j); return;
+          }
+        }
+        const commentOut=commentOutMin(r.コメント);
+        if(day===lastDay && splitBoundary){
+          total+=workHours(r.inMin,1440,0);                    // 当月分は 24:00 まで
+          used.add(i); note.push(`${r.日付} の夜勤は24:00で分割`);
+          return;
+        }
+        if(commentOut!=null && isNightOutClock(commentOut)){
+          total+=workHours(r.inMin,1440+commentOut,breakHours(r.コメント));
+          used.add(i);
+        }
+        return;
+      }
+      if(r.inMin==null && r.outMin!=null && isNightOutClock(r.outMin) && day===1 && splitBoundary){
+        total+=workHours(0, r.outMin, breakHours(r.コメント)); // 前月夜勤の当月分
+        used.add(i); note.push(`${r.日付} の夜勤明けを0:00から計上`);
+      }
+    });
+    out[key]=Math.round(total*100)/100;
+    notes[key]=note;
+  });
+  return {hours:out, notes};
+}
+
+/* --------------------------------------------------------------------------
+ * 比較：日別
+ * ------------------------------------------------------------------------*/
+function compareDaily(schedule, kintai, tol, y, m, warn){
+  const rows=[];
+  let outOfMonth=0;
+  const allKeys = new Set([...Object.keys(schedule.normal), ...Object.keys(kintai.map)]);
+  allKeys.forEach(key=>{
+    const dates = new Set([...(Object.keys(schedule.normal[key]||{})), ...(Object.keys(kintai.map[key]||{}))]);
+    dates.forEach(d=>{
+      // B-7: 勤務表の月以外の打刻はここでは扱わない（全件「空欄なのに打刻あり」になるため）
+      if(!inMonth(d,y,m)){
+        if((kintai.map[key]?.[d]||[]).some(c=>c.inMin!=null||c.outMin!=null)) outOfMonth++;
+        return;
+      }
+      const shifts = schedule.normal[key]?.[d] || [];
+      const clocks = kintai.map[key]?.[d] || [];
+      if(shifts.length===0 && clocks.some(c=>c.inMin!=null || c.outMin!=null)){
+        rows.push({施設名:clocks[0].施設名||'', 職員名:clocks[0].職員名, 日付:d, シフト:'空欄', 予定開始:'', 予定終了:'',
+                   CSV出勤:clocks.map(c=>c.出勤).filter(Boolean).join(' / '), CSV退勤:clocks.map(c=>c.退勤).filter(Boolean).join(' / '),
+                   判定:'要確認', 内容:'空欄＝休み扱いですが、CSVに打刻があります'});
+        return;
+      }
+      shifts.forEach(s=>{
+        const m2=s.master, cls=s.kind;
+        const ins=clocks.map(c=>c.inMin).filter(v=>v!=null), outs=clocks.map(c=>c.outMin).filter(v=>v!=null);
+        let status='OK', msg=[];
+        if(isOffShift(s.シフト)){
+          if(ins.length || outs.length){ status='要確認'; msg.push('休み系シフトですが打刻があります'); }
+        } else if(!m2){ status='未登録'; msg.push('シフトがマスタ未登録'); }
+        else if(cls==='off'){
+          if(ins.length || outs.length){ status='要確認'; msg.push('休み系シフトですが打刻があります'); }
+        } else if(cls==='nightIn'){
+          if(!ins.length){ status='要確認'; msg.push('夜勤入り・出勤打刻なし'); }
+          else { const best=Math.min(...ins.map(v=>timeDiffMin(v,m2.start))); if(best>tol){ status='ズレ'; msg.push(`出勤 ${best}分ズレ`); } }
+        } else if(cls==='nightOut'){
+          if(!outs.length){ status='要確認'; msg.push('夜勤明け・退勤打刻なし'); }
+          else { const best=Math.min(...outs.map(v=>timeDiffMin(v,m2.end))); if(best>tol){ status='ズレ'; msg.push(`退勤 ${best}分ズレ`); } }
+        } else {
+          if(!ins.length && !outs.length){ status='要確認'; msg.push('勤務予定ですが打刻がありません'); }
+          else {
+            if(m2.start!=null){
+              if(!ins.length){ status='要確認'; msg.push('出勤打刻なし'); }
+              else { const best=Math.min(...ins.map(v=>diffMin(v,m2.start))); if(best>tol){ status='ズレ'; msg.push(`出勤 ${best}分ズレ`); } }
+            }
+            if(m2.end!=null){
+              if(!outs.length){ status='要確認'; msg.push('退勤打刻なし'); }
+              else { const best=Math.min(...outs.map(v=>diffMin(v,m2.end))); if(best>tol){ status='ズレ'; msg.push(`退勤 ${best}分ズレ`); } }
+            }
+          }
+        }
+        if(status!=='OK') rows.push({施設名:s.施設名||'', 職員名:s.職員名, 日付:d, シフト:s.シフト,
+          予定開始:minToTime(m2?.start), 予定終了:minToTime(m2?.end),
+          CSV出勤:clocks.map(c=>c.出勤).filter(Boolean).join(' / '), CSV退勤:clocks.map(c=>c.退勤).filter(Boolean).join(' / '),
+          判定:status, 内容:msg.join('、')});
+      });
+    });
+  });
+  if(outOfMonth) warn(`勤務表(${y}/${m})の対象外の日付に打刻が ${outOfMonth} 日分あり、日別ズレからは除外しました`);
+  return rows.sort((a,b)=>String(a.職員名).localeCompare(String(b.職員名),'ja') || dayIndex(a.日付)-dayIndex(b.日付));
+}
+
+/* --------------------------------------------------------------------------
+ * 比較：月間
+ * ------------------------------------------------------------------------*/
+function compareMonthly(schedule, kintai, hourTol, y, m, splitBoundary){
+  const {hours:actual, notes} = actualMonthlyHours(kintai.byName, y, m, splitBoundary);
+  const keys=new Set([...Object.keys(schedule.cuByName), ...Object.keys(actual)]);
+  return [...keys].map(key=>{
+    const meta=schedule.metaByName[key] || {};
+    const planned=Math.round((schedule.cuByName[key]||0)*100)/100;
+    const act=actual[key]||0;
+    const diff=Math.round((act-planned)*100)/100;
+    return {施設名:meta.施設名 || kintai.byName[key]?.[0]?.施設名 || '',
+            職員名:meta.職員名 || kintai.byName[key]?.[0]?.職員名 || key,
+            職種:meta.職種||'', 勤務形態:meta.勤務形態||'',
+            勤務表CU時間:planned, CSV実績概算時間:act, 差分:diff,
+            判定:Math.abs(diff)<=hourTol?'OK':'要確認',
+            内容:['CSV実績は出勤・退勤打刻をペアリングして概算。コメントの休憩を控除。', ...(notes[key]||[])].join(' ')};
+  }).sort((a,b)=>String(a.職員名).localeCompare(String(b.職員名),'ja'));
+}
+
+/* --------------------------------------------------------------------------
+ * 比較：タイミー（A-3 レベル1=枠数 / レベル2=明細1対1）
+ * ------------------------------------------------------------------------*/
+// 束ねる単位は「施設グループ」。A-7 で明細側の施設名を店舗ID・求人タイトルから
+// 解決するようにしたため、行ごとの施設名でキーを作ると勤務表側と割れてしまう。
+// 表示用の施設名は行の値を使い、突合はグループキーで行う。
+const bucketKey = (facility, date, kubun, groupKey) =>
+  `${groupKey != null ? groupKey : facilityBase(facility||'')}||${date||''}||${kubun}`;
+
+// レベル1：日付 × 区分 の枠数と明細件数の突合。個人の特定が不要で最も確実。
+// 「派遣」行がタイミーの枠なのか本当の派遣社員なのかは施設ごとに事情が異なるため、
+// 内訳と「派遣を除いた過不足」を併記して、どちらの読み方でも判断できるようにする。
+function compareTimeeCounts(slots, details, groupKey){
+  const bySlot={}, byDetail={};
+  slots.forEach(s=>{ (bySlot[bucketKey(s.施設名,s.日付,s.区分,groupKey)] ||= []).push(s); });
+  details.forEach(d=>{ (byDetail[bucketKey(d.施設名,d.求人日,d.区分,groupKey)] ||= []).push(d); });
+  const out=[];
+  new Set([...Object.keys(bySlot), ...Object.keys(byDetail)]).forEach(k=>{
+    const S=bySlot[k]||[], D=byDetail[k]||[];
+    const [fac,date,kubun]=k.split('||');
+    const nTimee=S.filter(s=>s.枠種別==='タイミー').length;
+    const nDispatch=S.length-nTimee;
+    const gap=D.length-S.length;
+    const gapNoDispatch=D.length-nTimee;
+    const sign=n=>n>0?`+${n}`:String(n);
+    const tally=arr=>{const c={};arr.forEach(x=>{c[x]=(c[x]||0)+1});return Object.entries(c).map(([a,b])=>b>1?`${a}×${b}`:a).join(' / ')};
+    out.push({
+      施設名:(S[0]||D[0]||{}).施設名 || fac, 日付:date, 区分:kubun,
+      シフト枠数:S.length, うちタイミー:nTimee, うち派遣:nDispatch,
+      明細件数:D.length, 過不足:sign(gap), '過不足(派遣除く)':sign(gapNoDispatch),
+      枠内訳:tally(S.map(s=>s.シフト)), 明細内訳:tally(D.map(d=>d.QR開始||'')),
+      判定: gap===0 ? 'OK' : (gap>0 ? '明細が多い' : '枠が多い'),
+      内容: gap===0 ? '' : (gap>0 ? `シフト表にない実績が ${gap} 件あります` : `実績のないシフト枠が ${-gap} 件あります`)
+    });
+  });
+  return out.sort((a,b)=>dayIndex(a.日付)-dayIndex(b.日付) || String(a.区分).localeCompare(String(b.区分),'ja'));
+}
+
+// レベル2：同じ (日付×区分) の中だけで、開始時刻の近い順に1対1で突き合わせる。
+function compareTimeeDetails(slots, details, tol, hourTol, groupKey){
+  const bySlot={}, byDetail={};
+  slots.forEach(s=>{ (bySlot[bucketKey(s.施設名,s.日付,s.区分,groupKey)] ||= []).push(s); });
+  details.forEach(d=>{ (byDetail[bucketKey(d.施設名,d.求人日,d.区分,groupKey)] ||= []).push(d); });
+  const out=[];
+  new Set([...Object.keys(bySlot), ...Object.keys(byDetail)]).forEach(k=>{
+    const S=bySlot[k]||[], D=byDetail[k]||[];
+    const [fac,date,kubun]=k.split('||');
+    const cand=[];
+    S.forEach((s,si)=>D.forEach((d,di)=>{
+      // A-4: 日跨ぎを考慮した差分でスコアリングする。
+      const sd = timeDiffMin(s.start, d.inMin);
+      cand.push({si, di, sd: sd==null ? 9999 : sd, hd: Math.abs((s.予定時間||0)-(d.実働時間||0))});
+    }));
+    cand.sort((x,y)=>x.sd-y.sd || x.hd-y.hd);
+    const usedS=new Set(), usedD=new Set(), pair={};
+    cand.forEach(c=>{ if(!usedS.has(c.si) && !usedD.has(c.di)){ usedS.add(c.si); usedD.add(c.di); pair[c.si]=c.di; } });
+
+    S.forEach((s,si)=>{
+      if(!usedS.has(si)){
+        out.push({施設名:s.施設名, 日付:s.日付, 区分:s.区分, 枠名:s.枠名, 枠種別:s.枠種別, シフト:s.シフト,
+          予定開始:s.予定開始, 予定終了:s.予定終了, 予定時間:s.予定時間,
+          QR開始:'', QR終了:'', 実働時間:'', 開始差分分:'', 終了差分分:'', 実働差分時間:'',
+          判定:'明細なし', 内容:'シフト上は枠がありますが、対応する明細が見つかりません', 参考ワーカー:''});
+        return;
+      }
+      const d=D[pair[si]];
+      const sd=timeDiffMin(s.start, d.inMin), ed=timeDiffMin(s.end, d.outMin);
+      const hd=Math.round(((d.実働時間||0)-(s.予定時間||0))*100)/100;
+      const msg=[];
+      if(sd!=null && sd>tol) msg.push(`開始 ${sd}分ズレ`);
+      if(ed!=null && ed>tol) msg.push(`終了 ${ed}分ズレ`);
+      // A-5: 実働差の許容範囲を実際に使う。
+      if(Math.abs(hd)>hourTol) msg.push(`実働 ${hd>0?'+':''}${hd}時間`);
+      out.push({施設名:s.施設名, 日付:s.日付, 区分:s.区分, 枠名:s.枠名, 枠種別:s.枠種別, シフト:s.シフト,
+        予定開始:s.予定開始, 予定終了:s.予定終了, 予定時間:s.予定時間,
+        QR開始:d.QR開始, QR終了:d.QR終了, 実働時間:d.実働時間,
+        開始差分分:sd ?? '', 終了差分分:ed ?? '', 実働差分時間:hd,
+        判定: msg.length ? 'ズレ' : 'OK', 内容: msg.join('、'), 参考ワーカー:d.氏名});
+    });
+    D.forEach((d,di)=>{
+      if(usedD.has(di)) return;
+      out.push({施設名:d.施設名, 日付:d.求人日, 区分:d.区分, 枠名:'', 枠種別:'', シフト:'',
+        予定開始:'', 予定終了:'', 予定時間:'', QR開始:d.QR開始, QR終了:d.QR終了, 実働時間:d.実働時間,
+        開始差分分:'', 終了差分分:'', 実働差分時間:'',
+        判定:'シフト枠なし', 内容:'明細はありますが、シフト上に対応する枠が見つかりません', 参考ワーカー:d.氏名});
+    });
+  });
+  return out.sort((a,b)=>dayIndex(a.日付)-dayIndex(b.日付) || String(a.区分).localeCompare(String(b.区分),'ja'));
+}
+
+/* --------------------------------------------------------------------------
+ * ここから下は画面まわり（Node からロジックだけ読み込めるよう分離）
+ * ------------------------------------------------------------------------*/
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    APP_VERSION, baseNormName, buildAliasMap, normShift, isOffShift, timeToMin, minToTime, hourVal,
+    dateKey, timeDiffMin, daysInMonth, parseMaster, getMaster, expectedHours, classifyShift,
+    parseSchedule, buildExternalSlots, parseCSV, rowsToObjects, requireHeaders, breakHours, commentOutMin,
+    parseKintai, parseTimee, actualMonthlyHours, compareDaily, compareMonthly,
+    compareTimeeCounts, compareTimeeDetails, inferFacility, facilityBase, facilityFromText,
+    parseStoreMap, inferYearMonth, parseYmFromSheet, DEFAULT_FACILITIES
+  };
+}
+
+if (typeof document !== 'undefined') (function(){
+  const $ = id => document.getElementById(id);
+  const aliasStoreKey='shiftCheckerNameAliases';
+  const storeMapKey='shiftCheckerStoreMap';
+  let state = { daily:[], monthly:[], timeeCount:[], timee:[], unknown:[], warnings:[], master:[], current:'daily', nameOptions:[], facilities:[] };
+  let aliasMap = {};
+
+  $('verLabel').textContent = APP_VERSION;
+
+  const normName = v => { const k=baseNormName(v); return aliasMap[k] || k; };
+  function escapeHtml(v){ return String(v ?? '').replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+  function badge(status){
+    const s=String(status||''); let cls='bINFO';
+    if(s==='OK') cls='bOK';
+    else if(s.includes('要確認')||s.includes('なし')||s.includes('未登録')||s.includes('多い')) cls='bBAD';
+    else if(s.includes('ズレ')||s.includes('許容')) cls='bWARN';
+    return `<span class="badge ${cls}">${escapeHtml(s)}</span>`;
+  }
+
+  function refreshNameAliases(){ aliasMap = buildAliasMap($('nameAliases')?.value || ''); }
+  function aliasRules(){
+    const rows=[];
+    ($('nameAliases')?.value || '').split(/\r?\n/).forEach((line,idx)=>{
+      const s=line.trim(); if(!s || s.startsWith('#')) return;
+      const parts=s.split(/[=,、]/).map(x=>x.trim()).filter(Boolean);
+      if(parts.length>=2) rows.push({idx, canonical:parts[0], variants:parts.slice(1)});
+    });
+    return rows;
+  }
+  function setAliasText(lines){
+    $('nameAliases').value = lines.join('\n');
+    localStorage.setItem(aliasStoreKey,$('nameAliases').value);
+    refreshNameAliases(); renderAliasList(); renderNameOptions();
+  }
+  function removeAliasLine(idx){
+    setAliasText(($('nameAliases').value||'').split(/\r?\n/).filter((_,i)=>i!==idx));
+  }
+  function renderAliasList(){
+    const rows=aliasRules();
+    $('aliasList').innerHTML = rows.length
+      ? rows.map(r=>`<span class="aliasItem"><span>${escapeHtml(r.canonical)} = ${escapeHtml(r.variants.join(' / '))}</span><button type="button" data-alias-line="${r.idx}">削除</button></span>`).join('')
+      : '<span class="small">まだ設定がありません。比較実行後、結果に出た名前から選択できます。</span>';
+    document.querySelectorAll('[data-alias-line]').forEach(btn=>btn.addEventListener('click',()=>removeAliasLine(Number(btn.dataset.aliasLine))));
+  }
+  function renderNameOptions(){
+    const options=state.nameOptions.length ? state.nameOptions : aliasRules().flatMap(r=>[r.canonical,...r.variants]);
+    const html=['<option value="">選択してください</option>', ...options.map(n=>`<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`)].join('');
+    $('aliasCanonical').innerHTML=html; $('aliasVariant').innerHTML=html;
+  }
+  async function addAliasFromSelects(){
+    const canonical=$('aliasCanonical').value, variant=$('aliasVariant').value;
+    if(!canonical || !variant){ alert('基準にする名前と、同じ人として扱う名前を選択してください。'); return; }
+    if(baseNormName(canonical)===baseNormName(variant)){ alert('同じ名前として扱われています（異体字は自動で同一視されます）。'); return; }
+    const lines=($('nameAliases').value||'').split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+    lines.push(`${canonical}=${variant}`);
+    setAliasText(lines);
+    if($('excelFile').files[0] && $('kintaiFile').files[0]) await runCompare();
+  }
+
+  // C-4: 同じファイルを複数回選んでも1つとして扱う。
+  function fileList(id){
+    const seen=new Set();
+    return Array.from($(id).files||[]).filter(f=>{
+      const k=`${f.name}|${f.size}|${f.lastModified}`;
+      if(seen.has(k)) return false;
+      seen.add(k); return true;
+    });
+  }
+  function knownFacilityList(){
+    return [...new Set([...DEFAULT_FACILITIES, ...Object.values(parseStoreMap($('storeMap').value)).filter(Boolean)])];
+  }
+  function groupFiles(){
+    const known=knownFacilityList();
+    const groups={};
+    const attach=(id,type)=>fileList(id).forEach(file=>{
+      const facility=inferFacility(file, known), base=facilityBase(facility);
+      groups[base] ||= {base, excels:[], kintai:[], timee:[]};
+      groups[base][type].push({file, facility});
+    });
+    attach('excelFile','excels'); attach('kintaiFile','kintai'); attach('timeeFile','timee');
+    return Object.values(groups).sort((a,b)=>a.base.localeCompare(b.base,'ja'));
+  }
+
+  async function readArrayBuffer(file){ return await file.arrayBuffer(); }
+  async function readTextSmart(file){
+    const buf = await file.arrayBuffer(); const u8=new Uint8Array(buf);
+    if(u8[0]===0xef && u8[1]===0xbb && u8[2]===0xbf) return new TextDecoder('utf-8').decode(buf).replace(/^﻿/, '');
+    try { const t = new TextDecoder('utf-8',{fatal:true}).decode(buf); if(!t.includes('�')) return t; } catch(e) {}
+    try { return new TextDecoder('shift_jis').decode(buf); } catch(e) { return new TextDecoder('utf-8').decode(buf); }
+  }
+  function normSheetName(v){ return String(v||'').normalize('NFKC').replace(/\s+/g,'').trim(); }
+  function sheetInput(id, fallback){ return String($(id)?.value||'').normalize('NFKC').trim() || fallback; }
+  // C-6: 数式エラーセルの位置を拾えるようにして返す。
+  function readWorkbookRows(wb, sheetName){
+    const wanted=String(sheetName||'').normalize('NFKC').trim();
+    const names=wb.SheetNames || Object.keys(wb.Sheets||{});
+    const found=names.find(n=>n===wanted) || names.find(n=>normSheetName(n)===normSheetName(wanted));
+    const ws=wb.Sheets[found];
+    if(!ws) throw new Error(`シートが見つかりません: ${wanted || '(空欄)'} / このExcelのシート: ${names.join('、')}`);
+    const rows=XLSX.utils.sheet_to_json(ws,{header:1, raw:true, defval:''});
+    const errs=new Set();
+    Object.keys(ws).forEach(k=>{
+      if(k[0]==='!') return;
+      const c=ws[k];
+      if(c && c.t==='e'){ const a=XLSX.utils.decode_cell(k); errs.add(a.r+','+a.c); }
+    });
+    return {rows, errs};
+  }
+
+  function addNameOption(set, name){ const s=String(name||'').trim(); if(s && !['職員名','従業員氏名'].includes(s)) set.add(s); }
+
+  async function runCompare(){
+    const logs=[];
+    const warn = msg => { if(!logs.includes(msg)) logs.push(msg); };
+    try{
+      refreshNameAliases();
+      if(!fileList('excelFile').length || !fileList('kintaiFile').length) throw new Error('勤務表Excelとタイムカード実績CSVを選択してください。');
+      if(!window.XLSX) throw new Error('Excel読込ライブラリを読み込めません。インターネット接続を確認してください。');
+      $('status').textContent='読み込み中...';
+
+      const tol=Number($('tolerance').value||15);
+      const hourTol=Number($('hourTolerance').value||0.25);
+      const includeDispatch=$('includeDispatch').checked;
+      const splitBoundary=$('splitMonthBoundary').checked;
+      const storeMap=parseStoreMap($('storeMap').value);
+      const known=knownFacilityList();
+      const groups=groupFiles();
+
+      const all={daily:[], monthly:[], timeeCount:[], timee:[], unknown:[], master:[]};
+      const nameSet=new Set(), facilitySet=new Set();
+
+      for(const group of groups){
+        // C-3: どのExcelにも紐づかないCSVを黙って捨てない。
+        if(!group.excels.length){
+          const files=[...group.kintai,...group.timee].map(x=>x.file.name).join('、');
+          warn(`「${group.base}」に対応する勤務表Excelがないため、次のCSVを照合できませんでした: ${files}`);
+          continue;
+        }
+        if(!group.kintai.length){ warn(`${group.base}: タイムカード実績CSVが見つかりません`); continue; }
+
+        // C-5: Excel 1枚の失敗で全施設を止めない。
+        const schedules=[]; let master=null;
+        for(const item of group.excels){
+          try{
+            facilitySet.add(item.facility);
+            const wb=XLSX.read(await readArrayBuffer(item.file),{type:'array',cellDates:false});
+            const parsed=parseMaster(readWorkbookRows(wb,sheetInput('masterSheet','マスタ設定')).rows, warn);
+            master=parsed.master;
+            all.master.push(...parsed.list.map(r=>({施設名:item.facility, ...r})));
+
+            const sheetYm=parseYmFromSheet(readWorkbookRows(wb,sheetInput('manageSheet','管理用シート')).rows);
+            const fileYm=inferYearMonth(item.file);
+            let ym=fileYm||sheetYm;
+            if(!ym){ ym={y:new Date().getFullYear(), m:new Date().getMonth()+1}; warn(`${item.file.name}: 年月を判定できないため ${monthKey(ym)} として処理しました`); }
+            else if(fileYm && sheetYm && monthKey(fileYm)!==monthKey(sheetYm)){
+              warn(`${item.facility}: 勤務表シート上の年月 ${monthKey(sheetYm)} とファイル名の年月 ${monthKey(fileYm)} が違うため、ファイル名を優先しました`);
+            }
+            const sheet=readWorkbookRows(wb,sheetInput('manageSheet','管理用シート'));
+            schedules.push(parseSchedule(sheet, master, {facility:item.facility, y:ym.y, m:ym.m, aliasMap, includeDispatch, warn}));
+          }catch(e){
+            warn(`${item.file.name}: 読み込みに失敗したためスキップしました（${e.message}）`);
+          }
+        }
+        if(!schedules.length) continue;
+
+        const schedule=mergeSchedules(schedules);
+        const {y,m}=schedule;
+
+        const kintais=[];
+        for(const item of group.kintai){
+          try{
+            facilitySet.add(item.facility);
+            kintais.push(parseKintai(await readTextSmart(item.file), {facility:item.facility, excludedKeys:schedule.excludedKeys, aliasMap, warn, fileName:item.file.name}));
+          }catch(e){ warn(`${item.file.name}: ${e.message}`); }
+        }
+        if(!kintais.length){ warn(`${group.base}: 読み込めたタイムカード実績CSVがありません`); continue; }
+        const kintai=mergeKintai(kintais);
+
+        let timeeRows=[];
+        for(const item of group.timee){
+          try{
+            facilitySet.add(item.facility);
+            timeeRows.push(...parseTimee(await readTextSmart(item.file), {facility:item.facility, storeMap, knownFacilities:known, warn, fileName:item.file.name}));
+          }catch(e){ warn(`${item.file.name}: ${e.message}`); }
+        }
+        // A-6: 勤務表の年月以外の明細は除外する。
+        const before=timeeRows.length;
+        timeeRows=timeeRows.filter(r=>inMonth(r.求人日,y,m));
+        if(before!==timeeRows.length) warn(`タイミー明細のうち ${before-timeeRows.length} 件は ${y}/${m} 以外の日付のため除外しました`);
+
+        collectNameOptions(schedule,kintai,timeeRows).forEach(n=>nameSet.add(n));
+        all.unknown.push(...schedule.unknown, ...schedule.errorCells.map(e=>({...e, シフト:e.セル値})));
+        all.daily.push(...compareDaily(schedule,kintai,tol,y,m,warn));
+        all.monthly.push(...compareMonthly(schedule,kintai,hourTol,y,m,splitBoundary));
+
+        if(timeeRows.length || schedule.external.length){
+          const mismatched=[...new Set(timeeRows.filter(r=>facilityBase(r.施設名)!==group.base).map(r=>r.施設名))];
+          if(mismatched.length) warn(`タイミー明細から読み取った施設名（${mismatched.join('、')}）がファイル名から判断した「${group.base}」と違います。「${group.base}」として照合しました`);
+          const slots=buildExternalSlots(schedule.external, master||{}, y, m);
+          all.timeeCount.push(...compareTimeeCounts(slots, timeeRows, group.base));
+          all.timee.push(...compareTimeeDetails(slots, timeeRows, tol, hourTol, group.base));
+        }
+      }
+
+      state.daily=all.daily; state.monthly=all.monthly; state.timeeCount=all.timeeCount; state.timee=all.timee;
+      state.unknown=all.unknown; state.master=all.master;
+      state.warnings=logs.map((w,i)=>({番号:i+1, 内容:w, 判定:'警告'}));
+      state.nameOptions=[...nameSet].sort((a,b)=>a.localeCompare(b,'ja'));
+      state.facilities=[...facilitySet].sort((a,b)=>a.localeCompare(b,'ja'));
+
+      renderNameOptions(); renderFacilityOptions(); renderSummary(); renderStatusOptions(); renderTable();
+      const timeeGap=state.timeeCount.filter(r=>r.判定!=='OK').length;
+      $('status').textContent =
+        `比較完了 (${APP_VERSION})\n`+
+        `施設: ${state.facilities.length}件\n`+
+        `日別ズレ: ${state.daily.length}件\n`+
+        `月間集計: ${state.monthly.length}名（要確認 ${state.monthly.filter(r=>r.判定!=='OK').length}名）\n`+
+        `タイミー枠数: ${state.timeeCount.length}区分（不一致 ${timeeGap}区分）\n`+
+        `タイミー明細照合: ${state.timee.length}件\n`+
+        `未登録シフト: ${state.unknown.length}件\n`+
+        `マスタ読込: ${state.master.length}件`+
+        (logs.length?`\n\n警告 ${logs.length}件:\n・`+logs.join('\n・'):'');
+    }catch(e){
+      state.warnings=logs.map((w,i)=>({番号:i+1, 内容:w, 判定:'警告'}));
+      $('status').textContent='エラー: '+e.message+(logs.length?'\n\n警告:\n・'+logs.join('\n・'):'');
+      console.error(e);
+    }
+  }
+
+  function mergeSchedules(items){
+    const out={normal:{}, external:[], unknown:[], errorCells:[], cuByName:{}, metaByName:{}, excludedKeys:new Set(), y:items[0]?.y, m:items[0]?.m};
+    items.forEach(s=>{
+      Object.entries(s.normal||{}).forEach(([key, byDate])=>{
+        out.normal[key] ||= {};
+        Object.entries(byDate).forEach(([d, list])=>{ out.normal[key][d] ||= []; out.normal[key][d].push(...list); });
+      });
+      out.external.push(...(s.external||[]));
+      out.unknown.push(...(s.unknown||[]));
+      out.errorCells.push(...(s.errorCells||[]));
+      Object.entries(s.cuByName||{}).forEach(([k,v])=>{ out.cuByName[k]=(out.cuByName[k]||0)+v; });
+      Object.entries(s.metaByName||{}).forEach(([k,v])=>{ if(!out.metaByName[k]) out.metaByName[k]=v; });
+      (s.excludedKeys||new Set()).forEach(k=>out.excludedKeys.add(k));
+    });
+    return out;
+  }
+  function mergeKintai(items){
+    const out={map:{}, byName:{}};
+    items.forEach(k=>{
+      Object.entries(k.map||{}).forEach(([key, byDate])=>{
+        out.map[key] ||= {};
+        Object.entries(byDate).forEach(([d, list])=>{ out.map[key][d] ||= []; out.map[key][d].push(...list); });
+      });
+      Object.entries(k.byName||{}).forEach(([key, list])=>{ out.byName[key] ||= []; out.byName[key].push(...list); });
+    });
+    return out;
+  }
+  function collectNameOptions(schedule, kintai, timeeRows){
+    const names=new Set();
+    Object.values(schedule.metaByName||{}).forEach(m=>addNameOption(names,m.職員名));
+    Object.values(schedule.normal||{}).forEach(byDate=>Object.values(byDate).forEach(list=>list.forEach(r=>addNameOption(names,r.職員名))));
+    (schedule.external||[]).forEach(r=>addNameOption(names,r.職員名));
+    Object.values(kintai.byName||{}).forEach(list=>list.forEach(r=>addNameOption(names,r.職員名)));
+    (timeeRows||[]).forEach(r=>addNameOption(names,r.氏名));
+    return [...names].sort((a,b)=>a.localeCompare(b,'ja'));
+  }
+
+  function renderSummary(){
+    const badMonthly=state.monthly.filter(r=>r.判定!=='OK').length;
+    const timeeGap=state.timeeCount.filter(r=>r.判定!=='OK').length;
+    const timeeBad=state.timee.filter(r=>r.判定!=='OK').length;
+    $('summary').innerHTML=[
+      ['日別ズレ',state.daily.length],['月間要確認',badMonthly],['タイミー枠数不一致',timeeGap],
+      ['タイミー明細ズレ',timeeBad],['未登録シフト',state.unknown.length],['警告',state.warnings.length]
+    ].map(([l,n])=>`<div class="kpi"><div class="num">${n}</div><div class="lbl">${l}</div></div>`).join('');
+  }
+  function renderFacilityOptions(){
+    const current=$('facilityFilter').value;
+    $('facilityFilter').innerHTML=['<option value="">全施設</option>', ...state.facilities.map(f=>`<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`)].join('');
+    if(state.facilities.includes(current)) $('facilityFilter').value=current;
+  }
+  function renderStatusOptions(){
+    const current=$('statusFilter').value;
+    const statuses=[...new Set((state[state.current]||[]).map(r=>String(r.判定||'')).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ja'));
+    $('statusFilter').innerHTML=['<option value="">全判定</option>','<option value="__not_ok">OK以外</option>', ...statuses.map(s=>`<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`)].join('');
+    if(current && (current==='__not_ok' || statuses.includes(current))) $('statusFilter').value=current;
+  }
+  function renderTable(){
+    const rows=state[state.current]||[];
+    const data=rows.filter(r=>{
+      const facility=$('facilityFilter').value, status=$('statusFilter').value, f=$('filterText').value.trim();
+      const statusOk=!status || (status==='__not_ok' ? r.判定!=='OK' : r.判定===status);
+      return (!facility || r.施設名===facility) && statusOk && (!f || JSON.stringify(r).includes(f));
+    });
+    $('countLabel').textContent=`${data.length}件表示 / ${rows.length}件`;
+    const table=$('resultTable');
+    if(!data.length){ table.innerHTML='<tr><td>表示するデータがありません。</td></tr>'; return; }
+    const headers=Object.keys(data[0]);
+    table.innerHTML='<thead><tr>'+headers.map(h=>`<th>${escapeHtml(h)}</th>`).join('')+'</tr></thead><tbody>'
+      +data.map(r=>'<tr>'+headers.map(h=>`<td>${h==='判定'?badge(r[h]):escapeHtml(r[h])}</td>`).join('')+'</tr>').join('')+'</tbody>';
+  }
+  function toCsv(rows){
+    if(!rows.length) return '';
+    const headers=Object.keys(rows[0]); const esc=v=>'"'+String(v ?? '').replace(/"/g,'""')+'"';
+    return headers.map(esc).join(',')+'\n'+rows.map(r=>headers.map(h=>esc(r[h])).join(',')).join('\n');
+  }
+  function downloadCsv(type){
+    const rows=state[type]||[];
+    if(!rows.length){ alert('出力するデータがありません。'); return; }
+    const blob=new Blob(['﻿'+toCsv(rows)],{type:'text/csv;charset=utf-8'});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download={daily:'日別ズレ一覧.csv',monthly:'職員別月間集計.csv',timeeCount:'タイミー枠数照合.csv',
+                timee:'タイミー明細照合.csv',unknown:'未登録シフト一覧.csv',warnings:'警告一覧.csv'}[type]||'result.csv';
+    a.click(); URL.revokeObjectURL(a.href);
+  }
+  function clearResults(){
+    state={daily:[],monthly:[],timeeCount:[],timee:[],unknown:[],warnings:[],master:[],current:'daily',
+           nameOptions:state.nameOptions||[],facilities:state.facilities||[]};
+    document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('active', b.dataset.tab==='daily'));
+    $('filterText').value=''; $('statusFilter').value='';
+    renderSummary(); renderFacilityOptions(); renderStatusOptions(); renderTable();
+    $('status').textContent='結果をクリアしました。';
+  }
+  function checkSelected(){
+    const groups=groupFiles();
+    if(!groups.length){ $('status').textContent='ファイルが選択されていません。'; return; }
+    $('status').textContent=groups.map(g=>{
+      const miss=!g.excels.length ? '  ← 勤務表Excelがないため照合できません' : (!g.kintai.length ? '  ← 勤怠CSVがありません' : '');
+      return `${g.base}: 勤務表 ${g.excels.length}件 / 勤怠CSV ${g.kintai.length}件 / タイミー ${g.timee.length}件${miss}`;
+    }).join('\n');
+  }
+
+  document.querySelectorAll('.tab').forEach(btn=>btn.addEventListener('click',()=>{
+    document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active'); state.current=btn.dataset.tab;
+    $('filterText').value=''; $('statusFilter').value='';
+    renderStatusOptions(); renderTable();
+  }));
+  document.querySelectorAll('[data-dl]').forEach(b=>b.addEventListener('click',()=>downloadCsv(b.dataset.dl)));
+  $('filterText').addEventListener('input',renderTable);
+  $('facilityFilter').addEventListener('change',renderTable);
+  $('statusFilter').addEventListener('change',renderTable);
+  $('runBtn').addEventListener('click',runCompare);
+  $('clearBtn').addEventListener('click',clearResults);
+  $('sampleBtn').addEventListener('click',checkSelected);
+  $('addAliasBtn').addEventListener('click',addAliasFromSelects);
+
+  $('nameAliases').value = localStorage.getItem(aliasStoreKey) || '';
+  $('storeMap').value = localStorage.getItem(storeMapKey) || '';
+  $('nameAliases').addEventListener('input',()=>{
+    localStorage.setItem(aliasStoreKey,$('nameAliases').value);
+    refreshNameAliases(); renderAliasList(); renderNameOptions();
+  });
+  $('storeMap').addEventListener('input',()=>localStorage.setItem(storeMapKey,$('storeMap').value));
+
+  refreshNameAliases(); renderAliasList(); renderNameOptions();
+  renderFacilityOptions(); renderStatusOptions(); renderSummary(); renderTable();
+})();
+</script>
+</body>
+</html>
