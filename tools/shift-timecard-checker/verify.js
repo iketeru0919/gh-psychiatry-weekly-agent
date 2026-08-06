@@ -240,6 +240,41 @@ ok(L.signedDiffMin(23 * 60, 10) === 70, 'D-5 0時をまたいでも符号つき�
   ok(w2.length === 1, 'J-2 定義が食い違う場合は警告する', w2[0] && w2[0].slice(0, 50) + '…');
 }
 
+// L-1〜L-4 「末」シフト（月末出勤・退勤は翌月）
+{
+  const suePa = { start: 18 * 60, end: 9 * 60, breakStart: null, breakEnd: null, hours: 0 };   // 18:00〜翌09:00
+  const sueUt = { start: 18 * 60, end: 1440, breakStart: null, breakEnd: null, hours: 0 };     // 18:00〜24:00
+  ok(L.classifyShift(suePa, '末パ夜①') === 'nightIn' && L.classifyShift(sueUt, '末パ夜') === 'nightIn',
+    'L-1 日をまたぐ「末」シフトも夜勤入りと判定', `翌朝まで=${L.classifyShift(suePa, '末パ夜①')} / 24:00まで=${L.classifyShift(sueUt, '末パ夜')}`);
+  ok(L.classifyShift({ start: 540, end: 18 * 60, breakStart: 780, breakEnd: 840, hours: 8 }, '日') === 'day',
+    'L-1 通常の日勤は day のまま');
+  ok(L.isMonthEndShift('末パ夜①') && L.isMonthEndShift('②深末') && !L.isMonthEndShift('パ夜'),
+    'L-2 「末」を含むシフトを月末出勤とみなす');
+  ok(L.monthEndSpansNextDay(suePa) === true && L.monthEndSpansNextDay(sueUt) === false,
+    'L-4 翌朝までの登録か24:00までの登録かを判別', `翌朝まで=${L.monthEndSpansNextDay(suePa)} / 24:00まで=${L.monthEndSpansNextDay(sueUt)}`);
+
+  // コメントの退勤時刻（施設ごとに表記が違う）
+  const cases = [['8/1休憩深夜1h、退勤5:01', 301], ['8/1深夜休憩1時間　5：00退勤', 300],
+                 ['休憩深夜1時間、退勤5時（8/1の退勤時間）', 300], ['休憩深夜2時間、退勤10時（8/1の退勤時間）', 600],
+                 ['休憩1時間', null]];
+  ok(cases.every(([c, e]) => L.commentOutMin(c) === e), 'L-3 施設ごとに違う退勤コメントの表記に対応',
+    cases.map(([c, e]) => `${L.commentOutMin(c)}`).join(' / '));
+
+  // 月末の計上：翌朝までの登録はコメントの退勤まで、24:00までの登録は24:00で切る
+  const mk = (d, i, o, c) => ({ 日付: d, inMin: i, outMin: o, 出勤: '', 退勤: '', コメント: c || '' });
+  const byName = { A: [mk('2026/7/31', 17 * 60 + 51, null, '8/1 深夜休憩2時間　9：00退勤')] };
+  const full = L.actualMonthlyHours(byName, 2026, 7, true,
+    { normal: { A: { '2026/7/31': [{ シフト: '末パ夜①', master: suePa }] } } });
+  ok(Math.abs(full.hours.A - 13.15) < 0.05, 'L-4 翌朝までの「末」はコメントの退勤まで計上',
+    full.hours.A + 'h  ' + full.notes.A[0]);
+  const split = L.actualMonthlyHours(byName, 2026, 7, true,
+    { normal: { A: { '2026/7/31': [{ シフト: '末パ夜', master: sueUt }] } } });
+  ok(Math.abs(split.hours.A - 6.15) < 0.05, 'L-4 24:00までの「末」は24:00で分割',
+    split.hours.A + 'h  ' + split.notes.A[0]);
+  ok(full.issues.A.length === 0 && split.issues.A.length === 0,
+    'L-2 「末」シフトの退勤打刻なしを警告にしない');
+}
+
 console.log(`\n  ${pass} passed / ${fail} failed\n`);
 
 /* ------------------------------------------------------------ 実データ検証 */

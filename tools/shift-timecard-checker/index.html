@@ -149,7 +149,7 @@
 </main>
 <script id="tool-logic">
 /* ============================================================================
- * シフト・勤怠CSV・タイミー明細 照合ツール v2.19
+ * シフト・勤怠CSV・タイミー明細 照合ツール v2.20
  *
  * v2.14 からの修正（A群=タイミー照合 / B群=日別・月間 / C群=無警告で壊れる箇所）
  *
@@ -234,9 +234,24 @@
  *      二重計上していた（西浅田Ⅰ/Ⅱで509件）。ファイル間の重複だけを1件にまとめる。
  * J-2 マスタを施設グループ内で統合する。西浅田はⅠが①系、Ⅱがⅱ系のシフトだけ
  *      時刻を持っており、片方だけでは残り半分が0時間になっていた。
+ *
+ * --- v2.20 で追加 ---
+ * L-1 マスタの「末◯◯」の登録形式が施設で2種類ある。
+ *      宇都宮「末パ夜 18:00〜24:00」（当月分だけ・翌月に「初◯◯」がある）と
+ *      気賀・西浅田「末パ夜① 18:00〜09:00」（翌朝まで）。
+ *      後者を日勤と誤判定して退勤打刻を要求していた。終了が開始より前なら
+ *      日をまたぐ勤務として夜勤入りと判定する。
+ * L-2 「末」を含むシフトは月末出勤で退勤打刻が翌月になるため、
+ *      退勤が無いことを問題にしない。マスタに時刻が無い「末」シフトでも
+ *      「休み系シフトですが打刻があります」を出さない。
+ * L-3 月末の退勤時刻はコメントに書かれるが表記が施設ごとに違う。
+ *      「退勤5:01」「5：00退勤」「退勤5時」「退勤10時」すべてに対応する。
+ * L-4 月末の実績は勤務表の「末」シフトの登録に合わせて計上する。
+ *      翌朝までの登録ならコメントの退勤時刻までフル計上、24:00終わりの
+ *      登録なら24:00で分割（翌月の「初◯◯」が翌月分を持つため）。
  * ==========================================================================*/
 
-const APP_VERSION = 'v2.19';
+const APP_VERSION = 'v2.20';
 
 /* --------------------------------------------------------------------------
  * 定数
@@ -448,13 +463,23 @@ function normalizeMasterEnd(m){
   return m;
 }
 
+// L-1: 終了時刻が開始時刻より前なら日をまたぐ勤務。マスタの登録形式が施設で違い、
+//   「末パ夜 18:00〜24:00」（当月分だけ）と「末パ夜① 18:00〜09:00」（翌朝まで）の
+//   両方があるため、後者を日勤と誤判定して退勤打刻を要求していた。
 function classifyShift(m, shift){
   const s=normShift(shift);
   if(!m || (m.start==null && m.end==null)) return 'off';
   if(s.includes('明') || (m.start!=null && m.start<=30 && m.end!=null && m.end<=12*60)) return 'nightOut';
-  if(s.includes('入') || m.end===1440 || (m.start!=null && m.start>=12*60 && m.end!=null && m.end>=23*60)) return 'nightIn';
+  if(s.includes('入') || m.end===1440) return 'nightIn';
+  if(m.start!=null && m.end!=null && m.start>=12*60 && (m.end>=23*60 || m.end<m.start)) return 'nightIn';
   return 'day';
 }
+// 「末」を含むシフトは月末出勤で、退勤打刻は翌月になる。退勤が無いのは正常。
+const isMonthEndShift = shift => /末/.test(normShift(shift));
+// マスタ上、その「末」シフトが翌朝まで続く登録か（＝当月にフル計上する運用か）。
+// 終了が24:00なら当月分だけを計上する登録（翌月に「初◯◯」がある）。
+const monthEndSpansNextDay = m =>
+  !!m && m.start!=null && m.end!=null && m.end!==1440 && m.end < m.start;
 // タイミー照合で使う区分。明けは入りと1サイクルにまとめるので枠としては数えない。
 function slotKubun(kind){ return kind==='nightIn' ? '夜勤' : kind==='day' ? '日勤' : null; }
 
@@ -801,10 +826,15 @@ function breakHours(comment){
   const m=s.match(/(?:休憩深夜|深夜休憩|休憩)(\d+(?:\.\d+)?)\s*(?:時間|hrs?|h)/i);
   return m ? Number(m[1]) : 0;
 }
+// L-3: 月末の退勤時刻はコメントに書かれるが、表記が施設ごとに違う。
+//   宇都宮「退勤5:01」／ 気賀「5：00退勤」／ 西浅田「退勤5時」「退勤10時」
+//   NFKC で全角は半角になっているので、順序と「時」表記の両方を見る。
 function commentOutMin(comment){
   const s=normalizeComment(comment);
-  const m=s.match(/退勤(\d{1,2})[:：](\d{2})/);
-  return m ? Number(m[1])*60+Number(m[2]) : null;
+  const pick = m => m ? Number(m[1])*60 + Number(m[2] || m[3] || 0) : null;
+  const after = pick(s.match(/退勤(\d{1,2})(?::(\d{2})|時(\d{1,2})分|時)/));
+  if(after!=null) return after;
+  return pick(s.match(/(\d{1,2})(?::(\d{2})|時(\d{1,2})分|時)退勤/));
 }
 
 const KINTAI_REQUIRED = ['従業員氏名','年/月/日','出勤打刻','退勤打刻'];
@@ -924,9 +954,14 @@ function isNightOutClock(min){ return min>=5*60 && min<11*60; }
 //   - 月末の入り … 出勤〜24:00 だけを当月に計上（翌朝分は翌月）
 //   - 月初の明け … 0:00〜退勤 を当月に計上
 //   深夜休憩は0時以降に取ることが多いため、分割時は明け側から控除する。
-function actualMonthlyHours(byName, y, m, splitBoundary){
+function actualMonthlyHours(byName, y, m, splitBoundary, ctx){
   const hours={}, notes={}, issues={};
   const isIn = d => inMonth(d, y, m);
+  const lastDay = daysInMonth(y, m);
+  // L-4: その日の勤務表に「末」シフトがあり、マスタが翌朝までの登録なら
+  //      当月にフル計上する（翌月に「初◯◯」を持つ運用なら24:00で分割）。
+  const monthEndShiftOn = (key, date) =>
+    (ctx?.normal?.[key]?.[date] || []).find(x => isMonthEndShift(x.シフト));
   Object.entries(byName).forEach(([key, list])=>{
     const ev=[];
     list.forEach(r=>{
@@ -964,12 +999,23 @@ function actualMonthlyHours(byName, y, m, splitBoundary){
     if(open && isIn(open.日付)){
       const endOfDay=(Math.floor(open.t/1440)+1)*1440;
       const commentOut=commentOutMin(open.c);
-      // 月末の出勤だけを「翌月へまたぐ夜勤」とみなす。月中の未対応は打刻漏れ。
-      if(splitBoundary && ymdOf(open.日付)?.[2]===daysInMonth(y,m)){
+      const isLastDay=ymdOf(open.日付)?.[2]===lastDay;
+      const meShift=monthEndShiftOn(key, open.日付);
+      const spans=meShift ? monthEndSpansNextDay(meShift.master) : false;
+      if(isLastDay && spans && commentOut!=null){
+        // 「末◯◯」が翌朝までの登録。コメントの退勤時刻まで当月に計上する。
+        total+=Math.max(0,(endOfDay+commentOut-open.t)/60 - breakHours(open.c));
+        note.push(`${open.日付} は翌月にまたぐ夜勤（${meShift.シフト}）。コメントの退勤 ${minToTime(commentOut)} まで計上`);
+      } else if(isLastDay && splitBoundary){
         total+=Math.max(0,(endOfDay-open.t)/60);
-        note.push(`${open.日付} の夜勤を24:00で分割`);
+        note.push(spans
+          ? `${open.日付} の夜勤（${meShift.シフト}）は翌月にまたぎますが退勤時刻が分からないため24:00で分割`
+          : `${open.日付} の夜勤を24:00で分割`);
       } else if(commentOut!=null){
         total+=Math.max(0,(endOfDay+commentOut-open.t)/60 - breakHours(open.c));
+      } else if(isLastDay || meShift){
+        // 月末の「末」シフトは退勤が翌月になるため、打刻が無くても問題ではない。
+        note.push(`${open.日付} の退勤は翌月のため当月には計上していません`);
       } else {
         bad.push(`${open.日付} ${open.時刻||''} の出勤に対応する退勤がありません`);
       }
@@ -1040,6 +1086,8 @@ function compareDaily(schedule, kintai, tol, y, m, warn){
       shifts.forEach(s=>{
         const m2=s.master, cls=s.kind;
         const ins=clocks.map(c=>c.inMin).filter(v=>v!=null), outs=clocks.map(c=>c.outMin).filter(v=>v!=null);
+        // L-2: 「末◯◯」は月末出勤で退勤打刻が翌月になる。退勤が無いのは正常。
+        const monthEnd=isMonthEndShift(s.シフト);
         let status='OK', msg=[];
         // D-2: 「有4」のような部分有給は、その日に打刻があっても異常ではない。
         if(isPartialLeave(s.シフト, standardHours)){
@@ -1052,13 +1100,18 @@ function compareDaily(schedule, kintai, tol, y, m, warn){
           }
         } else if(!m2){ status='未登録'; msg.push('シフトがマスタ未登録'); }
         else if(cls==='off'){
-          if(ins.length || outs.length){ status='要確認'; msg.push('休み系シフトですが打刻があります'); }
+          // 「末◯◯」はマスタに時刻が無くても月末の夜勤入り。打刻があるのは正常。
+          if((ins.length || outs.length) && !monthEnd){ status='要確認'; msg.push('休み系シフトですが打刻があります'); }
         } else if(cls==='nightIn'){
           if(!ins.length){ status='要確認'; msg.push('夜勤入り・出勤打刻なし'); }
           else if(checkClockIn(m2.start, ins, lateTol, overTol, msg)) status='ズレ';
         } else if(cls==='nightOut'){
           if(!outs.length){ status='要確認'; msg.push('夜勤明け・退勤打刻なし'); }
           else if(checkClockOut(m2.end, outs, lateTol, overTol, msg)) status='ズレ';
+        } else if(monthEnd){
+          // 月末出勤。退勤は翌月なので出勤だけを見る。
+          if(!ins.length){ status='要確認'; msg.push('月末の夜勤入り・出勤打刻なし'); }
+          else if(checkClockIn(m2.start, ins, lateTol, overTol, msg)) status='ズレ';
         } else {
           if(!ins.length && !outs.length){ status='要確認'; msg.push('勤務予定ですが打刻がありません'); }
           else {
@@ -1129,7 +1182,7 @@ function mergeShiftedDays(rows){
 function compareMonthly(schedule, kintai, tol, y, m, splitBoundary, warn){
   const hourTol = tol.hour ?? 0.25;
   const pctTol  = tol.pct ?? 0;
-  const {hours:actual, notes, issues} = actualMonthlyHours(kintai.byName, y, m, splitBoundary);
+  const {hours:actual, notes, issues} = actualMonthlyHours(kintai.byName, y, m, splitBoundary, schedule);
   const keys=new Set([...Object.keys(schedule.cuByName), ...Object.keys(schedule.shiftHoursByName||{}), ...Object.keys(actual)]);
   let unpaired=0;
   const rows=[...keys].map(key=>{
@@ -1394,6 +1447,7 @@ if (typeof module !== 'undefined' && module.exports) {
     signedDiffMin, leaveHours, isPartialLeave, mergeShiftedDays, aggregateIssues,
     plannedShiftHours, daytimeHours, ymFromLayout,
     computePlannedHours, reconcileStaff, levenshtein, stripNameSuffix, mergeMasters,
+    isMonthEndShift, monthEndSpansNextDay,
     detectScheduleLayout, detectMasterLayout
   };
 }
