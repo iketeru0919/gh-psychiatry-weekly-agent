@@ -92,6 +92,26 @@ ok(L.inferFacility({ name: '【タイミー】RASIEL宇都宮_明細.csv' }, L.D
 // A-4 日跨ぎの時刻差
 ok(L.timeDiffMin(23 * 60, 10) === 70, 'A-4 23:00 と 0:10 の差は 70分', L.timeDiffMin(23 * 60, 10) + '分');
 
+// F-1 マスタY列は日中勤務時間であって総労働時間ではない
+{
+  const pa = { start: 18 * 60, end: 1440, breakStart: null, breakEnd: null, hours: 4 };
+  const pm = { start: 0, end: 9 * 60, breakStart: 0, breakEnd: 120, hours: 4 };
+  const sy = { start: 22 * 60, end: 1440, breakStart: null, breakEnd: null, hours: 0 };
+  const sm = { start: 0, end: 5 * 60, breakStart: 120, breakEnd: 180, hours: 0 };
+  ok(L.expectedHours(pa) === 6 && L.expectedHours(pm) === 7,
+    'F-1 パ夜/パ明けの予定時間は Y列(4h)ではなく実労働(6h/7h)',
+    `パ夜=${L.expectedHours(pa)}h パ明け=${L.expectedHours(pm)}h → サイクル ${L.expectedHours(pa) + L.expectedHours(pm)}h`);
+  ok(L.expectedHours(sy) + L.expectedHours(sm) === 6,
+    'F-1 深夜サイクルは 6.0h のまま（タイミー実働6.0hと一致）',
+    `${L.expectedHours(sy)}h + ${L.expectedHours(sm)}h`);
+  ok(L.daytimeHours(pa) === 4, 'F-1 日中勤務時間はY列から取れる', L.daytimeHours(pa) + 'h');
+  ok(L.expectedHours({ start: null, end: null, hours: 8 }) === 8,
+    'F-1 時刻を持たないシフトはY列にフォールバック');
+  ok(L.plannedShiftHours('有4', {}) === 4 && L.plannedShiftHours('振10', {}) === 10,
+    'F-2 「有4」「振10」は時間数つきの休暇として積み上げる',
+    `有4=${L.plannedShiftHours('有4', {})}h 振10=${L.plannedShiftHours('振10', {})}h`);
+}
+
 // D-2 部分有給
 ok(L.leaveHours('有4') === 4 && L.leaveHours('有') === null, 'D-2 「有4」から休暇時間を取り出す', `有4→${L.leaveHours('有4')} / 有→${L.leaveHours('有')}`);
 ok(L.isPartialLeave('有4', 8) && !L.isPartialLeave('有8', 8) && !L.isPartialLeave('有13', 8),
@@ -210,14 +230,15 @@ console.log(`■ 実データ検証  ${y}/${m}`);
 console.log('='.repeat(74));
 console.log(`  日別ズレ            ${daily.length}件（1日ずれ集約前 ${dailyRaw.length}件 / うち日ずれ ${daily.filter(r => r.判定 === '日ずれ').length}件）`);
 console.log(`  月間集計            ${monthly.length}名（要確認 ${monthly.filter(r => r.判定 !== 'OK').length}名）`);
+console.log(`  CU列とシフト積上の差 ${monthly.filter(r => Math.abs(r.積上差) >= 1).length}名`);
 console.log(`  未登録シフト/エラー ${issues.length}種（延べ ${issues.reduce((a, r) => a + r.件数, 0)}件）`);
 console.log(`  タイミー枠          ${slots.length}件（タイミー ${slots.filter(s => s.枠種別 === 'タイミー').length} / 派遣 ${slots.filter(s => s.枠種別 === '派遣').length}）`);
 console.log(`  タイミー明細        ${tim.length}件`);
 
 console.log('\n■ 月間集計');
-console.log('  職員名        予定CU  予定日数   実績   打刻日数     差分   許容  判定');
+console.log('  職員名        予定CU  積上   差  予定日  実績   打刻日     差分   許容  判定');
 monthly.forEach(r => console.log(
-  `  ${String(r.職員名).padEnd(12)}${String(r.勤務表CU時間).padStart(6)}${String(r.予定勤務日数).padStart(8)}${String(r.CSV実績概算時間).padStart(9)}${String(r.実績打刻日数).padStart(8)}${String(r.差分).padStart(9)}${String(r.許容).padStart(6)}  ${r.判定}${r.内容 && !r.内容.startsWith('CSV実績') ? '  ← ' + r.内容 : ''}`));
+  `  ${String(r.職員名).padEnd(12)}${String(r.勤務表CU時間).padStart(6)}${String(r.シフト積上時間).padStart(6)}${String(r.積上差).padStart(5)}${String(r.予定勤務日数).padStart(6)}${String(r.CSV実績概算時間).padStart(8)}${String(r.実績打刻日数).padStart(6)}${String(r.差分).padStart(9)}${String(r.許容).padStart(6)}  ${r.判定}`));
 
 if (counts.length) {
   console.log('\n■ タイミー枠数照合（レベル1）');

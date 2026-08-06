@@ -146,7 +146,7 @@
 </main>
 <script id="tool-logic">
 /* ============================================================================
- * シフト・勤怠CSV・タイミー明細 照合ツール v2.16
+ * シフト・勤怠CSV・タイミー明細 照合ツール v2.17
  *
  * v2.14 からの修正（A群=タイミー照合 / B群=日別・月間 / C群=無警告で壊れる箇所）
  *
@@ -195,9 +195,18 @@
  *      「download」（拡張子なし）で保存されていた。ASCII名にする。
  * E-1 CDNのSRIは、配信元のハッシュを検証できないまま付けると読み込み自体が失敗する。
  *      推測値を置くのはやめ、ローカルに置いた xlsx.full.min.js を優先して読む方式にした。
+ *
+ * --- v2.17 で追加 ---
+ * F-1 マスタ設定の「時間」列(Y)は総労働時間ではなく【日中勤務時間(5:00〜22:00の部分)】
+ *      だった。パ夜 18:00-24:00 は Y=4 だが実労働は 6.0h、パ明け 0:00-9:00(休憩2h) は
+ *      Y=4 だが実労働は 7.0h。expectedHours が Y を優先していたため夜勤系の予定時間が
+ *      過少だった（パ夜+パ明けのサイクルが 8h、正しくは 13h）。
+ *      勤務表のCU列(総労働勤務時間)とDE列(日中勤務時間数)を全16シフトで再現して確認済み。
+ * F-2 勤務表のCU列と、シフト記入から積み上げた予定時間を突き合わせて食い違いを出す。
+ *      勤務表側の数式ずれ・記入漏れ・数式エラーによる欠落を検出できる。
  * ==========================================================================*/
 
-const APP_VERSION = 'v2.16';
+const APP_VERSION = 'v2.17';
 
 /* --------------------------------------------------------------------------
  * 定数
@@ -375,10 +384,14 @@ function getMaster(master, shift, warn){
   return null;
 }
 
+// F-1: マスタ設定の「時間」列(Y)は総労働時間ではなく【日中勤務時間(5:00〜22:00の部分)】。
+//   パ夜 18:00-24:00 → Y=4 だが実労働は 6.0h、パ明け 0:00-9:00(休憩2h) → Y=4 だが実労働は 7.0h。
+//   v2.16 までは Y を優先していたため、夜勤系の予定時間が過少だった。
+//   開始・終了があるシフトは「終了−開始−休憩」で求め、Y列は時刻を持たないシフト
+//   （常有 など）のフォールバックにのみ使う。
 function expectedHours(m){
   if(!m) return 0;
-  if(m.hours) return m.hours;
-  if(m.start==null || m.end==null) return 0;
+  if(m.start==null || m.end==null) return m.hours || 0;
   let end=m.end, start=m.start;
   if(end<start) end+=1440;
   let h=(end-start)/60;
@@ -388,6 +401,14 @@ function expectedHours(m){
     h -= Math.max(0,(be-bs)/60);
   }
   return Math.max(0,h);
+}
+// マスタのY列（日中勤務時間）。勤務表のDE列と対応する。
+function daytimeHours(m){ return m && m.hours ? m.hours : 0; }
+// シフト1コマの予定労働時間。「有4」「振10」は時間数つきの休暇として扱う。
+function plannedShiftHours(shift, master){
+  const lv = leaveHours(shift);
+  if(lv != null) return lv;
+  return expectedHours(getMaster(master, shift));
 }
 
 // B-3: 終了が 0:00 の夜勤（深夜 22:00-0:00 など）を 24:00 とみなす。
@@ -522,6 +543,7 @@ function parseSchedule(sheet, master, ctx){
 
   const normal={}, external=[], unknown=[], errorCells=[];
   const cuByName={}, metaByName={}, excludedKeys=new Set();
+  const shiftHoursByName={};   // F-2: シフト記入から積み上げた予定労働時間
 
   for(let r=0; r<rows.length; r++){
     const row=rows[r]||[];
@@ -565,12 +587,13 @@ function parseSchedule(sheet, master, ctx){
         external.push({...record, 枠名:name, 枠種別:isTimee?'タイミー':'派遣'});
         return;
       }
+      shiftHoursByName[key]=(shiftHoursByName[key]||0)+plannedShiftHours(shift, master);
       normal[key] ||= {};
       normal[key][dkey] ||= [];
       normal[key][dkey].push(record);
     });
   }
-  return {normal, external, unknown, errorCells, cuByName, metaByName, excludedKeys, y, m};
+  return {normal, external, unknown, errorCells, cuByName, metaByName, shiftHoursByName, excludedKeys, y, m};
 }
 
 // A-2: 夜勤入りと翌日の明けを1サイクルに畳む。
@@ -970,14 +993,19 @@ function compareMonthly(schedule, kintai, tol, y, m, splitBoundary){
     const actualDays=new Set((kintai.byName[key]||[])
       .filter(r=>inMonth(r.日付,y,m) && (r.inMin!=null||r.outMin!=null)).map(r=>r.日付)).size;
     const allow=Math.max(hourTol, planned*(pctTol/100));
+    // F-2: 勤務表のCU列（月間時間）と、シフト記入から積み上げた時間の食い違いを見る。
+    // ずれる場合、勤務表側のCU列の数式かシフト記入のどちらかが実態と合っていない。
+    const fromShifts=Math.round((schedule.shiftHoursByName?.[key]||0)*100)/100;
+    const cuGap=Math.round((fromShifts-planned)*100)/100;
     const hints=[];
     if(planned===0 && act>0) hints.push('勤務表に予定時間がありませんが打刻があります');
     else if(act===0 && planned>0) hints.push('予定はありますが打刻がありません');
     else if(Math.abs(plannedDays-actualDays)>=3) hints.push(`予定 ${plannedDays}日 / 打刻 ${actualDays}日 と日数が食い違っています`);
+    if(Math.abs(cuGap)>=1) hints.push(`勤務表の月間時間 ${planned}h とシフト記入から積み上げた ${fromShifts}h が ${cuGap>0?'+':''}${cuGap}h ずれています`);
     return {施設名:meta.施設名 || kintai.byName[key]?.[0]?.施設名 || '',
             職員名:meta.職員名 || kintai.byName[key]?.[0]?.職員名 || key,
             職種:meta.職種||'', 勤務形態:meta.勤務形態||'',
-            勤務表CU時間:planned, 予定勤務日数:plannedDays,
+            勤務表CU時間:planned, シフト積上時間:fromShifts, 積上差:cuGap, 予定勤務日数:plannedDays,
             CSV実績概算時間:act, 実績打刻日数:actualDays,
             差分:diff, 差分率:planned ? Math.round(diff/planned*1000)/10 + '%' : '',
             許容:Math.round(allow*100)/100,
@@ -1110,6 +1138,7 @@ if (typeof module !== 'undefined' && module.exports) {
     compareTimeeCounts, compareTimeeDetails, inferFacility, facilityBase, facilityFromText,
     parseStoreMap, inferYearMonth, parseYmFromSheet, DEFAULT_FACILITIES,
     signedDiffMin, leaveHours, isPartialLeave, mergeShiftedDays, aggregateIssues,
+    plannedShiftHours, daytimeHours,
     detectScheduleLayout, detectMasterLayout
   };
 }
@@ -1350,12 +1379,13 @@ if (typeof document !== 'undefined') (function(){
   }
 
   function mergeSchedules(items){
-    const out={normal:{}, external:[], unknown:[], errorCells:[], cuByName:{}, metaByName:{}, excludedKeys:new Set(), y:items[0]?.y, m:items[0]?.m};
+    const out={normal:{}, external:[], unknown:[], errorCells:[], cuByName:{}, metaByName:{}, shiftHoursByName:{}, excludedKeys:new Set(), y:items[0]?.y, m:items[0]?.m};
     items.forEach(s=>{
       Object.entries(s.normal||{}).forEach(([key, byDate])=>{
         out.normal[key] ||= {};
         Object.entries(byDate).forEach(([d, list])=>{ out.normal[key][d] ||= []; out.normal[key][d].push(...list); });
       });
+      Object.entries(s.shiftHoursByName||{}).forEach(([k,v])=>{ out.shiftHoursByName[k]=(out.shiftHoursByName[k]||0)+v; });
       out.external.push(...(s.external||[]));
       out.unknown.push(...(s.unknown||[]));
       out.errorCells.push(...(s.errorCells||[]));
