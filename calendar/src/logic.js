@@ -348,7 +348,8 @@ function stayDays(stay, winStart, winEnd) {
 
 // Nights the bed is actually held. The departure day is excluded so a same-day
 // turnover (A leaves in the morning, B arrives in the afternoon) is not a clash.
-// 稼働率はこちらを母数にする（利用日ベースだと同日入替で100%を超えてしまう）。
+// 重複判定・空き判定・「延べ宿泊数」の集計に使う。稼働率は請求実績に合わせて
+// 利用日ベース（stayDays）で出すので、そちらでは使わない。
 function stayNights(stay, winStart, winEnd) {
   const lastNight = stay.end == null ? winEnd : shiftDate(stay.end, -1);
   const start = stay.start > winStart ? stay.start : winStart;
@@ -1493,10 +1494,13 @@ class Component extends DCLogic {
     const monthStats = rangeStats(kpiStays, monthStartStr, monthEndStr);
     const recordCount = Object.values(monthData).reduce((acc, list) => acc + list.length, 0);
     const totalCount = monthStats.stays;
-    const roomNights = daysInMonthCount * master.rooms.length;
-    // 稼働率は「延べ宿泊数 ÷ 室日」。退所日を含む利用日ベースだと、同日入替のある
-    // 月で 100% を超えてしまうため。
-    const utilizationRate = roomNights ? Math.round((monthStats.bedNights / roomNights) * 1000) / 10 : 0;
+    const roomDays = daysInMonthCount * master.rooms.length;
+    // 稼働率は「延べ利用日数 ÷ 室日」。請求の実績が利用日単位で数えられるので、
+    // 突合しやすいこちらを採る。
+    // 利用日は退所日を含むため、同日入替（朝に退所→夕方に次の方が入所）のあった
+    // 日は1室が2人ぶん数えられ、月によっては 100% を超える。これは数え方どおりの
+    // 挙動なので丸めない。内訳が分かるよう、カードの下段に計算式を出している。
+    const utilizationRate = roomDays ? Math.round((monthStats.bedDays / roomDays) * 1000) / 10 : 0;
 
     const monthEvents = [];
     Object.keys(monthData).forEach((dateStr) => (monthData[dateStr] || []).forEach((r) => monthEvents.push(r)));
@@ -1534,7 +1538,7 @@ class Component extends DCLogic {
     const userKpi = { label: '利用者数', value: monthStats.users, unit: '名', sub: currentMonthLabel, color: 'oklch(0.5 0.14 250)' };
     const kpiCards = [
       { label: '稼働日数', value: monthStats.days, unit: '日', sub: '/ ' + daysInMonthCount + '日中', color: 'oklch(0.55 0.13 150)' },
-      { label: '稼働率（宿泊ベース）', value: utilizationRate, unit: '%', sub: '延べ' + monthStats.bedNights + '泊 ÷ ' + roomNights + '室日', color: primaryAccent },
+      { label: '稼働率（利用日ベース）', value: utilizationRate, unit: '%', sub: '延べ' + monthStats.bedDays + '利用日 ÷ ' + roomDays + '室日', color: primaryAccent },
       { label: '送迎あり', value: pickupCount, unit: '件', sub: '仮予約 ' + tentativeCount + '件 / キャンセル ' + cancelledCount + '件', color: 'oklch(0.6 0.13 70)' },
     ];
 
