@@ -72,6 +72,14 @@ function eachDate(startStr, endStr, fn) {
   for (let guard = 0; cur <= endStr && guard < 4000; guard++) { fn(cur); cur = shiftDate(cur, 1); }
 }
 
+// 朝・昼・夕はそれぞれ色相を変える。同じ色の濃淡だと、離れて見たときに
+// 「どれが点いているか」を字を読まないと判別できない。
+const MEAL_KINDS = [
+  { key: 'b', label: '朝', bg: 'oklch(0.93 0.07 65)', color: 'oklch(0.42 0.13 55)', border: 'oklch(0.74 0.13 65)' },
+  { key: 'l', label: '昼', bg: 'oklch(0.93 0.07 145)', color: 'oklch(0.38 0.12 150)', border: 'oklch(0.72 0.12 145)' },
+  { key: 'd', label: '夕', bg: 'oklch(0.92 0.06 295)', color: 'oklch(0.43 0.14 295)', border: 'oklch(0.72 0.12 295)' },
+];
+
 const STATUS_LIST = ['確定', '仮予約', '調整中', '利用済み', 'キャンセル'];
 // 稼働率・請求の母数に入れてよいのは確定系のみ。仮予約・調整中は「見込み」。
 const TENTATIVE_STATUSES = ['仮予約', '調整中'];
@@ -1839,13 +1847,31 @@ class Component extends DCLogic {
         };
       });
       const dayMeals = { b: 0, l: 0, d: 0 };
+      let stayingCount = 0;
       (Object.keys(occByRoom)).forEach((rid) => (occByRoom[rid] || []).forEach((s) => {
+        stayingCount += 1;
         const m = mealsOfStay(s)[dateStr];
         if (!m) return;
         if (m.b) dayMeals.b++;
         if (m.l) dayMeals.l++;
         if (m.d) dayMeals.d++;
       }));
+      // 「朝・昼・夕のどれが要るか」を一目で見せる。要る食事だけ色を付け、
+      // 要らないものは薄く残す。位置が固定なので、カレンダーを縦に流し読みしても
+      // 「この日は夕食だけ」がすぐ分かる。
+      const mealBadges = MEAL_KINDS.map((kind) => {
+        const count = dayMeals[kind.key];
+        return {
+          // 2人以上のときだけ人数を添える。1人なら字だけの方が読みやすい。
+          label: count >= 2 ? kind.label + count : kind.label,
+          on: count > 0,
+          bg: count > 0 ? kind.bg : 'transparent',
+          color: count > 0 ? kind.color : 'oklch(0.83 0.005 75)',
+          border: count > 0 ? kind.border : 'oklch(0.93 0.005 75)',
+          weight: count > 0 ? '800' : '500',
+          title: kind.label + '食 ' + count + '名',
+        };
+      });
       calendarCells.push({
         key: dateStr + '-' + i,
         dateStr,
@@ -1861,8 +1887,10 @@ class Component extends DCLogic {
         // 42行になって読めないので、当月以外は隠す。
         outClass: inMonth ? '' : 'ss-cell--out',
         dateColor: !inMonth ? 'oklch(0.7 0.005 75)' : weekday === 0 ? 'oklch(0.55 0.15 25)' : weekday === 6 ? 'oklch(0.5 0.13 250)' : 'oklch(0.3 0.01 75)',
-        hasMeals: dayMeals.b + dayMeals.l + dayMeals.d > 0,
-        mealSummary: '朝' + dayMeals.b + '・昼' + dayMeals.l + '・夕' + dayMeals.d,
+        // 滞在者が居る日は、食事が0でもバッジ行を出す。行ごと消してしまうと
+        // 「誰も居ない日」と「居るが食事なしの日」が見分けられなくなる。
+        hasMeals: stayingCount > 0,
+        mealBadges,
         lanes,
       });
     }
