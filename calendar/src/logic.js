@@ -94,15 +94,18 @@ function defaultMaster() {
     buildingLabel: 'ⅰ棟 1F',
     capacity: 2,
     rooms: [{ id: 'r1', name: '部屋1' }, { id: 'r2', name: '部屋2' }],
+    // allowanceDays: 受給者証の支給量（月あたりの上限日数）。空欄なら管理しない。
     users: [
-      { id: 'u1', name: '蓬町様（漢字要確認）' },
-      { id: 'u2', name: '麻美様' },
-      { id: 'u3', name: '人見様' },
+      { id: 'u1', name: '蓬町様（漢字要確認）', allowanceDays: '' },
+      { id: 'u2', name: '麻美様', allowanceDays: '' },
+      { id: 'u3', name: '人見様', allowanceDays: '' },
     ],
+    // countsAllowance: この区分の利用を支給量に数えるか。
+    // 既定は true。取りこぼして超過に気づかないより、多めに数えて確認する方が安全。
     categories: [
-      { id: 'c1', label: 'SS', color: '#3a6ea5' },
-      { id: 'c2', label: '無料', color: '#3f8a5c' },
-      { id: 'c3', label: '契約', color: '#7a4f8c' },
+      { id: 'c1', label: 'SS', color: '#3a6ea5', countsAllowance: true },
+      { id: 'c2', label: '無料', color: '#3f8a5c', countsAllowance: true },
+      { id: 'c3', label: '契約', color: '#7a4f8c', countsAllowance: true },
     ],
     pickupOptions: [
       { id: 'p1', label: 'あり', highlight: true },
@@ -500,6 +503,79 @@ function vacancyFor(stays, rooms, startStr, endStr, checkinTime, checkoutTime) {
   });
 }
 
+// ── 支給量（受給者証の月あたり上限日数） ────────────────────────────
+// 空欄／0以下は「管理しない」。数値であれば整数として扱う。
+function normalizeAllowance(v) {
+  if (v === '' || v === null || v === undefined) return '';
+  const n = Math.floor(Number(v));
+  return Number.isFinite(n) && n > 0 ? n : '';
+}
+
+// 記録は氏名を持つが、改名しても追えるよう userId を優先して束ねる。
+function stayUserKey(s) { return s.userId || s.name; }
+
+// 支給量は「日数」で決まっている。同じ日に複数の記録があっても1日と数えるため、
+// 日付の集合で持つ。これは同一人物が誤って2部屋に登録されていた場合にも
+// 二重計上を防ぐ。
+function allowanceDaysUsed(stays, userKey, monthKey, countsCategory, excludeStayId) {
+  const start = monthStartOf(monthKey);
+  const end = monthEndOf(monthKey);
+  const days = new Set();
+  stays.forEach((s) => {
+    if (isCancelled(s.status)) return;
+    if (excludeStayId && s.stayId && s.stayId === excludeStayId) return;
+    if (stayUserKey(s) !== userKey) return;
+    if (!countsCategory(s.category)) return;
+    stayDays(s, start, end).forEach((d) => days.add(d));
+  });
+  return days;
+}
+
+// 期間が月をまたぐ場合、支給量は月ごとに判定する必要がある。
+function monthsSpanned(startDate, endDate) {
+  const out = [];
+  let mk = monthKeyOf(startDate);
+  const last = monthKeyOf(endDate);
+  for (let guard = 0; guard < 120; guard++) {
+    out.push(mk);
+    if (mk === last || mk > last) break;
+    mk = shiftMonth(mk, 1);
+  }
+  return out;
+}
+
+// ── 定期利用の日付生成 ──────────────────────────────────────────────
+// 週単位の計算をせず、範囲を1日ずつ歩いて条件に合う日を拾う。
+// 「第5週がある月・ない月」「月初が何曜か」といった例外を場合分けせずに済む。
+function nthWeekdayOfMonth(dateStr) {
+  return Math.floor((parseDate(dateStr).getDate() - 1) / 7) + 1;
+}
+function isLastWeekdayOfMonth(dateStr) {
+  return shiftDate(dateStr, 7).slice(0, 7) !== dateStr.slice(0, 7);
+}
+function recurringStartDates(rule) {
+  const out = [];
+  const { mode, weekdays, nth, rangeStart, rangeEnd } = rule;
+  if (!rangeStart || !rangeEnd || rangeEnd < rangeStart) return out;
+  if (!weekdays || !weekdays.length) return out;
+  // 隔週の基準は範囲の開始日が属する週。ここを固定しないと、月をまたぐたびに
+  // どちらの週が「実施週」か揺れてしまう。
+  const anchor = parseDate(rangeStart).getTime();
+  eachDate(rangeStart, rangeEnd, (d) => {
+    const dow = parseDate(d).getDay();
+    if (weekdays.indexOf(dow) < 0) return;
+    if (mode === 'biweekly') {
+      const weeks = Math.floor((parseDate(d).getTime() - anchor) / (7 * 86400000));
+      if (weeks % 2 !== 0) return;
+    } else if (mode === 'monthly') {
+      if (nth === 'last') { if (!isLastWeekdayOfMonth(d)) return; }
+      else if (nthWeekdayOfMonth(d) !== Number(nth)) return;
+    }
+    out.push(d);
+  });
+  return out;
+}
+
 function normalizeMaster(savedMaster) {
   const base = defaultMaster();
   const master = { ...base, ...(savedMaster || {}) };
@@ -509,8 +585,12 @@ function normalizeMaster(savedMaster) {
   // v1 は利用者マスタが文字列配列だった。改名を記録へ波及させるため実体(id)を持たせる。
   if (!Array.isArray(master.users)) master.users = base.users;
   master.users = master.users.map((u, i) => (typeof u === 'string'
-    ? { id: 'u' + (i + 1) + '-' + Math.random().toString(36).slice(2, 6), name: u }
-    : { id: u.id || uid('u'), name: u.name || '' }));
+    ? { id: 'u' + (i + 1) + '-' + Math.random().toString(36).slice(2, 6), name: u, allowanceDays: '' }
+    : { id: u.id || uid('u'), name: u.name || '', allowanceDays: normalizeAllowance(u.allowanceDays) }));
+  master.categories = master.categories.map((c) => ({
+    ...c,
+    countsAllowance: c.countsAllowance === undefined ? true : !!c.countsAllowance,
+  }));
   master.defaultCheckinTime = master.defaultCheckinTime || base.defaultCheckinTime;
   master.defaultCheckoutTime = master.defaultCheckoutTime || base.defaultCheckoutTime;
   master.operator = master.operator || '';
@@ -746,6 +826,13 @@ class Component extends DCLogic {
       faxRecipientId: '',
       faxNote: '',
       faxIncludeCover: false,
+      bulkOpen: false,
+      bulk: {
+        name: '', userId: null, room: '', category: '', status: '確定', pickup: '',
+        mode: 'weekly', weekdays: [], nth: 2,
+        rangeStart: TODAY, rangeEnd: fmtDate(new Date(NOW.getFullYear(), NOW.getMonth() + 3, 0)),
+        nights: 1, startTime: '', endTime: '', notes: '',
+      },
     };
     // ドラッグ中の一時状態。1ドラッグにつき何度も setState したくないので、
     // 「日」単位で変化したときだけ dragPreview を更新する。
@@ -1158,7 +1245,10 @@ class Component extends DCLogic {
       )),
     };
   });
-  addUser = () => this.setState((s) => ({ master: { ...s.master, users: [...s.master.users, { id: uid('u'), name: '' }] } }));
+  updateUserAllowance = (idx, val) => this.setState((s) => ({
+    master: { ...s.master, users: s.master.users.map((u, i) => (i === idx ? { ...u, allowanceDays: normalizeAllowance(val) } : u)) },
+  }));
+  addUser = () => this.setState((s) => ({ master: { ...s.master, users: [...s.master.users, { id: uid('u'), name: '', allowanceDays: '' }] } }));
   removeUser = (idx) => this.setState((s) => ({ master: { ...s.master, users: s.master.users.filter((_, i) => i !== idx) } }));
 
   // Records reference categories by LABEL, so a rename has to be carried through
@@ -1552,6 +1642,125 @@ class Component extends DCLogic {
     this.setState({ data, drawer: null });
   };
 
+  // ── カレンダー上での食事のクリック切替 ──────────────────────────
+  // 予約を開かずに、その日の朝／昼／夕を直接切り替える。滞在者が複数いる日は
+  // まとめて切り替える（全員ありなら全員なしへ、それ以外は全員ありへ）。
+  toggleDayMeal = (dateStr, key) => {
+    const master = this.state.master;
+    const roomIds = new Set(master.rooms.map((r) => r.id));
+    const stays = activeStaysOf(deriveStays(this.state.data, roomIds, master.rooms[0].id))
+      .filter((s) => stayDays(s, dateStr, dateStr).length > 0);
+    if (!stays.length) return;
+    const allOn = stays.every((s) => {
+      const m = mealsOfStay(s)[dateStr];
+      return m && m[key];
+    });
+    const next = !allOn;
+    const stamped = this.stamp();
+    let data = this.state.data;
+    stays.forEach((s) => {
+      const table = mealsOfStay(s);
+      table[dateStr] = { ...(table[dateStr] || { b: false, l: false, d: false }), [key]: next };
+      // 入所・退所の2レコードが同じ食事表を持つので、両方を書き換える。
+      const ids = new Set([s.checkinId, s.checkoutId].filter(Boolean));
+      data = mapRecords(data, (r) => (ids.has(r.id) ? { ...r, mealsByDate: table, ...stamped } : r));
+    });
+    const kindLabel = (MEAL_KINDS.find((k) => k.key === key) || {}).label || '';
+    this.setState({
+      data,
+      storageNotice: dateStr.replace(/-/g, '/') + ' の' + kindLabel + '食を'
+        + (next ? 'あり' : 'なし') + 'にしました（' + stays.length + '名）。',
+    });
+  };
+
+  // ── 定期利用の一括登録 ────────────────────────────────────────
+  openBulk = () => this.setState((s) => ({
+    bulkOpen: true,
+    bulk: {
+      ...s.bulk,
+      room: s.bulk.room || s.master.rooms[0].id,
+      category: s.bulk.category || (s.master.categories[0] || {}).label || '',
+      pickup: s.bulk.pickup || (s.master.pickupOptions[0] || {}).label || '',
+      startTime: s.bulk.startTime || s.master.defaultCheckinTime,
+      endTime: s.bulk.endTime || s.master.defaultCheckoutTime,
+    },
+  }));
+  closeBulk = () => this.setState({ bulkOpen: false });
+  setBulk = (patch) => this.setState((s) => ({ bulk: { ...s.bulk, ...patch } }));
+  toggleBulkWeekday = (dow) => this.setState((s) => {
+    const has = s.bulk.weekdays.indexOf(dow) >= 0;
+    const weekdays = has ? s.bulk.weekdays.filter((d) => d !== dow) : [...s.bulk.weekdays, dow].sort();
+    return { bulk: { ...s.bulk, weekdays } };
+  });
+
+  // プレビューと実作成で同じ判定を使う。片方だけ直して食い違うのを防ぐ。
+  bulkPlan = () => {
+    const s = this.state;
+    const b = s.bulk;
+    const master = s.master;
+    const roomIds = new Set(master.rooms.map((r) => r.id));
+    const nights = Math.max(1, Math.floor(Number(b.nights) || 1));
+    const starts = recurringStartDates(b);
+    const existing = activeStaysOf(deriveStays(s.data, roomIds, master.rooms[0].id));
+    const planned = [];
+    const accepted = [];
+    starts.forEach((startDate) => {
+      const endDate = shiftDate(startDate, nights);
+      const probe = { start: startDate, startTime: b.startTime, end: endDate, endTime: b.endTime, room: b.room };
+      const clashRoom = existing.concat(accepted).find((x) => x.room === b.room && staysOverlap(x, probe));
+      // 同じ方が同時に別部屋へ入ることはできない。部屋の重複とは別に見る。
+      const clashPerson = existing.concat(accepted).find((x) => stayUserKey(x) === (b.userId || b.name) && staysOverlap(x, probe));
+      const skip = clashRoom || clashPerson;
+      planned.push({
+        startDate, endDate,
+        skip: !!skip,
+        reason: clashRoom ? (clashRoom.name + ' さんと部屋が重複') : clashPerson ? '同じ方の予約と重複' : '',
+      });
+      if (!skip) accepted.push({ ...probe, name: b.name, userId: b.userId, status: b.status, category: b.category });
+    });
+    return planned;
+  };
+
+  runBulk = () => {
+    const b = this.state.bulk;
+    const name = String(b.name || '').trim();
+    if (!name) { this.setState({ storageNotice: '氏名を入力してください。' }); return; }
+    if (!b.weekdays.length) { this.setState({ storageNotice: '曜日を1つ以上選んでください。' }); return; }
+    const plan = this.bulkPlan().filter((x) => !x.skip);
+    if (!plan.length) { this.setState({ storageNotice: '作成できる日がありませんでした。条件をご確認ください。' }); return; }
+    if (!window.confirm(plan.length + '件の予約を作成します。よろしいですか？')) return;
+
+    const master = this.state.master;
+    const matched = master.users.find((u) => u.name === name);
+    const stamped = this.stamp();
+    let data = this.state.data;
+    plan.forEach((item) => {
+      const stayId = uid('s');
+      const shared = {
+        stayId, name, userId: b.userId || (matched ? matched.id : null),
+        category: b.category, meals: { b: false, l: false, d: false },
+        mealsByDate: buildMealsByDate(item.startDate, item.endDate, null, null),
+        pickup: b.pickup, status: b.status || '確定', notes: b.notes || '', room: b.room,
+        pickupMethod: '', pickupLocation: '', externalService: '',
+        ...stamped,
+      };
+      data = applyRecord(data, item.startDate, { ...shared, id: stayId + '-in', type: '入所', time: b.startTime }, true);
+      data = applyRecord(data, item.endDate, { ...shared, id: stayId + '-out', type: '退所', time: b.endTime }, true);
+    });
+    const users = master.users.some((u) => u.name === name)
+      ? master.users
+      : [...master.users, { id: uid('u'), name, allowanceDays: '' }];
+    const skipped = this.bulkPlan().filter((x) => x.skip).length;
+    this.setState({
+      data,
+      master: { ...master, users },
+      bulkOpen: false,
+      currentMonth: monthKeyOf(plan[0].startDate),
+      storageNotice: plan.length + '件の予約を作成しました。'
+        + (skipped ? '重複のため ' + skipped + '件はスキップしました。' : ''),
+    });
+  };
+
   // ── タイムラインのドラッグ ────────────────────────────────────────
   // 予約バーの本体をドラッグ=日程移動、左右の取っ手をドラッグ=期間の伸縮、
   // 空きトラックのドラッグ=その期間で新規作成。
@@ -1730,17 +1939,41 @@ class Component extends DCLogic {
     const cumEndStr = currentMonth + '-' + pad2(Math.min(cumEndDay, daysInMonthCount));
     const cumulative = rangeStats(kpiStays, monthStartStr, cumEndStr);
 
+    // 支給量の判定に使う。区分ごとに「数える／数えない」を切り替えられる。
+    const countsAllowance = (label) => {
+      const cat = categoryByLabel[label];
+      return !cat || cat.countsAllowance !== false;
+    };
+    const allowanceOf = (key) => {
+      const u = master.users.find((x) => x.id === key || x.name === key);
+      return u ? normalizeAllowance(u.allowanceDays) : '';
+    };
+
     // 当月に1日以上かかる滞在を「1回」として利用者別に集計する。
     const userUsageStats = {};
     kpiStays.forEach((s) => {
       const days = stayDays(s, monthStartStr, monthEndStr);
       if (!days.length) return;
-      const row = (userUsageStats[s.name] = userUsageStats[s.name] || { count: 0, days: 0 });
+      const row = (userUsageStats[s.name] = userUsageStats[s.name] || { count: 0, days: 0, key: stayUserKey(s) });
       row.count += 1;
       row.days += days.length;
     });
     const userUsageRows = Object.keys(userUsageStats)
-      .map((name) => ({ name, count: userUsageStats[name].count, days: userUsageStats[name].days }))
+      .map((name) => {
+        const st = userUsageStats[name];
+        const limit = allowanceOf(st.key);
+        const used = limit ? allowanceDaysUsed(activeStays, st.key, currentMonth, countsAllowance).size : 0;
+        const remain = limit ? limit - used : 0;
+        return {
+          name, count: st.count, days: st.days,
+          hasAllowance: !!limit,
+          allowanceLabel: limit ? used + ' / ' + limit + '日' : '',
+          remainLabel: limit ? (remain >= 0 ? '残り' + remain + '日' : '超過' + (-remain) + '日') : '',
+          allowanceColor: !limit ? 'oklch(0.6 0.01 75)'
+            : remain < 0 ? 'oklch(0.5 0.17 25)'
+              : remain === 0 ? 'oklch(0.52 0.14 60)' : 'oklch(0.45 0.11 150)',
+        };
+      })
       .sort((a, b) => b.days - a.days || b.count - a.count || a.name.localeCompare(b.name, 'ja'));
     const userUsageTotalCount = userUsageRows.reduce((sum, row) => sum + row.count, 0);
     const userUsageTotalDays = userUsageRows.reduce((sum, row) => sum + row.days, 0);
@@ -1861,6 +2094,7 @@ class Component extends DCLogic {
       // 「この日は夕食だけ」がすぐ分かる。
       const mealBadges = MEAL_KINDS.map((kind) => {
         const count = dayMeals[kind.key];
+        const allOn = count > 0 && count === stayingCount;
         return {
           // 2人以上のときだけ人数を添える。1人なら字だけの方が読みやすい。
           label: count >= 2 ? kind.label + count : kind.label,
@@ -1869,7 +2103,10 @@ class Component extends DCLogic {
           color: count > 0 ? kind.color : 'oklch(0.83 0.005 75)',
           border: count > 0 ? kind.border : 'oklch(0.93 0.005 75)',
           weight: count > 0 ? '800' : '500',
-          title: kind.label + '食 ' + count + '名',
+          title: kind.label + '食 ' + count + '名 ／ クリックで'
+            + (allOn ? 'なし' : 'あり') + 'に切替'
+            + (stayingCount > 1 ? '（' + stayingCount + '名まとめて）' : ''),
+          toggle: () => this.toggleDayMeal(dateStr, kind.key),
         };
       });
       calendarCells.push({
@@ -2230,6 +2467,44 @@ class Component extends DCLogic {
     const drawerNights = drawer && drawer.isStayEditor && drawer.endDate >= drawer.startDate
       ? daysBetween(drawer.startDate, drawer.endDate) : 0;
 
+    // ── 支給量の見込み（編集中の内容を反映した予測） ──────────────
+    // 期間が月をまたぐことがあるので、かかる月それぞれで判定する。
+    // ここは警告のみで保存は止めない。緊急利用など、正当に超える場面があるため。
+    const allowanceLines = [];
+    if (drawer && drawer.isStayEditor) {
+      const dName = String(drawer.name || '').trim();
+      const dKey = drawer.userId || dName;
+      const limit = dName ? allowanceOf(dKey) : '';
+      if (limit && drawer.startDate && drawer.endDate && drawer.endDate >= drawer.startDate
+          && !isCancelled(drawer.status) && countsAllowance(drawer.category)) {
+        monthsSpanned(drawer.startDate, drawer.endDate).forEach((mk) => {
+          // 編集中の滞在は除外して数え、そのうえで今の入力内容ぶんを足す。
+          const others = allowanceDaysUsed(activeStays, dKey, mk, countsAllowance, drawer.stayId);
+          const mStart = monthStartOf(mk);
+          const mEnd = monthEndOf(mk);
+          eachDate(drawer.startDate > mStart ? drawer.startDate : mStart,
+            drawer.endDate < mEnd ? drawer.endDate : mEnd, (d) => others.add(d));
+          const used = others.size;
+          const over = used > limit;
+          allowanceLines.push({
+            label: monthLabelOf(mk) + '　' + used + ' / ' + limit + '日',
+            detail: over ? '支給量を ' + (used - limit) + '日 超えます' : '残り ' + (limit - used) + '日',
+            over,
+            bg: over ? 'oklch(0.96 0.05 25)' : 'oklch(0.97 0.02 150)',
+            border: over ? 'oklch(0.78 0.13 25)' : 'oklch(0.85 0.05 150)',
+            color: over ? 'oklch(0.45 0.16 25)' : 'oklch(0.4 0.1 150)',
+          });
+        });
+      }
+    }
+
+    // ── 定期利用の一括登録 ────────────────────────────────────────
+    const bulk = this.state.bulk;
+    const bulkPlan = this.state.bulkOpen ? this.bulkPlan() : [];
+    const bulkCreatable = bulkPlan.filter((x) => !x.skip).length;
+    const bulkSkipped = bulkPlan.filter((x) => x.skip).length;
+    const bulkNights = Math.max(1, Math.floor(Number(bulk.nights) || 1));
+
     return {
       primaryAccent,
       cellMinHeight,
@@ -2523,18 +2798,117 @@ class Component extends DCLogic {
 
       userRows: master.users.map((u, idx) => ({
         idx, value: u.name,
+        allowance: u.allowanceDays === '' ? '' : String(u.allowanceDays),
         onChange: (e) => this.updateUser(idx, e.target.value),
+        onAllowanceChange: (e) => this.updateUserAllowance(idx, e.target.value),
         onRemove: () => this.removeUser(idx),
       })),
       addUser: this.addUser,
 
       categoryRows: master.categories.map((c, idx) => ({
         idx, label: c.label, color: c.color,
+        countsAllowance: c.countsAllowance !== false,
         onLabelChange: (e) => this.updateCategory(idx, { label: e.target.value }),
         onColorChange: (e) => this.updateCategory(idx, { color: e.target.value }),
+        onToggleAllowance: () => this.updateCategory(idx, { countsAllowance: !(c.countsAllowance !== false) }),
         onRemove: () => this.removeCategory(idx),
       })),
       addCategory: this.addCategory,
+
+      // 支給量（ドロワーの見込み警告）
+      allowanceLines,
+      hasAllowanceLines: allowanceLines.length > 0,
+
+      // 定期利用の一括登録
+      bulkOpen: this.state.bulkOpen,
+      openBulk: this.openBulk,
+      closeBulk: this.closeBulk,
+      runBulk: this.runBulk,
+      bulkName: bulk.name,
+      onBulkNameChange: (e) => {
+        const val = e.target.value;
+        const m = master.users.find((u) => u.name === val);
+        this.setBulk({ name: val, userId: m ? m.id : null });
+      },
+      bulkNotes: bulk.notes,
+      onBulkNotesChange: (e) => this.setBulk({ notes: e.target.value }),
+      bulkRangeStart: bulk.rangeStart,
+      bulkRangeEnd: bulk.rangeEnd,
+      onBulkRangeStartChange: (e) => this.setBulk({ rangeStart: e.target.value }),
+      onBulkRangeEndChange: (e) => this.setBulk({ rangeEnd: e.target.value }),
+      bulkNights: bulkNights,
+      onBulkNightsChange: (e) => this.setBulk({ nights: e.target.value }),
+      bulkStayLabel: bulkNights + '泊' + (bulkNights + 1) + '日',
+      bulkStartTime: bulk.startTime,
+      bulkEndTime: bulk.endTime,
+      onBulkStartTimeChange: (e) => this.setBulk({ startTime: e.target.value }),
+      onBulkEndTimeChange: (e) => this.setBulk({ endTime: e.target.value }),
+      bulkModes: [
+        { key: 'weekly', label: '毎週' },
+        { key: 'biweekly', label: '隔週' },
+        { key: 'monthly', label: '毎月第○週' },
+      ].map((m) => ({
+        label: m.label,
+        select: () => this.setBulk({ mode: m.key }),
+        bg: bulk.mode === m.key ? 'color-mix(in oklab, ' + primaryAccent + ' 12%, white)' : 'white',
+        border: bulk.mode === m.key ? primaryAccent : 'oklch(0.87 0.01 75)',
+        color: bulk.mode === m.key ? primaryAccent : 'oklch(0.5 0.01 75)',
+      })),
+      bulkIsMonthly: bulk.mode === 'monthly',
+      bulkNthOptions: [1, 2, 3, 4, 'last'].map((n) => ({
+        label: n === 'last' ? '最終' : '第' + n,
+        select: () => this.setBulk({ nth: n }),
+        bg: String(bulk.nth) === String(n) ? 'color-mix(in oklab, ' + primaryAccent + ' 12%, white)' : 'white',
+        border: String(bulk.nth) === String(n) ? primaryAccent : 'oklch(0.87 0.01 75)',
+        color: String(bulk.nth) === String(n) ? primaryAccent : 'oklch(0.5 0.01 75)',
+      })),
+      bulkWeekdayOptions: WEEKDAY_LABELS.map((label, dow) => {
+        const on = bulk.weekdays.indexOf(dow) >= 0;
+        return {
+          label,
+          toggle: () => this.toggleBulkWeekday(dow),
+          bg: on ? 'color-mix(in oklab, ' + primaryAccent + ' 14%, white)' : 'white',
+          border: on ? primaryAccent : 'oklch(0.88 0.01 75)',
+          color: on ? primaryAccent : (dow === 0 ? 'oklch(0.55 0.15 25)' : dow === 6 ? 'oklch(0.5 0.13 250)' : 'oklch(0.5 0.01 75)'),
+          weight: on ? '800' : '500',
+        };
+      }),
+      bulkRoomOptions: master.rooms.map((room) => ({
+        label: room.name,
+        select: () => this.setBulk({ room: room.id }),
+        bg: bulk.room === room.id ? 'color-mix(in oklab, ' + primaryAccent + ' 12%, white)' : 'white',
+        border: bulk.room === room.id ? primaryAccent : 'oklch(0.87 0.01 75)',
+        color: bulk.room === room.id ? primaryAccent : 'oklch(0.5 0.01 75)',
+      })),
+      bulkCategoryOptions: master.categories.map((c) => ({
+        label: c.label,
+        select: () => this.setBulk({ category: c.label }),
+        bg: bulk.category === c.label ? 'color-mix(in oklab, ' + c.color + ' 12%, white)' : 'white',
+        border: bulk.category === c.label ? c.color : 'oklch(0.87 0.01 75)',
+        color: bulk.category === c.label ? c.color : 'oklch(0.5 0.01 75)',
+      })),
+      bulkStatusOptions: STATUS_LIST.filter((x) => x !== 'キャンセル').map((label) => ({
+        label,
+        select: () => this.setBulk({ status: label }),
+        bg: bulk.status === label ? 'color-mix(in oklab, ' + primaryAccent + ' 12%, white)' : 'white',
+        border: bulk.status === label ? primaryAccent : 'oklch(0.87 0.01 75)',
+        color: bulk.status === label ? primaryAccent : 'oklch(0.5 0.01 75)',
+      })),
+      bulkPlanRows: bulkPlan.slice(0, 60).map((x) => ({
+        label: x.startDate.replace(/-/g, '/') + ' 〜 ' + x.endDate.replace(/-/g, '/'),
+        skip: x.skip,
+        ok: !x.skip,
+        reason: x.reason,
+        color: x.skip ? 'oklch(0.58 0.13 25)' : 'oklch(0.4 0.01 75)',
+      })),
+      bulkPlanTruncated: bulkPlan.length > 60,
+      bulkCreatable,
+      bulkSkipped,
+      bulkHasPlan: bulkPlan.length > 0,
+      bulkNoPlan: bulkPlan.length === 0,
+      bulkSummary: bulkPlan.length === 0
+        ? '条件に合う日がありません。曜日と期間をご確認ください。'
+        : '作成 ' + bulkCreatable + '件' + (bulkSkipped ? ' ／ 重複でスキップ ' + bulkSkipped + '件' : ''),
 
       pickupRows: master.pickupOptions.map((p, idx) => ({
         idx, label: p.label, highlight: p.highlight,

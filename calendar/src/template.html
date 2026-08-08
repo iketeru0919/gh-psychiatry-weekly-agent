@@ -213,6 +213,7 @@
     <div data-print-hide="" style="display:flex;justify-content:flex-end;gap:10px;align-items:center;margin-bottom:16px;">
       <button sc-camel-on-click="{{ toggleKpiTentative }}" style="padding:5px 12px;border-radius:999px;border:1px solid oklch(0.85 0.01 75);background:white;color:oklch(0.45 0.01 75);font-size:11.5px;font-weight:700;cursor:pointer;">集計範囲：{{ kpiScopeLabel }}（切替）</button>
       <button sc-camel-on-click="{{ toggleVacancy }}" style="padding:5px 12px;border-radius:999px;border:1px solid {{ primaryAccent }};background:white;color:{{ primaryAccent }};font-size:11.5px;font-weight:700;cursor:pointer;">{{ vacancyToggleLabel }}</button>
+      <button sc-camel-on-click="{{ openBulk }}" style="padding:5px 12px;border-radius:999px;border:1px solid oklch(0.7 0.09 150);background:white;color:oklch(0.4 0.11 150);font-size:11.5px;font-weight:700;cursor:pointer;">定期予約をまとめて作成</button>
     </div>
 
     <sc-if value="{{ userUsageOpen }}" hint-placeholder-val="{{ false }}">
@@ -221,9 +222,16 @@
         <sc-if value="{{ userUsageHasRows }}" hint-placeholder-val="{{ false }}">
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px 12px;">
             <sc-for list="{{ userUsageRows }}" as="usage" hint-placeholder-count="4">
-              <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;background:white;border-radius:9px;padding:9px 11px;border:1px solid oklch(0.91 0.015 250);">
-                <span style="font-size:13px;font-weight:600;color:oklch(0.35 0.02 75);">{{ usage.name }}</span>
-                <span style="white-space:nowrap;font-size:13px;font-weight:900;color:{{ userKpi.color }};">{{ usage.count }}回 ／ {{ usage.days }}日</span>
+              <div style="background:white;border-radius:9px;padding:9px 11px;border:1px solid oklch(0.91 0.015 250);">
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+                  <span style="font-size:13px;font-weight:600;color:oklch(0.35 0.02 75);">{{ usage.name }}</span>
+                  <span style="white-space:nowrap;font-size:13px;font-weight:900;color:{{ userKpi.color }};">{{ usage.count }}回 ／ {{ usage.days }}日</span>
+                </div>
+                <sc-if value="{{ usage.hasAllowance }}" hint-placeholder-val="{{ false }}">
+                  <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:5px;padding-top:5px;border-top:1px dashed oklch(0.9 0.02 250);font-size:11.5px;font-weight:700;color:{{ usage.allowanceColor }};">
+                    <span>支給量 {{ usage.allowanceLabel }}</span><span>{{ usage.remainLabel }}</span>
+                  </div>
+                </sc-if>
               </div>
             </sc-for>
           </div>
@@ -356,7 +364,7 @@
               <sc-if value="{{ c.hasMeals }}" hint-placeholder-val="{{ false }}">
                 <div class="ss-mealsum" style="margin-top:auto;padding-top:5px;border-top:1px dashed oklch(0.91 0.008 75);display:flex;gap:4px;align-items:center;">
                   <sc-for list="{{ c.mealBadges }}" as="mb" hint-placeholder-count="3">
-                    <span class="ss-mealbadge" title="{{ mb.title }}" style="flex:1;text-align:center;padding:2px 0;border-radius:5px;border:1px solid {{ mb.border }};background:{{ mb.bg }};color:{{ mb.color }};font-size:10px;font-weight:{{ mb.weight }};letter-spacing:.02em;">{{ mb.label }}</span>
+                    <button class="ss-mealbadge" sc-camel-on-click="{{ mb.toggle }}" title="{{ mb.title }}" style="flex:1;text-align:center;padding:2px 0;border-radius:5px;border:1px solid {{ mb.border }};background:{{ mb.bg }};color:{{ mb.color }};font-size:10px;font-weight:{{ mb.weight }};letter-spacing:.02em;cursor:pointer;font-family:inherit;" style-hover="filter:brightness(0.94);">{{ mb.label }}</button>
                   </sc-for>
                 </div>
               </sc-if>
@@ -811,6 +819,16 @@
         </datalist>
       </div>
 
+      <sc-if value="{{ hasAllowanceLines }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <sc-for list="{{ allowanceLines }}" as="al" hint-placeholder-count="1">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 11px;border-radius:9px;background:{{ al.bg }};border:1px solid {{ al.border }};color:{{ al.color }};font-size:12px;font-weight:700;">
+              <span>{{ al.label }}</span><span>{{ al.detail }}</span>
+            </div>
+          </sc-for>
+        </div>
+      </sc-if>
+
       <div>
         <div style="font-size:12px;font-weight:700;color:oklch(0.5 0.01 75);margin-bottom:6px;">区分</div>
         <div style="display:flex;gap:6px;">
@@ -908,6 +926,108 @@
       <sc-if value="{{ drawerIsExisting }}" hint-placeholder-val="{{ false }}">
         <button sc-camel-on-click="{{ deleteDrawer }}" style="padding:10px;border-radius:10px;border:none;background:none;color:oklch(0.55 0.16 25);font-weight:500;font-size:13px;cursor:pointer;">この予約を削除</button>
       </sc-if>
+    </div>
+  </sc-if>
+
+  <!-- ── 定期利用の一括登録 ──────────────────────────────────── -->
+  <sc-if value="{{ bulkOpen }}" hint-placeholder-val="{{ false }}">
+    <div sc-camel-on-click="{{ closeBulk }}" style="position:fixed;inset:0;background:oklch(0.2 0.01 75 / 0.4);z-index:60;"></div>
+    <div class="ss-modal" style="position:fixed;top:5vh;left:50%;transform:translateX(-50%);width:560px;max-width:94vw;max-height:90vh;overflow-y:auto;background:oklch(0.995 0.003 75);border-radius:20px;box-shadow:0 20px 60px oklch(0.2 0.01 75 / 0.25);z-index:61;padding:26px 28px;display:flex;flex-direction:column;gap:18px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div style="font-size:18px;font-weight:900;">定期利用をまとめて作成</div>
+        <button sc-camel-on-click="{{ closeBulk }}" style="border:none;background:none;font-size:20px;cursor:pointer;color:oklch(0.5 0.01 75);">×</button>
+      </div>
+      <div style="font-size:11.5px;color:oklch(0.55 0.01 75);line-height:1.7;">
+        「毎週土曜」「毎月第2土曜」のような定期利用を、期間を指定して一度に登録します。<strong>すでに予約が入っている日は自動でスキップ</strong>し、下の一覧に理由を表示します。
+      </div>
+
+      <div>
+        <div style="font-size:12px;font-weight:700;color:oklch(0.5 0.01 75);margin-bottom:6px;">氏名</div>
+        <input type="text" list="user-master-options" value="{{ bulkName }}" sc-camel-on-change="{{ onBulkNameChange }}" placeholder="山田 太郎" style="width:100%;padding:9px 10px;border-radius:9px;border:1px solid oklch(0.87 0.01 75);font-size:14px;" style-focus="border-color:{{ primaryAccent }};outline:none;">
+      </div>
+
+      <div>
+        <div style="font-size:12px;font-weight:700;color:oklch(0.5 0.01 75);margin-bottom:6px;">繰り返し</div>
+        <div style="display:flex;gap:6px;margin-bottom:8px;">
+          <sc-for list="{{ bulkModes }}" as="bm" hint-placeholder-count="3">
+            <button sc-camel-on-click="{{ bm.select }}" style="flex:1;padding:8px 4px;border-radius:9px;border:1px solid {{ bm.border }};background:{{ bm.bg }};color:{{ bm.color }};font-weight:700;font-size:12.5px;cursor:pointer;">{{ bm.label }}</button>
+          </sc-for>
+        </div>
+        <sc-if value="{{ bulkIsMonthly }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;gap:6px;margin-bottom:8px;">
+            <sc-for list="{{ bulkNthOptions }}" as="bn" hint-placeholder-count="5">
+              <button sc-camel-on-click="{{ bn.select }}" style="flex:1;padding:7px 2px;border-radius:8px;border:1px solid {{ bn.border }};background:{{ bn.bg }};color:{{ bn.color }};font-weight:700;font-size:12px;cursor:pointer;">{{ bn.label }}</button>
+            </sc-for>
+          </div>
+        </sc-if>
+        <div style="display:flex;gap:5px;">
+          <sc-for list="{{ bulkWeekdayOptions }}" as="bw" hint-placeholder-count="7">
+            <button sc-camel-on-click="{{ bw.toggle }}" style="flex:1;padding:9px 0;border-radius:9px;border:1px solid {{ bw.border }};background:{{ bw.bg }};color:{{ bw.color }};font-weight:{{ bw.weight }};font-size:13px;cursor:pointer;">{{ bw.label }}</button>
+          </sc-for>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;">
+        <label style="font-size:11px;font-weight:700;color:oklch(0.5 0.01 75);">開始日<input type="date" value="{{ bulkRangeStart }}" sc-camel-on-change="{{ onBulkRangeStartChange }}" style="display:block;width:100%;margin-top:4px;padding:8px;border-radius:8px;border:1px solid oklch(0.84 0.01 75);font-size:13px;"></label>
+        <label style="font-size:11px;font-weight:700;color:oklch(0.5 0.01 75);">終了日<input type="date" value="{{ bulkRangeEnd }}" sc-camel-on-change="{{ onBulkRangeEndChange }}" style="display:block;width:100%;margin-top:4px;padding:8px;border-radius:8px;border:1px solid oklch(0.84 0.01 75);font-size:13px;"></label>
+        <label style="font-size:11px;font-weight:700;color:oklch(0.5 0.01 75);">1回あたり（{{ bulkStayLabel }}）<input type="number" min="1" max="30" value="{{ bulkNights }}" sc-camel-on-change="{{ onBulkNightsChange }}" style="display:block;width:100%;margin-top:4px;padding:8px;border-radius:8px;border:1px solid oklch(0.84 0.01 75);font-size:13px;"></label>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+          <label style="font-size:11px;font-weight:700;color:oklch(0.5 0.01 75);">入所<input type="time" value="{{ bulkStartTime }}" sc-camel-on-change="{{ onBulkStartTimeChange }}" style="display:block;width:100%;margin-top:4px;padding:8px;border-radius:8px;border:1px solid oklch(0.84 0.01 75);font-size:13px;"></label>
+          <label style="font-size:11px;font-weight:700;color:oklch(0.5 0.01 75);">退所<input type="time" value="{{ bulkEndTime }}" sc-camel-on-change="{{ onBulkEndTimeChange }}" style="display:block;width:100%;margin-top:4px;padding:8px;border-radius:8px;border:1px solid oklch(0.84 0.01 75);font-size:13px;"></label>
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:9px;">
+        <div>
+          <div style="font-size:12px;font-weight:700;color:oklch(0.5 0.01 75);margin-bottom:6px;">部屋</div>
+          <div style="display:flex;gap:6px;">
+            <sc-for list="{{ bulkRoomOptions }}" as="br" hint-placeholder-count="2">
+              <button sc-camel-on-click="{{ br.select }}" style="flex:1;padding:8px 4px;border-radius:9px;border:1px solid {{ br.border }};background:{{ br.bg }};color:{{ br.color }};font-weight:700;font-size:12.5px;cursor:pointer;">{{ br.label }}</button>
+            </sc-for>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:12px;font-weight:700;color:oklch(0.5 0.01 75);margin-bottom:6px;">区分</div>
+          <div style="display:flex;gap:6px;">
+            <sc-for list="{{ bulkCategoryOptions }}" as="bc" hint-placeholder-count="3">
+              <button sc-camel-on-click="{{ bc.select }}" style="flex:1;padding:8px 4px;border-radius:9px;border:1px solid {{ bc.border }};background:{{ bc.bg }};color:{{ bc.color }};font-weight:700;font-size:12.5px;cursor:pointer;">{{ bc.label }}</button>
+            </sc-for>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:12px;font-weight:700;color:oklch(0.5 0.01 75);margin-bottom:6px;">予約状態</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            <sc-for list="{{ bulkStatusOptions }}" as="bs" hint-placeholder-count="4">
+              <button sc-camel-on-click="{{ bs.select }}" style="flex:1;min-width:80px;padding:8px 4px;border-radius:9px;border:1px solid {{ bs.border }};background:{{ bs.bg }};color:{{ bs.color }};font-weight:700;font-size:12px;cursor:pointer;">{{ bs.label }}</button>
+            </sc-for>
+          </div>
+        </div>
+        <label style="font-size:11px;font-weight:700;color:oklch(0.5 0.01 75);">備考（全件に入ります）<input type="text" value="{{ bulkNotes }}" sc-camel-on-change="{{ onBulkNotesChange }}" placeholder="定期利用" style="display:block;width:100%;margin-top:4px;padding:8px;border-radius:8px;border:1px solid oklch(0.84 0.01 75);font-size:13px;"></label>
+      </div>
+
+      <div style="border:1px solid oklch(0.9 0.01 75);border-radius:12px;padding:12px 14px;background:oklch(0.99 0.003 75);">
+        <div style="font-size:12.5px;font-weight:800;margin-bottom:8px;">作成される予約（プレビュー）</div>
+        <div style="font-size:12px;font-weight:700;color:oklch(0.42 0.01 75);margin-bottom:8px;">{{ bulkSummary }}</div>
+        <sc-if value="{{ bulkHasPlan }}" hint-placeholder-val="{{ false }}">
+          <div style="max-height:180px;overflow-y:auto;display:flex;flex-direction:column;gap:3px;">
+            <sc-for list="{{ bulkPlanRows }}" as="bp" hint-placeholder-count="6">
+              <div style="display:flex;justify-content:space-between;gap:10px;font-size:11.5px;color:{{ bp.color }};padding:3px 0;border-bottom:1px solid oklch(0.96 0.004 75);">
+                <span>{{ bp.label }}</span>
+                <sc-if value="{{ bp.skip }}" hint-placeholder-val="{{ false }}"><span style="white-space:nowrap;font-weight:700;">スキップ：{{ bp.reason }}</span></sc-if>
+                <sc-if value="{{ bp.ok }}" hint-placeholder-val="{{ true }}"><span style="white-space:nowrap;color:oklch(0.45 0.11 150);font-weight:700;">作成</span></sc-if>
+              </div>
+            </sc-for>
+          </div>
+          <sc-if value="{{ bulkPlanTruncated }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:11px;color:oklch(0.62 0.01 75);margin-top:6px;">※ 先頭60件のみ表示しています</div>
+          </sc-if>
+        </sc-if>
+      </div>
+
+      <div style="display:flex;gap:10px;">
+        <button sc-camel-on-click="{{ runBulk }}" style="flex:1;padding:12px;border-radius:10px;border:none;background:{{ primaryAccent }};color:white;font-weight:700;font-size:14px;cursor:pointer;">{{ bulkCreatable }}件を作成</button>
+        <button sc-camel-on-click="{{ closeBulk }}" style="padding:12px 18px;border-radius:10px;border:1px solid oklch(0.87 0.01 75);background:none;color:oklch(0.45 0.01 75);font-weight:500;font-size:14px;cursor:pointer;">閉じる</button>
+      </div>
     </div>
   </sc-if>
 
@@ -1064,13 +1184,16 @@
         </div>
         <div style="display:flex;flex-direction:column;gap:6px;">
           <sc-for list="{{ userRows }}" as="u" hint-placeholder-count="7">
-            <div style="display:flex;gap:6px;">
+            <div style="display:flex;gap:6px;align-items:center;">
               <input type="text" value="{{ u.value }}" sc-camel-on-change="{{ u.onChange }}" style="flex:1;padding:7px 9px;border-radius:8px;border:1px solid oklch(0.87 0.01 75);font-size:13px;" style-focus="border-color:{{ primaryAccent }};outline:none;">
+              <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:oklch(0.55 0.01 75);white-space:nowrap;">支給量
+                <input type="number" min="1" max="31" value="{{ u.allowance }}" sc-camel-on-change="{{ u.onAllowanceChange }}" placeholder="—" style="width:56px;padding:7px 6px;border-radius:8px;border:1px solid oklch(0.87 0.01 75);font-size:13px;text-align:right;">日
+              </label>
               <button sc-camel-on-click="{{ u.onRemove }}" style="border:none;background:none;color:oklch(0.6 0.05 25);font-size:16px;cursor:pointer;padding:0 6px;">×</button>
             </div>
           </sc-for>
         </div>
-        <div style="font-size:11px;color:oklch(0.6 0.01 75);margin-top:6px;line-height:1.6;">氏名を修正すると、その利用者の既存の予約記録にも反映されます</div>
+        <div style="font-size:11px;color:oklch(0.6 0.01 75);margin-top:6px;line-height:1.7;">氏名を修正すると、その利用者の既存の予約記録にも反映されます<br><strong>支給量</strong>＝受給者証の月あたり上限日数。空欄なら管理しません。予約を作るときに残り日数と超過を知らせます</div>
       </div>
 
       <div>
@@ -1083,6 +1206,9 @@
             <div style="display:flex;gap:6px;align-items:center;">
               <input type="color" value="{{ c.color }}" sc-camel-on-change="{{ c.onColorChange }}" style="width:34px;height:32px;border-radius:6px;border:1px solid oklch(0.87 0.01 75);padding:0;cursor:pointer;">
               <input type="text" value="{{ c.label }}" sc-camel-on-change="{{ c.onLabelChange }}" style="flex:1;padding:7px 9px;border-radius:8px;border:1px solid oklch(0.87 0.01 75);font-size:13px;" style-focus="border-color:{{ primaryAccent }};outline:none;">
+              <label style="display:flex;align-items:center;gap:4px;font-size:11.5px;color:oklch(0.5 0.01 75);white-space:nowrap;">
+                <input type="checkbox" checked="{{ c.countsAllowance }}" sc-camel-on-change="{{ c.onToggleAllowance }}">支給量に含める
+              </label>
               <button sc-camel-on-click="{{ c.onRemove }}" style="border:none;background:none;color:oklch(0.6 0.05 25);font-size:16px;cursor:pointer;padding:0 6px;">×</button>
             </div>
           </sc-for>
