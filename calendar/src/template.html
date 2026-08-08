@@ -160,7 +160,10 @@
 
     <div data-print-hide="{{ hideOnSheetPrint }}" style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:20px;gap:20px;flex-wrap:wrap;">
       <div>
-        <div style="font-size:13px;letter-spacing:.1em;font-weight:500;color:{{ primaryAccent }};margin-bottom:6px;">{{ facilityName }} ／ {{ buildingLabel }}</div>
+        <div style="display:flex;align-items:center;gap:9px;margin-bottom:6px;flex-wrap:wrap;">
+          <div style="font-size:13px;letter-spacing:.1em;font-weight:500;color:{{ primaryAccent }};">{{ facilityName }} ／ {{ buildingLabel }}</div>
+          <button data-print-hide="" sc-camel-on-click="{{ toggleSiteSwitcher }}" title="この端末には複数の施設ぶんのデータを、互いに独立して保存できます" style="padding:3px 11px;border-radius:999px;border:1px solid {{ primaryAccent }};background:color-mix(in oklab, {{ primaryAccent }} 8%, white);color:{{ primaryAccent }};font-size:11.5px;font-weight:800;cursor:pointer;white-space:nowrap;">施設を切替（{{ siteCount }}）</button>
+        </div>
         <div class="ss-title" style="font-size:32px;font-weight:900;letter-spacing:.02em;">ショートステイ・体験利用 管理表</div>
       </div>
       <div style="text-align:right;">
@@ -892,6 +895,52 @@
     </div>
   </sc-if>
 
+  <!-- ── 施設(拠点)の切替 ────────────────────────────────────── -->
+  <sc-if value="{{ siteSwitcherOpen }}" hint-placeholder-val="{{ false }}">
+    <div sc-camel-on-click="{{ closeSiteSwitcher }}" style="position:fixed;inset:0;background:oklch(0.2 0.01 75 / 0.4);z-index:60;"></div>
+    <div class="ss-modal" style="position:fixed;top:8vh;left:50%;transform:translateX(-50%);width:520px;max-width:92vw;max-height:84vh;overflow-y:auto;background:oklch(0.995 0.003 75);border-radius:20px;box-shadow:0 20px 60px oklch(0.2 0.01 75 / 0.25);z-index:61;padding:26px 28px;display:flex;flex-direction:column;gap:18px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div style="font-size:18px;font-weight:900;">施設を切替</div>
+        <button sc-camel-on-click="{{ closeSiteSwitcher }}" style="border:none;background:none;font-size:20px;cursor:pointer;color:oklch(0.5 0.01 75);">×</button>
+      </div>
+
+      <div style="font-size:11.5px;color:oklch(0.5 0.01 75);line-height:1.75;background:oklch(0.98 0.008 250);border:1px solid oklch(0.9 0.03 250);border-radius:10px;padding:10px 13px;">
+        施設ごとに<strong>予約データもマスタも完全に分かれて</strong>保存されます。片方を編集しても、もう片方には一切影響しません。<br>
+        なお、これは<strong>この端末の中での分離</strong>です。別のPCとの共有ではありません（別PCへ渡すにはバックアップの保存・取り込みを使ってください）。
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <sc-for list="{{ siteRows }}" as="site" hint-placeholder-count="2">
+          <div style="display:flex;align-items:center;gap:9px;border:1px solid oklch(0.9 0.01 75);border-radius:11px;padding:11px 13px;background:oklch(0.99 0.003 75);">
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:14px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ site.name }}</div>
+              <div style="font-size:10px;color:oklch(0.66 0.01 75);margin-top:2px;">ショートカット用: {{ site.shortcut }}</div>
+            </div>
+            <sc-if value="{{ site.active }}" hint-placeholder-val="{{ true }}">
+              <span style="font-size:11px;font-weight:800;padding:5px 12px;border-radius:999px;background:color-mix(in oklab, {{ primaryAccent }} 14%, white);color:{{ primaryAccent }};white-space:nowrap;">{{ site.statusLabel }}</span>
+            </sc-if>
+            <sc-if value="{{ site.inactive }}" hint-placeholder-val="{{ false }}">
+              <button sc-camel-on-click="{{ site.select }}" style="padding:6px 13px;border-radius:8px;border:1px solid {{ primaryAccent }};background:white;color:{{ primaryAccent }};font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;">{{ site.statusLabel }}</button>
+            </sc-if>
+            <sc-if value="{{ canRemoveSite }}" hint-placeholder-val="{{ false }}">
+              <button sc-camel-on-click="{{ site.remove }}" title="この施設のデータを削除" style="border:none;background:none;color:oklch(0.6 0.05 25);font-size:16px;cursor:pointer;padding:0 4px;">×</button>
+            </sc-if>
+          </div>
+        </sc-for>
+      </div>
+
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button sc-camel-on-click="{{ addSiteBlank }}" style="flex:1;min-width:150px;padding:10px;border-radius:9px;border:1px solid {{ primaryAccent }};background:white;color:{{ primaryAccent }};font-size:12.5px;font-weight:700;cursor:pointer;">＋ 施設を追加</button>
+        <button sc-camel-on-click="{{ addSiteFromMaster }}" style="flex:1;min-width:150px;padding:10px;border-radius:9px;border:1px solid oklch(0.85 0.01 75);background:white;color:oklch(0.45 0.01 75);font-size:12.5px;font-weight:700;cursor:pointer;">＋ 今の設定を引き継いで追加</button>
+      </div>
+      <div style="font-size:11px;color:oklch(0.62 0.01 75);line-height:1.7;margin-top:-8px;">
+        「引き継いで追加」は、部屋・区分・送迎・FAX送付先などの<strong>設定だけ</strong>をコピーします。予約データは引き継ぎません。
+      </div>
+
+      <button sc-camel-on-click="{{ exportAllSitesBackup }}" style="padding:10px;border-radius:9px;border:1px solid oklch(0.7 0.09 150);background:white;color:oklch(0.4 0.11 150);font-size:12.5px;font-weight:700;cursor:pointer;">全施設まとめてバックアップ保存</button>
+    </div>
+  </sc-if>
+
   <!-- ── マスタ設定 ──────────────────────────────────────────── -->
   <sc-if value="{{ settingsOpen }}" hint-placeholder-val="{{ false }}">
     <div sc-camel-on-click="{{ closeSettings }}" style="position:fixed;inset:0;background:oklch(0.2 0.01 75 / 0.4);z-index:50;"></div>
@@ -1051,7 +1100,7 @@
         </div>
         <button sc-camel-on-click="{{ restoreAutoBackup }}" style="padding:8px;border-radius:9px;border:1px solid oklch(0.82 0.02 75);background:none;color:oklch(0.42 0.04 75);font-weight:500;font-size:12px;cursor:pointer;">初期化前の自動バックアップを復元</button>
         <button sc-camel-on-click="{{ resetAll }}" style="padding:9px;border-radius:9px;border:1px solid oklch(0.88 0.01 75);background:none;color:{{ resetColor }};font-weight:500;font-size:12px;cursor:pointer;">{{ resetLabel }}</button>
-        <div style="font-size:11px;color:oklch(0.62 0.01 75);text-align:center;line-height:1.7;">入力内容はこのブラウザに自動保存されます。<strong>複数の端末で同時には共有されません。</strong>他の端末の内容を取り込むには、その端末でバックアップを保存し「取り込む（マージ）」から読み込んでください。</div>
+        <div style="font-size:11px;color:oklch(0.62 0.01 75);text-align:center;line-height:1.7;">ここでの保存・復元は<strong>表示中の施設「{{ siteName }}」だけ</strong>が対象です。全施設まとめての保存は「施設を切替」から行えます。<br>入力内容はこのブラウザに自動保存されます。<strong>複数の端末で同時には共有されません。</strong>他の端末の内容を取り込むには、その端末でバックアップを保存し「取り込む（マージ）」から読み込んでください。</div>
       </div>
     </div>
   </sc-if>

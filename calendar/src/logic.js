@@ -1,11 +1,20 @@
 const WEEKDAY_LABELS = ['日', '月', '火', '水', '木', '金', '土'];
 const NOW = new Date();
 
-// v1 は「2026年8月固定」の想定でキーに月が埋め込まれていた。v2 では月に依存しない。
-// 旧キーは読み込み時にだけ参照し、移行後は新キーへ書き出す。
-const STORAGE_KEY = 'ss-kanri-v2';
+// ── 保存先のキー ────────────────────────────────────────────────────
+// file:// で開いたページの localStorage は「ファイルごと」ではなく
+// 「file:// 全体でひとつ」。そのため HTML をコピーしてフォルダを分けても、
+// 同じPC・同じブラウザなら同じ保存領域を共有してしまい、複数施設で使うと
+// 互いのデータを上書きし合う。施設(拠点)ごとにキーを分けて解決する。
+const SITE_INDEX_KEY = 'ss-kanri-sites-v1';
+const ACTIVE_SITE_KEY = 'ss-kanri-active-site-v1';
+const storageKeyFor = (siteId) => 'ss-kanri-v2::' + siteId;
+const autoBackupKeyFor = (siteId) => 'ss-kanri-auto-backup-v2::' + siteId;
+
+// 施設を分ける前の単一データ。初回起動時に最初の施設へ移す。
+// v1 は「2026年8月固定」の想定でキーに月が埋め込まれていた。
+const SHARED_STORAGE_KEY = 'ss-kanri-v2';
 const LEGACY_STORAGE_KEY = 'ss-kanri-august-2026-v1';
-const AUTO_BACKUP_KEY = 'ss-kanri-auto-backup-v2';
 const LEGACY_AUTO_BACKUP_KEY = 'ss-kanri-august-2026-auto-backup-v1';
 
 // タイムラインの1日あたりの横幅(px)。ドラッグ量から日数を割り出すため、
@@ -553,27 +562,91 @@ function isBackupPayload(value) {
   return !!value && typeof value === 'object' && !!value.data && !!value.master;
 }
 
-function loadPersisted() {
+function isMultiSiteBackup(value) {
+  return !!value && typeof value === 'object' && Array.isArray(value.sites)
+    && value.sites.every((s) => s && typeof s === 'object' && isBackupPayload(s));
+}
+
+// ── 施設(拠点)の一覧 ────────────────────────────────────────────────
+function loadSiteIndex() {
   try {
-    let raw = window.localStorage.getItem(STORAGE_KEY);
-    let migrated = false;
-    if (!raw) {
-      raw = window.localStorage.getItem(LEGACY_STORAGE_KEY);
-      migrated = !!raw;
-    }
+    const list = JSON.parse(window.localStorage.getItem(SITE_INDEX_KEY) || 'null');
+    if (!Array.isArray(list)) return [];
+    return list.filter((s) => s && s.id).map((s) => ({ id: String(s.id), name: String(s.name || '') }));
+  } catch (err) {
+    return [];
+  }
+}
+function saveSiteIndex(list) {
+  try { window.localStorage.setItem(SITE_INDEX_KEY, JSON.stringify(list)); return true; } catch (err) { return false; }
+}
+function loadActiveSiteId() {
+  try { return window.localStorage.getItem(ACTIVE_SITE_KEY) || ''; } catch (err) { return ''; }
+}
+function saveActiveSiteId(id) {
+  try { window.localStorage.setItem(ACTIVE_SITE_KEY, id); } catch (err) { /* 保存できなくても動作は続ける */ }
+}
+// ショートカットに #site=xxx を付ければ、開いた瞬間その施設になる。
+// 1台のPCで複数施設を扱うとき、切替忘れによる他施設への誤入力を防げる。
+function siteIdFromHash() {
+  try {
+    const m = String(window.location.hash || '').match(/[#&]site=([^&]+)/);
+    return m ? decodeURIComponent(m[1]) : '';
+  } catch (err) {
+    return '';
+  }
+}
+
+function readPayload(key) {
+  try {
+    const raw = window.localStorage.getItem(key);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    if (!isBackupPayload(parsed)) return null;
-    const master = normalizeMaster(parsed.master);
-    return { data: normalizeData(parsed.data, master), master, migrated };
+    return isBackupPayload(parsed) ? parsed : null;
   } catch (err) {
     return null;
   }
 }
 
+// 施設ごとにキーが分かれる前のデータを拾う。初回起動時の1回だけ使う。
+function readPreSitePayload() {
+  return readPayload(SHARED_STORAGE_KEY) || readPayload(LEGACY_STORAGE_KEY);
+}
+
+// 施設一覧が空＝この端末では初めて開いた状態。既存データがあればそれを
+// 最初の施設として引き継ぎ、無ければ空の施設を1つ作る。
+function bootstrapSites() {
+  let sites = loadSiteIndex();
+  let migrated = false;
+  if (!sites.length) {
+    const existing = readPreSitePayload();
+    const id = uid('site');
+    const name = (existing && existing.master && existing.master.facilityName) || defaultMaster().facilityName || '施設1';
+    sites = [{ id, name }];
+    saveSiteIndex(sites);
+    if (existing) {
+      try { window.localStorage.setItem(storageKeyFor(id), JSON.stringify(existing)); migrated = true; } catch (err) { /* 続行 */ }
+    }
+    saveActiveSiteId(id);
+  }
+  const hashId = siteIdFromHash();
+  const stored = loadActiveSiteId();
+  const activeId = (sites.some((s) => s.id === hashId) && hashId)
+    || (sites.some((s) => s.id === stored) && stored)
+    || sites[0].id;
+  return { sites, activeId, migrated };
+}
+
+function loadPersisted(siteId) {
+  const parsed = readPayload(storageKeyFor(siteId));
+  if (!parsed) return null;
+  const master = normalizeMaster(parsed.master);
+  return { data: normalizeData(parsed.data, master), master };
+}
+
 function persist(state) {
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ data: state.data, master: state.master }));
+    window.localStorage.setItem(storageKeyFor(state.siteId), JSON.stringify({ data: state.data, master: state.master }));
     return true;
   } catch (err) {
     return false;
@@ -582,7 +655,7 @@ function persist(state) {
 
 function saveAutoBackup(state) {
   try {
-    window.localStorage.setItem(AUTO_BACKUP_KEY, JSON.stringify({
+    window.localStorage.setItem(autoBackupKeyFor(state.siteId), JSON.stringify({
       format: 'ss-kanri-backup-v2', exportedAt: new Date().toISOString(),
       data: state.data, master: state.master,
     }));
@@ -592,9 +665,9 @@ function saveAutoBackup(state) {
   }
 }
 
-function loadAutoBackup() {
+function loadAutoBackup(siteId) {
   try {
-    const value = JSON.parse(window.localStorage.getItem(AUTO_BACKUP_KEY)
+    const value = JSON.parse(window.localStorage.getItem(autoBackupKeyFor(siteId))
       || window.localStorage.getItem(LEGACY_AUTO_BACKUP_KEY) || 'null');
     return isBackupPayload(value) ? value : null;
   } catch (err) {
@@ -637,13 +710,18 @@ function monthsList() {
 class Component extends DCLogic {
   constructor(props) {
     super(props);
-    const saved = loadPersisted();
+    const boot = bootstrapSites();
+    const saved = loadPersisted(boot.activeId);
     // 初期表示は「今月」。v1 は '2026-08' が固定で埋め込まれていたため、
     // 別の月に開いても毎回タブを押し直す必要があった。
     this.state = {
       view: 'month',
       currentMonth: THIS_MONTH,
       focusDate: TODAY,
+      // 施設(拠点)ごとにデータを完全に分ける。siteId が保存先キーを決める。
+      sites: boot.sites,
+      siteId: boot.activeId,
+      siteSwitcherOpen: false,
       data: saved ? saved.data : sampleData(),
       drawer: null,
       master: saved ? saved.master : defaultMaster(),
@@ -652,8 +730,8 @@ class Component extends DCLogic {
       vacancyOpen: false,
       vacancyRange: { start: TODAY, end: shiftDate(TODAY, 1) },
       kpiIncludeTentative: true,
-      storageNotice: saved && saved.migrated
-        ? '旧バージョンのデータを引き継ぎました。食事は日別管理になったため、既存予約の食事内容をご確認ください。'
+      storageNotice: boot.migrated
+        ? 'この端末の既存データを「' + (boot.sites[0].name || '施設1') + '」として引き継ぎました。他の施設ぶんは、右上の「施設を切替」から追加してください。'
         : '',
       reportRange: { start: monthStartOf(THIS_MONTH), end: monthEndOf(THIS_MONTH) },
       dragPreview: null,
@@ -667,7 +745,7 @@ class Component extends DCLogic {
     // ドラッグ終了後に発火する click で編集画面が開いてしまうのを防ぐ。
     this.suppressClick = false;
     this.pendingImportMerge = false;
-    this.migratedFromLegacy = !!(saved && saved.migrated);
+    this.migratedFromLegacy = boot.migrated;
     this.onPointerMove = this.onPointerMove.bind(this);
     this.onPointerUp = this.onPointerUp.bind(this);
   }
@@ -718,13 +796,109 @@ class Component extends DCLogic {
 
   openSettings = () => this.setState({ settingsOpen: true });
   closeSettings = () => this.setState({ settingsOpen: false });
-  updateMaster = (patch) => this.setState((s) => ({ master: normalizeMaster({ ...s.master, ...patch }) }));
+  // 施設名を変えたら、施設一覧のラベルも追い掛ける。一覧に古い名前が残ると
+  // 「どれが今の施設か」が分からなくなり、他施設への誤入力につながる。
+  updateMaster = (patch) => this.setState((s) => {
+    const master = normalizeMaster({ ...s.master, ...patch });
+    const out = { master };
+    if (typeof patch.facilityName === 'string') {
+      const sites = s.sites.map((x) => (x.id === s.siteId ? { ...x, name: patch.facilityName } : x));
+      saveSiteIndex(sites);
+      out.sites = sites;
+    }
+    return out;
+  });
+
+  // ── 施設(拠点)の切替・追加・削除 ──────────────────────────────
+  toggleSiteSwitcher = () => this.setState((s) => ({ siteSwitcherOpen: !s.siteSwitcherOpen }));
+  closeSiteSwitcher = () => this.setState({ siteSwitcherOpen: false });
+
+  switchSite = (id) => this.setState((s) => {
+    if (id === s.siteId) return { siteSwitcherOpen: false };
+    const saved = loadPersisted(id);
+    saveActiveSiteId(id);
+    const site = s.sites.find((x) => x.id === id);
+    return {
+      siteId: id,
+      data: saved ? saved.data : sampleData(),
+      master: saved ? saved.master : defaultMaster(),
+      drawer: null, settingsOpen: false, siteSwitcherOpen: false,
+      currentMonth: THIS_MONTH, focusDate: TODAY, dragPreview: null,
+      storageNotice: '「' + ((site && site.name) || '施設') + '」に切り替えました。',
+    };
+  });
+
+  // 新しい施設は空のデータで始める。予約まで引き継ぐと他施設の記録が
+  // 紛れ込むため、引き継ぐのは部屋・区分などのマスタだけにする。
+  addSite = (carryMaster) => this.setState((s) => {
+    const id = uid('site');
+    const name = '新しい施設';
+    const sites = [...s.sites, { id, name }];
+    saveSiteIndex(sites);
+    saveActiveSiteId(id);
+    const base = carryMaster
+      ? normalizeMaster({ ...s.master, facilityName: name, users: [], faxRecipients: s.master.faxRecipients })
+      : defaultMaster();
+    if (!carryMaster) base.facilityName = name;
+    return {
+      sites, siteId: id,
+      data: {}, master: base,
+      drawer: null, settingsOpen: true, siteSwitcherOpen: false,
+      currentMonth: THIS_MONTH, focusDate: TODAY,
+      storageNotice: '施設を追加しました。マスタ設定で施設名・部屋を登録してください。',
+    };
+  });
+
+  removeSite = (id) => this.setState((s) => {
+    if (s.sites.length <= 1) return { storageNotice: '最後の1施設は削除できません。' };
+    const site = s.sites.find((x) => x.id === id);
+    const label = (site && site.name) || '施設';
+    if (!window.confirm('「' + label + '」の予約データとマスタをすべて削除します。元に戻せません。よろしいですか？')) return null;
+    try {
+      window.localStorage.removeItem(storageKeyFor(id));
+      window.localStorage.removeItem(autoBackupKeyFor(id));
+    } catch (err) { /* 消せなくても一覧からは外す */ }
+    const sites = s.sites.filter((x) => x.id !== id);
+    saveSiteIndex(sites);
+    if (id !== s.siteId) return { sites, storageNotice: '「' + label + '」を削除しました。' };
+    // 表示中の施設を消した場合は、残っている先頭の施設へ移る。
+    const nextId = sites[0].id;
+    const saved = loadPersisted(nextId);
+    saveActiveSiteId(nextId);
+    return {
+      sites, siteId: nextId,
+      data: saved ? saved.data : sampleData(),
+      master: saved ? saved.master : defaultMaster(),
+      drawer: null, settingsOpen: false,
+      storageNotice: '「' + label + '」を削除し、「' + sites[0].name + '」に切り替えました。',
+    };
+  });
 
   // ── バックアップ / 書き出し ───────────────────────────────────────
+  siteLabel = (id) => {
+    const site = this.state.sites.find((x) => x.id === (id || this.state.siteId));
+    return (site && site.name) || '施設';
+  };
+
   exportBackup = () => {
-    const payload = { format: 'ss-kanri-backup-v2', exportedAt: new Date().toISOString(), data: this.state.data, master: this.state.master };
-    downloadBlob(JSON.stringify(payload, null, 2), 'application/json', 'ショートステイ管理表バックアップ-' + TODAY + '.json');
-    this.setState({ storageNotice: 'バックアップファイルを保存しました。' });
+    const payload = { format: 'ss-kanri-backup-v2', exportedAt: new Date().toISOString(), site: this.siteLabel(), data: this.state.data, master: this.state.master };
+    downloadBlob(JSON.stringify(payload, null, 2), 'application/json', 'ショートステイ管理表-' + this.siteLabel() + '-' + TODAY + '.json');
+    this.setState({ storageNotice: '「' + this.siteLabel() + '」のバックアップを保存しました。' });
+  };
+
+  // 施設ごとにデータが分かれたので、全施設をまとめて退避する手段も要る。
+  // これが無いと、施設数だけ手作業でバックアップを取ることになる。
+  exportAllSitesBackup = () => {
+    const sites = this.state.sites.map((site) => {
+      // 表示中の施設は、まだ保存されていない編集が state 側にある可能性がある。
+      const payload = site.id === this.state.siteId
+        ? { data: this.state.data, master: this.state.master }
+        : (readPayload(storageKeyFor(site.id)) || { data: {}, master: defaultMaster() });
+      return { id: site.id, name: site.name, data: payload.data, master: payload.master };
+    });
+    const payload = { format: 'ss-kanri-backup-multi-v1', exportedAt: new Date().toISOString(), sites };
+    downloadBlob(JSON.stringify(payload, null, 2), 'application/json', 'ショートステイ管理表-全施設-' + TODAY + '.json');
+    this.setState({ storageNotice: '全' + sites.length + '施設のバックアップを保存しました。' });
   };
 
   // 明細CSV。請求・実績突合はExcelで行われるので、JSONバックアップとは別に必要。
@@ -839,6 +1013,11 @@ class Component extends DCLogic {
     reader.onload = () => {
       try {
         const parsed = JSON.parse(String(reader.result || ''));
+        // 全施設バックアップは、どの施設へ入れるかではなく施設一覧ごと差し替える。
+        if (isMultiSiteBackup(parsed)) {
+          this.restoreAllSites(parsed);
+          return;
+        }
         if (!isBackupPayload(parsed)) throw new Error('形式不正');
         const master = normalizeMaster(parsed.master);
         const incoming = normalizeData(parsed.data, master);
@@ -865,6 +1044,29 @@ class Component extends DCLogic {
   };
 
   markImportMerge = () => { this.pendingImportMerge = true; };
+
+  restoreAllSites = (payload) => {
+    if (!window.confirm('この端末の施設一覧とデータを、バックアップの全' + payload.sites.length + '施設で置き換えます。よろしいですか？')) return;
+    const index = [];
+    payload.sites.forEach((s) => {
+      const id = s.id || uid('site');
+      const master = normalizeMaster(s.master);
+      index.push({ id, name: s.name || master.facilityName || '施設' });
+      try {
+        window.localStorage.setItem(storageKeyFor(id), JSON.stringify({ data: normalizeData(s.data, master), master }));
+      } catch (err) { /* 個別に失敗しても残りは復元する */ }
+    });
+    if (!index.length) { this.setState({ storageNotice: '復元できる施設がありませんでした。' }); return; }
+    saveSiteIndex(index);
+    saveActiveSiteId(index[0].id);
+    const saved = loadPersisted(index[0].id);
+    this.setState({
+      sites: index, siteId: index[0].id,
+      data: saved ? saved.data : {}, master: saved ? saved.master : defaultMaster(),
+      drawer: null, settingsOpen: false, siteSwitcherOpen: false,
+      storageNotice: '全' + index.length + '施設を復元しました。',
+    });
+  };
 
   // 端末をまたいだ持ち寄りマージ。同一レコードidは updatedAt が新しい方を採用する。
   mergeData = (current, incoming) => {
@@ -911,7 +1113,7 @@ class Component extends DCLogic {
   };
 
   restoreAutoBackup = () => {
-    const backup = loadAutoBackup();
+    const backup = loadAutoBackup(this.state.siteId);
     if (!backup) { this.setState({ storageNotice: '初期化前の自動バックアップはありません。' }); return; }
     if (!window.confirm('初期化前の自動バックアップを復元します。現在のデータは置き換えられます。よろしいですか？')) return;
     const master = normalizeMaster(backup.master);
@@ -2255,11 +2457,35 @@ class Component extends DCLogic {
       onBelongingsChange: (e) => this.updateBoilerplate({ belongings: e.target.value }),
       onNoticesChange: (e) => this.updateBoilerplate({ notices: e.target.value }),
 
+      // 施設(拠点)の切替
+      siteName: this.siteLabel(),
+      siteCount: this.state.sites.length,
+      hasMultipleSites: this.state.sites.length > 1,
+      siteSwitcherOpen: this.state.siteSwitcherOpen,
+      toggleSiteSwitcher: this.toggleSiteSwitcher,
+      closeSiteSwitcher: this.closeSiteSwitcher,
+      siteRows: this.state.sites.map((site) => {
+        const active = site.id === this.state.siteId;
+        return {
+          name: site.name || '（名称未設定）',
+          active,
+          inactive: !active,
+          statusLabel: active ? '表示中' : '切り替える',
+          shortcut: '#site=' + site.id,
+          select: () => this.switchSite(site.id),
+          remove: () => this.removeSite(site.id),
+        };
+      }),
+      addSiteBlank: () => this.addSite(false),
+      addSiteFromMaster: () => this.addSite(true),
+      canRemoveSite: this.state.sites.length > 1,
+
       openSettings: this.openSettings,
       closeSettings: this.closeSettings,
       settingsOpen: this.state.settingsOpen,
       resetAll: this.resetAll,
       exportBackup: this.exportBackup,
+      exportAllSitesBackup: this.exportAllSitesBackup,
       importBackup: this.importBackup,
       markImportMerge: this.markImportMerge,
       restoreAutoBackup: this.restoreAutoBackup,
