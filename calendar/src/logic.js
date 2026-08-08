@@ -1993,6 +1993,16 @@ class Component extends DCLogic {
     const gridStartStr = fmtDate(gridStart);
     const gridEnd = new Date(gridStart); gridEnd.setDate(gridStart.getDate() + 41);
     const occupancy = occupancyMap(activeStays, gridStartStr, fmtDate(gridEnd));
+    // 画面のカレンダーにも、FAX紙面と同じ4状態の空き判定を出す。
+    // 紙と画面で語彙が揃うので、見る側が覚え直さずに済む。
+    // 単位は「その日の夜（宿泊）」。退所日の当日は次の方が入れるので空き扱いになる。
+    const gridVacancy = vacancyByDate(activeStays, master.rooms, gridStartStr, fmtDate(gridEnd));
+    const VACANCY_STYLE = {
+      open: { bg: 'oklch(0.9 0.09 150)', color: 'oklch(0.33 0.12 150)', border: 'oklch(0.68 0.12 150)' },
+      partial: { bg: 'oklch(1 0 0)', color: 'oklch(0.5 0.14 70)', border: 'oklch(0.72 0.13 70)' },
+      tentative: { bg: 'oklch(1 0 0)', color: 'oklch(0.45 0.13 290)', border: 'oklch(0.7 0.12 290)' },
+      full: { bg: 'oklch(0.93 0.005 75)', color: 'oklch(0.55 0.01 75)', border: 'oklch(0.87 0.005 75)' },
+    };
 
     const statusStyleOf = (status) => {
       if (isCancelled(status)) return { dashed: true, faded: true };
@@ -2109,6 +2119,18 @@ class Component extends DCLogic {
           toggle: () => this.toggleDayMeal(dateStr, kind.key),
         };
       });
+      const vac = gridVacancy[dateStr] || { free: master.rooms.length, state: 'open' };
+      const vacStyle = VACANCY_STYLE[vac.state] || VACANCY_STYLE.open;
+      const multiRoomFacility2 = master.rooms.length > 1;
+      const vacancyBadge = {
+        label: vac.state === 'full' ? '満'
+          : vac.state === 'tentative' ? '仮'
+            : (multiRoomFacility2 ? '空' + vac.free : '空'),
+        bg: vacStyle.bg, color: vacStyle.color, border: vacStyle.border,
+        title: vac.state === 'full' ? 'この日の夜は満室です'
+          : vac.state === 'tentative' ? '仮予約で埋まっています（調整の余地があります）'
+            : vac.free + ' / ' + master.rooms.length + ' 室が空いています（その日の夜の宿泊）',
+      };
       calendarCells.push({
         key: dateStr + '-' + i,
         dateStr,
@@ -2116,7 +2138,14 @@ class Component extends DCLogic {
         inMonth,
         isToday,
         todayBadge: isToday ? '今日' : '',
-        cellBg: isToday ? 'color-mix(in oklab, ' + primaryAccent + ' 6%, white)' : (inMonth ? 'oklch(1 0 0)' : 'oklch(0.96 0.005 75)'),
+        // 当月外は日付だけの飾りなので、空き状況は出さない（紙面も画面も煩雑になる）
+        showVacancy: inMonth,
+        vacancyBadge,
+        // 全室空きの日だけ地色を変える。バッジは小さく視線を寄せる必要があるが、
+        // 背景は面積が大きいので、月表を一瞥するだけで空いている日の塊が見える。
+        cellBg: !inMonth ? 'oklch(0.96 0.005 75)'
+          : vac.state === 'open' ? 'oklch(0.975 0.025 150)'
+            : isToday ? 'color-mix(in oklab, ' + primaryAccent + ' 6%, white)' : 'oklch(1 0 0)',
         cellBorder: isToday ? primaryAccent : 'oklch(0.91 0.008 75)',
         cellBorderWidth: isToday ? '2px' : '1px',
         cellOpacity: inMonth ? 1 : 0.6,

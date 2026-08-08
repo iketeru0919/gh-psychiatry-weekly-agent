@@ -11,6 +11,11 @@
      普段は控えめに、セルにポインタが乗ったときだけはっきり見せる。 */
   .ss-add { opacity: 0.32; transition: opacity .12s ease; }
   .ss-cell:hover .ss-add, .ss-cell:focus-within .ss-add { opacity: 1; }
+  /* 空室チップは「状態」として常に見せ、「＋追加」という操作の見た目は
+     ポインタを乗せたときだけ出す。以前これを薄い操作ボタンにしていたため、
+     空きが画面上で一番目立たない要素になっていた。 */
+  .ss-vacantadd { opacity: 0; transition: opacity .12s ease; }
+  .ss-cell:hover .ss-vacantadd, .ss-cell:focus-within .ss-vacantadd { opacity: 1; }
 
   .ss-bar { cursor: grab; user-select: none; touch-action: none; }
   .ss-bar:active { cursor: grabbing; }
@@ -150,6 +155,16 @@
        枠線と文字だけでも判別できるようにしておく。 */
     .ss-pickup-badge { border: 0.5pt solid #666 !important; color: #000 !important; font-size: 6pt !important; }
     .ss-vacant { font-size: 6pt; color: #999; line-height: 1.1; }
+    /* 空室チップは画面では存在感を持たせるが、紙では従来の一行表示まで詰める。
+       6週ぶんを1枚に収める余白がないため。 */
+    .ss-vacantchip {
+      border: 0 !important; border-left: 0 !important; background: none !important;
+      padding: 0 !important; font-size: 6pt !important; line-height: 1.15 !important;
+      color: #777 !important; font-weight: 400 !important;
+    }
+    .ss-vacantadd { display: none !important; }
+    /* 空きバッジは日付と同じ行なので行数は増えない。背景オフでも枠線で残る。 */
+    .ss-vacbadge { font-size: 6.5pt !important; padding: 0 1.2mm !important; border-width: 0.5pt !important; }
     .ss-mealsum { padding-top: 0.4mm !important; gap: 0.5mm !important; }
     /* 背景オフで刷られても、要る食事は枠線＋太字、要らない食事は薄字で判別できる。
        6週ぶんを1枚に収める必要があるので、余白は限界まで削る。 */
@@ -310,6 +325,10 @@
             <div class="ss-cell {{ c.outClass }}" style="min-height:{{ cellMinHeight }};border-radius:16px;padding:10px;display:flex;flex-direction:column;gap:8px;background:{{ c.cellBg }};border:{{ c.cellBorderWidth }} solid {{ c.cellBorder }};opacity:{{ c.cellOpacity }};position:relative;">
               <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
                 <span class="ss-daynum" style="font-size:13px;font-weight:700;color:{{ c.dateColor }};">{{ c.dayNum }}</span>
+                <span style="flex:1;"></span>
+                <sc-if value="{{ c.showVacancy }}" hint-placeholder-val="{{ true }}">
+                  <span class="ss-vacbadge" title="{{ c.vacancyBadge.title }}" style="font-size:10px;font-weight:800;padding:1px 7px;border-radius:999px;background:{{ c.vacancyBadge.bg }};color:{{ c.vacancyBadge.color }};border:1px solid {{ c.vacancyBadge.border }};white-space:nowrap;">{{ c.vacancyBadge.label }}</span>
+                </sc-if>
                 <sc-if value="{{ c.isToday }}" hint-placeholder-val="{{ false }}">
                   <span class="ss-today-badge" style="font-size:9.5px;font-weight:800;padding:2px 7px;border-radius:999px;background:{{ primaryAccent }};color:white;">{{ c.todayBadge }}</span>
                 </sc-if>
@@ -352,8 +371,10 @@
                   </sc-for>
 
                   <sc-if value="{{ lane.isEmpty }}" hint-placeholder-val="{{ false }}">
-                    <span class="ss-print-only ss-vacant">空</span>
-                    <button data-print-hide="" class="ss-add" sc-camel-on-click="{{ lane.onAdd }}" style="text-align:left;border:1px dashed oklch(0.88 0.008 75);background:none;border-radius:8px;padding:5px 7px;font-size:10.5px;color:oklch(0.68 0.008 75);cursor:pointer;" style-hover="border-color:{{ primaryAccent }};color:{{ primaryAccent }};">空室 ＋ 追加</button>
+                    <div class="ss-chip ss-vacantchip" role="button" sc-camel-on-click="{{ lane.onAdd }}" title="この部屋は空いています／クリックで予約を追加" style="display:flex;align-items:center;gap:5px;border-left:3px solid oklch(0.7 0.12 150);background:oklch(0.96 0.045 150);border-radius:9px;padding:5px 7px;font-size:11.5px;line-height:1.4;color:oklch(0.36 0.11 150);font-weight:700;cursor:pointer;" style-hover="filter:brightness(0.97);">
+                      <span>空室</span>
+                      <span class="ss-vacantadd" style="margin-left:auto;font-size:10px;font-weight:600;color:oklch(0.45 0.09 150);">＋ 追加</span>
+                    </div>
                   </sc-if>
                   <sc-if value="{{ lane.hasReservations }}" hint-placeholder-val="{{ false }}">
                     <button data-print-hide="" class="ss-add" sc-camel-on-click="{{ lane.onAdd }}" style="text-align:left;border:none;background:none;padding:1px 7px;font-size:10px;color:oklch(0.65 0.008 75);cursor:pointer;">＋ この部屋に追加</button>
@@ -364,7 +385,7 @@
               <sc-if value="{{ c.hasMeals }}" hint-placeholder-val="{{ false }}">
                 <div class="ss-mealsum" style="margin-top:auto;padding-top:5px;border-top:1px dashed oklch(0.91 0.008 75);display:flex;gap:4px;align-items:center;">
                   <sc-for list="{{ c.mealBadges }}" as="mb" hint-placeholder-count="3">
-                    <button class="ss-mealbadge" sc-camel-on-click="{{ mb.toggle }}" title="{{ mb.title }}" style="flex:1;text-align:center;padding:2px 0;border-radius:5px;border:1px solid {{ mb.border }};background:{{ mb.bg }};color:{{ mb.color }};font-size:10px;font-weight:{{ mb.weight }};letter-spacing:.02em;cursor:pointer;font-family:inherit;" style-hover="filter:brightness(0.94);">{{ mb.label }}</button>
+                    <div class="ss-mealbadge" role="button" sc-camel-on-click="{{ mb.toggle }}" title="{{ mb.title }}" style="flex:1;text-align:center;padding:2px 0;border-radius:5px;border:1px solid {{ mb.border }};background:{{ mb.bg }};color:{{ mb.color }};font-size:10px;font-weight:{{ mb.weight }};letter-spacing:.02em;cursor:pointer;">{{ mb.label }}</div>
                   </sc-for>
                 </div>
               </sc-if>
@@ -383,6 +404,13 @@
             <span style="padding:1px 6px;border-radius:5px;border:1px solid oklch(0.72 0.12 145);background:oklch(0.93 0.07 145);color:oklch(0.38 0.12 150);font-size:10px;font-weight:800;">昼</span>
             <span style="padding:1px 6px;border-radius:5px;border:1px solid oklch(0.72 0.12 295);background:oklch(0.92 0.06 295);color:oklch(0.43 0.14 295);font-size:10px;font-weight:800;">夕</span>
             ＝その日に必要な食事<span class="ss-screen-only">（薄い表示＝不要／2名以上は人数付き）</span>
+          </span>
+          <span style="display:inline-flex;align-items:center;gap:4px;">
+            <span style="font-size:10px;font-weight:800;padding:1px 7px;border-radius:999px;background:oklch(0.9 0.09 150);color:oklch(0.33 0.12 150);border:1px solid oklch(0.68 0.12 150);">空2</span>
+            <span style="font-size:10px;font-weight:800;padding:1px 7px;border-radius:999px;background:white;color:oklch(0.5 0.14 70);border:1px solid oklch(0.72 0.13 70);">空1</span>
+            <span style="font-size:10px;font-weight:800;padding:1px 7px;border-radius:999px;background:oklch(0.93 0.005 75);color:oklch(0.55 0.01 75);border:1px solid oklch(0.87 0.005 75);">満</span>
+            <span style="font-size:10px;font-weight:800;padding:1px 7px;border-radius:999px;background:white;color:oklch(0.45 0.13 290);border:1px solid oklch(0.7 0.12 290);">仮</span>
+            ＝その日の夜の空き<span class="ss-screen-only">（緑地の日は全室空き／「仮」は仮予約のみで埋まっており調整の余地あり）</span>
           </span>
         </div>
       </div>
