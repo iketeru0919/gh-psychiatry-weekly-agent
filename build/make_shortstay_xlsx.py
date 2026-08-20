@@ -27,7 +27,7 @@ OUT = "/home/user/gh-psychiatry-weekly-agent/build/ショートステイ管理�
 
 FONT = "Meiryo"
 MAX_ROOMS = 4
-BK_LAST = 204          # 01_予約入力 のデータ最終行(200件)
+BK_LAST = 404          # 01_予約入力 のデータ最終行(400件 ≒ 3年半ぶん)
 USER_ROWS = 30
 BAND_ROWS = 20         # 03_帯表 に出す利用者数
 CAT_ROWS = 10
@@ -176,7 +176,8 @@ rows = [
               "カレンダーと帯表はこのシートを引いているので、内容は必ず一致します。"),
     ("05_空室照会", "「この期間空いてますか」と電話で聞かれたとき用。日付を2つ入れるだけです。"),
     ("06_食数表", "厨房へ渡す日別の朝・昼・夕の食数。★個別の調整は 02_カレンダー の下部で日付ごとに入れます。"),
-    ("07_月次集計", "上司報告・請求突合用。期間を入れると区分別・利用者別が出ます。"),
+    ("07_月次集計", "上司報告・請求突合用。期間を入れると★稼働率・区分別・利用者別が出ます。"
+                 "月単位でも年度単位でも指定できます。"),
     ("08_支給量管理", "受給者証の月あたり上限に対する残日数。"),
     ("09_FAX空き表", "★このまま印刷してFAX送信できる1枚ものの用紙です。送信票と空き状況カレンダーが一体に"
                  "なっており、送信先・送信元・挨拶文・凡例・注意書き・連絡事項欄まで入っています。"
@@ -272,6 +273,29 @@ rows = [
     ("FAXで空き状況を送る", "09_FAX空き表 の「送信先」を選び、必要なら連絡事項を書いて印刷するだけです。"
                     "送信先は M_FAX送付先 に登録しておくと一覧から選べます（番号の打ち間違いによる誤送信を防げます）。"
                     "未登録・未入力の欄は手書き用の下線が印刷されるので、そのままでも使えます。"),
+    ("SEC", "★ 月が替わったとき（ファイルは作り直しません）", ""),
+    ("1つのファイルを使い続けます", "月ごとに新しいファイルを作る必要も、シートを増やす必要もありません。"
+                       "予約は 01_予約入力 に下へ追記していくだけ。見るときは 02_カレンダー の"
+                       "「対象月」を変えれば、カレンダー・帯表・食数表・FAX表がまとめて切り替わります。"),
+    ("新しい月の1行目だけ", "月が変わる最初の行で「年月」に新しい月（例 2026/9）を入れてください。"
+                    "そこから下の行はその月を引き継ぎます。あとは日にちの数字だけです。"),
+    ("★シートを月ごとに増やさないでください", "数式が月の数だけ複製され、直すときに全部を直すことになります。"
+                    "また 8/31→9/1 のように月をまたぐ滞在をどちらのシートに置くか決められず、"
+                    "年度集計や支給量管理が成り立たなくなります。"
+                    "「入力は1か所、表示は対象月で切り替え」が、この台帳のいちばんの利点です。"),
+    ("入る件数", "予約は400件まで入ります。月に10件なら3年以上ぶんです。"
+              "足りなくなったら、その時点でファイルをコピーして年度で分けてください。"),
+    ("年度でまとめて見る", "07_月次集計 の期間に 2026/4/1〜2027/3/31 のように入れれば、"
+                   "年度ぶんの稼働率・区分別・利用者別がそのまま出ます。"),
+    ("年度で分けるとき", "年度末にファイルをコピーして「2026年度_管理台帳.xlsx」として保存し、"
+                  "新しい方は古い年度の行を消して使い始めると軽く保てます。消す前に必ず控えを残してください。"),
+    ("SEC", "★ 稼働率の見かた", ""),
+    ("計算式", "稼働率 ＝ 延べ宿泊数 ÷（定員 × 期間の日数）。07_月次集計 の上部に自動で出ます。"),
+    ("「泊」で数えます", "退所日の夜は次の方が使えるので、稼働率には入りません。"
+                 "日帰り（0泊）も宿泊ではないため稼働率には入りません。"),
+    ("確定と見込み", "「稼働率（確定）」は確定・利用済み・状態未記入のぶんだけ。"
+               "「稼働率（仮予約を含む）」は仮予約・調整中も足した見込みです。報告には確定を使ってください。"),
+    ("区分別の稼働率", "SS・無料・契約それぞれの稼働率も区分別の表に出ます（こちらは仮予約も含みます）。"),
     ("SEC", "バックアップ", ""),
     ("月に一度はコピーを", "このファイル自体が台帳です。月初に「YYYYMM_管理台帳.xlsx」の名前でコピーを別フォルダに残してください。"),
 ]
@@ -707,7 +731,11 @@ ws.sheet_properties.pageSetUpPr.fitToPage = True
 ws = sheet("02_カレンダー")
 title(ws, "カレンダー",
       "★対象月を変えると、03_帯表・04_月間表・06_食数表・09_FAX空き表 も同じ月になります。")
-label_input(ws, 3, "対象月", MONTH0, "その月の日付ならどれでも可（1日でなくてもかまいません）", "yyyy/mm/dd")
+label_input(ws, 3, "対象月", MONTH0, "", "yyyy/mm/dd")
+ws["C3"] = ('="その月の日付ならどれでも可。　　【今日は "&YEAR(TODAY())&"年"&MONTH(TODAY())'
+            '&"月"&DAY(TODAY())&"日】　"&IF(TEXT($B$3,"yyyymm")=TEXT(TODAY(),"yyyymm"),'
+            '"（今月を表示しています）","← 今月に切り替えるときはここを直します")')
+ws["C3"].font = C_NOTE
 label_auto (ws, 4, "月初", '=DATE(YEAR($B$3),MONTH($B$3),1)', "自動", "yyyy/mm/dd")
 label_input(ws, 5, "時刻を表示", "○", "○で入室・退室時刻を表示。狭く感じるときは空欄に")
 label_input(ws, 6, "食事を表示", "○", "○で各週の下に朝・昼・夕の食数を表示。個別の調整はこのシートの下部で")
@@ -1108,10 +1136,13 @@ ws.sheet_properties.pageSetUpPr.fitToPage = True
 # 07_月次集計
 # ══════════════════════════════════════════════════════════════════
 ws = sheet("07_月次集計")
-title(ws, "期間集計（上司報告・請求突合用）",
-      "期間を入れると区分別・利用者別が出ます。キャンセルは除外。期間にかかった滞在は、期間内に重なる日数だけ数えます。")
-label_input(ws, 3, "開始日", datetime.date(2026, 4, 1), "", "yyyy/mm/dd")
-label_input(ws, 4, "終了日", datetime.date(2026, 4, 30), "", "yyyy/mm/dd")
+title(ws, "期間集計・稼働率（上司報告・請求突合用）",
+      "期間を入れると稼働率・区分別・利用者別が出ます。キャンセルは除外。"
+      "期間にかかった滞在は、期間内に重なる日数だけ数えます。")
+label_input(ws, 3, "開始日", datetime.date(2026, 8, 1), "", "yyyy/mm/dd")
+label_input(ws, 4, "終了日", datetime.date(2026, 8, 31), "", "yyyy/mm/dd")
+label_auto (ws, 5, "期間の日数", '=IF(OR($B$3="",$B$4="",$B$4<$B$3),"",$B$4-$B$3+1)',
+            "月単位でも年度単位でも指定できます（例 4/1〜3/31）")
 S_, E_ = "$B$3", "$B$4"
 DAYS_TERM = (f'((({OUTN_}<={E_})*{OUTN_}+({OUTN_}>{E_})*{E_})'
              f'-(({INN_}>={S_})*{INN_}+({INN_}<{S_})*{S_})+1)')
@@ -1119,48 +1150,97 @@ NIGHTS_TERM = (f'((({OUTN_}<={E_}+1)*{OUTN_}+({OUTN_}>{E_}+1)*({E_}+1))'
                f'-(({INN_}>={S_})*{INN_}+({INN_}<{S_})*{S_}))')
 OVL_D = f'({IN_}<={E_})*({OUT_}>={S_})'
 OVL_N = f'({IN_}<={E_})*({OUT_}>{S_})'
+NIGHTS = f'{OVL_N}*({NIGHTS_TERM}>0)*{NIGHTS_TERM}'
+CONF   = f'({ST_}<>"仮予約")*({ST_}<>"調整中")'          # 確定・利用済み・未記入
+TENTV  = f'(({ST_}="仮予約")+({ST_}="調整中"))'
 
-ws["A6"] = "■ 区分別"; ws["A6"].font = C_SUB
-head_row(ws, 7, ["区分", "利用者数", "利用回数", "延べ利用日数", "延べ宿泊数"], [16, 12, 12, 14, 14])
+# ── 稼働の概要 ────────────────────────────────────────────
+ws["A7"] = "■ 稼働の概要"; ws["A7"].font = C_SUB
+head_row(ws, 8, ["期間の日数", "定員（室）", "提供できる\n延べ室数",
+                 "延べ宿泊数\n（確定）", "稼働率\n（確定）",
+                 "延べ宿泊数\n（仮予約）", "稼働率\n（仮予約を含む）"],
+         [18, 13, 14, 14, 14, 14, 16])
+SLOT = f'($B$5*{CAP})'
+ws["A9"] = '=IF($B$5="","",$B$5&" 日")'
+ws["B9"] = f'={CAP}'
+ws["C9"] = f'=IF($B$5="","",{SLOT})'
+ws["D9"] = f'=IF($B$5="","",SUMPRODUCT({VALID}*{CONF}*{NIGHTS}))'
+ws["E9"] = f'=IF(OR($B$5="",{SLOT}=0),"",$D$9/{SLOT})'
+ws["F9"] = f'=IF($B$5="","",SUMPRODUCT({VALID}*{TENTV}*{NIGHTS}))'
+ws["G9"] = f'=IF(OR($B$5="",{SLOT}=0),"",($D$9+$F$9)/{SLOT})'
+for col in range(1, 8):
+    c = ws.cell(row=9, column=col); c.border = BORDER; c.fill = F_AUTO
+    c.font = Font(name=FONT, size=12, bold=True, color="1F3B52")
+    c.alignment = Alignment(horizontal="center", vertical="center")
+ws["E9"].number_format = "0.0%"; ws["G9"].number_format = "0.0%"
+ws.row_dimensions[9].height = 24
+ws.conditional_formatting.add("E9:E9", FormulaRule(formula=['$E$9>=0.9'], fill=F_WARN))
+ws.conditional_formatting.add("E9:E9", FormulaRule(formula=['$E$9>=0.7'], fill=F_WARN2))
+ws["A10"] = ('※ 稼働率 ＝ 延べ宿泊数 ÷（定員 × 期間の日数）。「泊」で数えるので、'
+             '退所日の夜は次の方が使える前提です。日帰り（0泊）は稼働率に入りません。')
+ws["A11"] = '※ 「確定」は 確定・利用済み・状態未記入 の予約です。仮予約・調整中は右の2列で見込みとして示します。'
+for r_ in (10, 11): ws[f"A{r_}"].font = C_NOTE
+
+# ── 区分別 ────────────────────────────────────────────────
+CAT_TOP = 14
+ws[f"A{CAT_TOP-1}"] = "■ 区分別"; ws[f"A{CAT_TOP-1}"].font = C_SUB
+head_row(ws, CAT_TOP, ["区分", "利用者数", "利用回数", "延べ利用日数", "延べ宿泊数", "稼働率"], None)
 for i in range(CAT_ROWS):
-    d = 8 + i
+    d = CAT_TOP + 1 + i
     ws[f"A{d}"] = f'=IF(COUNTA({CROW})>={i+1},INDEX({CROW},{i+1}),"")'
     ws[f"B{d}"] = (f'=IF($A{d}="","",SUMPRODUCT(--(COUNTIFS({NAME_},{UROW},{CAT_},$A{d},'
                    f'{IN_},"<="&{E_},{OUT_},">="&{S_},{ST_},"<>キャンセル")>0)*({UROW}<>"")))')
     ws[f"C{d}"] = (f'=IF($A{d}="","",COUNTIFS({CAT_},$A{d},{IN_},"<="&{E_},'
                    f'{OUT_},">="&{S_},{ST_},"<>キャンセル"))')
     ws[f"D{d}"] = f'=IF($A{d}="","",SUMPRODUCT({VALID}*({CAT_}=$A{d})*{OVL_D}*{DAYS_TERM}))'
-    ws[f"E{d}"] = (f'=IF($A{d}="","",SUMPRODUCT({VALID}*({CAT_}=$A{d})*{OVL_N}'
-                   f'*({NIGHTS_TERM}>0)*{NIGHTS_TERM}))')
-    for col in range(1, 6):
+    ws[f"E{d}"] = f'=IF($A{d}="","",SUMPRODUCT({VALID}*({CAT_}=$A{d})*{NIGHTS}))'
+    ws[f"F{d}"] = f'=IF(OR($A{d}="",{SLOT}=0),"",$E{d}/{SLOT})'
+    for col in range(1, 7):
         c = ws.cell(row=d, column=col); c.border = BORDER; c.font = C_AUTO; c.fill = F_AUTO
         c.alignment = Alignment(horizontal="center", vertical="center")
     ws[f"A{d}"].alignment = Alignment(horizontal="left", vertical="center")
-d = 8 + CAT_ROWS
+    ws[f"F{d}"].number_format = "0.0%"
+d = CAT_TOP + 1 + CAT_ROWS
 ws[f"A{d}"] = "合計"
 ws[f"B{d}"] = (f'=SUMPRODUCT(--(COUNTIFS({NAME_},{UROW},{IN_},"<="&{E_},'
                f'{OUT_},">="&{S_},{ST_},"<>キャンセル")>0)*({UROW}<>""))')
 for col in ("C", "D", "E"):
-    ws[f"{col}{d}"] = f"=SUM({col}8:{col}{d-1})"
-for col in range(1, 6):
+    ws[f"{col}{d}"] = f"=SUM({col}{CAT_TOP+1}:{col}{d-1})"
+ws[f"F{d}"] = f'=IF({SLOT}=0,"",$E{d}/{SLOT})'
+for col in range(1, 7):
     c = ws.cell(row=d, column=col); c.border = BORDER; c.font = C_BOLD; c.fill = F_SUB
     c.alignment = Alignment(horizontal="center", vertical="center")
-ws[f"A{d+1}"] = "※ 「利用者数」は実人数（同じ方が何回利用しても1人）。区分をまたぐ方がいる場合、区分別の合計と合計行は一致しません。"
-ws[f"A{d+1}"].font = C_NOTE
+ws[f"F{d}"].number_format = "0.0%"
+ws[f"A{d+1}"] = ("※ 区分別の「延べ宿泊数」「稼働率」には仮予約・調整中も含みます。"
+                 "確定だけの稼働率は上の「稼働の概要」をご覧ください。")
+ws[f"A{d+2}"] = ("※ 「利用者数」は実人数（同じ方が何回利用しても1人）。"
+                 "区分をまたぐ方がいる場合、区分別の合計と合計行は一致しません。")
+for k in (1, 2): ws[f"A{d+k}"].font = C_NOTE
 
-ws["A21"] = "■ 利用者別"; ws["A21"].font = C_SUB
-head_row(ws, 22, ["氏名", "利用回数", "延べ利用日数", "支給量対象日数（滞在全体）"], [22, 12, 14, 26])
+# ── 利用者別 ──────────────────────────────────────────────
+USR_TOP = d + 4
+ws[f"A{USR_TOP-1}"] = "■ 利用者別"; ws[f"A{USR_TOP-1}"].font = C_SUB
+head_row(ws, USR_TOP, ["氏名", "利用回数", "延べ利用日数", "延べ宿泊数",
+                       "支給量対象日数（滞在全体）"], None)
 for i in range(USER_ROWS):
-    d = 23 + i
-    ws[f"A{d}"] = f'=IF(COUNTA({UROW})>={i+1},INDEX({UROW},{i+1}),"")'
-    ws[f"B{d}"] = (f'=IF($A{d}="","",COUNTIFS({NAME_},$A{d},{IN_},"<="&{E_},'
-                   f'{OUT_},">="&{S_},{ST_},"<>キャンセル"))')
-    ws[f"C{d}"] = f'=IF($A{d}="","",SUMPRODUCT({VALID}*({NAME_}=$A{d})*{OVL_D}*{DAYS_TERM}))'
-    ws[f"D{d}"] = f'=IF($A{d}="","",SUMIFS({ALW_},{NAME_},$A{d},{IN_},">="&{S_},{IN_},"<="&{E_}))'
-    for col in range(1, 5):
-        c = ws.cell(row=d, column=col); c.border = BORDER; c.font = C_AUTO; c.fill = F_AUTO
+    d2 = USR_TOP + 1 + i
+    ws[f"A{d2}"] = f'=IF(COUNTA({UROW})>={i+1},INDEX({UROW},{i+1}),"")'
+    ws[f"B{d2}"] = (f'=IF($A{d2}="","",COUNTIFS({NAME_},$A{d2},{IN_},"<="&{E_},'
+                    f'{OUT_},">="&{S_},{ST_},"<>キャンセル"))')
+    ws[f"C{d2}"] = f'=IF($A{d2}="","",SUMPRODUCT({VALID}*({NAME_}=$A{d2})*{OVL_D}*{DAYS_TERM}))'
+    ws[f"D{d2}"] = f'=IF($A{d2}="","",SUMPRODUCT({VALID}*({NAME_}=$A{d2})*{NIGHTS}))'
+    ws[f"E{d2}"] = (f'=IF($A{d2}="","",SUMIFS({ALW_},{NAME_},$A{d2},'
+                    f'{IN_},">="&{S_},{IN_},"<="&{E_}))')
+    for col in range(1, 6):
+        c = ws.cell(row=d2, column=col); c.border = BORDER; c.font = C_AUTO; c.fill = F_AUTO
         c.alignment = Alignment(horizontal="center", vertical="center")
-    ws[f"A{d}"].alignment = Alignment(horizontal="left", vertical="center")
+    ws[f"A{d2}"].alignment = Alignment(horizontal="left", vertical="center")
+for i, w in enumerate([20, 13, 14, 15, 15, 16, 17]):
+    ws.column_dimensions[get_column_letter(1 + i)].width = w
+ws.print_area = f"A1:G{USR_TOP + USER_ROWS}"
+ws.page_setup.fitToWidth = 1; ws.page_setup.fitToHeight = 0
+ws.sheet_properties.pageSetUpPr.fitToPage = True
+
 
 
 # ══════════════════════════════════════════════════════════════════
