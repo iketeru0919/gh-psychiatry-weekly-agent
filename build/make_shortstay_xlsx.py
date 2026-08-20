@@ -150,6 +150,7 @@ CCNT  = f"{MCAT}!$B$4:$B$20"
 RROW  = f"{MROOM}!$A$4:$A$20"
 
 M1 = f"{CAL}!$B$4"        # 対象月の月初（唯一の基準）
+YM = f'YEAR({CAL}!$B$4)&"年"&MONTH({CAL}!$B$4)&"月"'   # 「2026年8月」
 SHOWTIME = f"{CAL}!$B$5"  # 「時刻を表示」の切替（○ で表示）
 
 
@@ -177,7 +178,9 @@ rows = [
     ("06_食数表", "厨房へ渡す日別の朝・昼・夕の食数。★個別の調整は 02_カレンダー の下部で日付ごとに入れます。"),
     ("07_月次集計", "上司報告・請求突合用。期間を入れると区分別・利用者別が出ます。"),
     ("08_支給量管理", "受給者証の月あたり上限に対する残日数。"),
-    ("09_FAX空き表", "外部へFAXする空き状況。利用者名は載りません。"),
+    ("09_FAX空き表", "★このまま印刷してFAX送信できる1枚ものの用紙です。送信票と空き状況カレンダーが一体に"
+                 "なっており、送信先・送信元・挨拶文・凡例・注意書き・連絡事項欄まで入っています。"
+                 "利用者名は載りません。A4縦1枚に収まるよう設定済みです。"),
     ("SEC", "★ 日付の入れ方（年月は最初の1回だけ）", ""),
     ("年月は1回だけ", "01_予約入力 の「年月」列に、最初の行で 2026/8 のように一度だけ入れてください。"
                 "以降の行は空欄のままでかまいません。上の行の年月を自動で引き継ぎます。"),
@@ -197,6 +200,8 @@ rows = [
     ("① M_施設設定", "施設名・棟・標準の入所/退所時刻・住所・TEL/FAX を入れます。"),
     ("② M_部屋", "部屋名を1行1室で登録します。★ここの行数が、そのまま定員（部屋数）になります。"),
     ("③ 利用者マスタ", "氏名と支給量（受給者証の月あたり上限日数）。支給量が空欄の方は残日数を管理しません。"),
+    ("⑤ M_FAX送付先", "相談支援事業所などFAXの送り先を登録します。09_FAX空き表 の宛先が一覧から選べるようになり、"
+                  "番号の打ち間違いによる誤送信を防げます。"),
     ("④ M_区分・M_送迎", "区分（SS・無料・契約など）と、その区分を支給量に数えるかどうか。"
                      "★区分名はカレンダーの色分けに使います。M_区分 の上から4つまでが色に対応します。"),
     ("SEC", "★ 部屋数が施設ごとに違う場合（1室の施設と2室の施設）", ""),
@@ -264,6 +269,9 @@ rows = [
     ("入れたあと確認", "02_カレンダー を見て、意図した期間に帯が出ているかを目で確かめます。"),
     ("「空いてますか」", "05_空室照会 に日付を2つ入れるだけです。"),
     ("月を切り替える", "★02_カレンダー の「対象月」を変えると、03_帯表・06_食数表・09_FAX空き表 の月も一緒に変わります。"),
+    ("FAXで空き状況を送る", "09_FAX空き表 の「送信先」を選び、必要なら連絡事項を書いて印刷するだけです。"
+                    "送信先は M_FAX送付先 に登録しておくと一覧から選べます（番号の打ち間違いによる誤送信を防げます）。"
+                    "未登録・未入力の欄は手書き用の下線が印刷されるので、そのままでも使えます。"),
     ("SEC", "バックアップ", ""),
     ("月に一度はコピーを", "このファイル自体が台帳です。月初に「YYYYMM_管理台帳.xlsx」の名前でコピーを別フォルダに残してください。"),
 ]
@@ -373,6 +381,7 @@ defname("部屋一覧", f"OFFSET({MROOM}!$A$4,0,0,MAX(1,COUNTA({RROW})),1)")
 defname("区分一覧", f"OFFSET({MCAT}!$A$4,0,0,MAX(1,COUNTA({CROW})),1)")
 defname("送迎一覧", "OFFSET('M_送迎'!$A$4,0,0,MAX(1,COUNTA('M_送迎'!$A$4:$A$15)),1)")
 defname("状態一覧", "'M_状態'!$A$4:$A$8")
+defname("送付先一覧", "OFFSET('M_FAX送付先'!$A$4,0,0,MAX(1,COUNTA('M_FAX送付先'!$A$4:$A$24)),1)")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -1187,49 +1196,208 @@ ws[f"A{last_u+2}"].font = C_NOTE
 # 09_FAX空き表（印刷用・氏名は載せない）
 # ══════════════════════════════════════════════════════════════════
 ws = sheet("09_FAX空き表")
-ws["A1"] = f'={MSET}!$B$4&"　"&{MSET}!$B$5'; ws["A1"].font = C_TITLE
-ws["A2"] = f'=TEXT({M1},"yyyy年m月")&"　短期入所 空き状況"'
-ws["A2"].font = Font(name=FONT, size=11, bold=True)
-ws["A3"] = f'={ADDR}&"　TEL "&{TEL}&"　FAX "&{FAXNO}'; ws["A3"].font = C_NOTE
-ws["A4"] = f'="作成日："&TEXT(TODAY(),"yyyy年m月d日")&"　／　対象月は 02_カレンダー で変更します"'
-ws["A4"].font = C_NOTE
-ws.column_dimensions["A"].width = 14
-ws["A6"] = "日"; ws["A7"] = "曜日"; ws["A8"] = "空き状況"
-for r_ in (6, 7, 8):
-    c = ws[f"A{r_}"]; c.font = C_SUB; c.fill = F_SUB; c.border = BORDER
-    c.alignment = Alignment(horizontal="center", vertical="center")
-for i in range(31):
-    L = get_column_letter(2 + i); src = 7 + i
-    ws.column_dimensions[L].width = 3.8
-    ws[f"{L}6"] = f'=IF({MON}!$A{src}="","",DAY({MON}!$A{src}))'
-    ws[f"{L}7"] = f'=IF({MON}!$A{src}="","",{MON}!$B{src})'
-    ws[f"{L}8"] = f'=IF({MON}!$A{src}="","",{MON}!${SYM_C}{src})'
-    for r_ in (6, 7, 8):
-        c = ws[f"{L}{r_}"]; c.border = BORDER
-        c.alignment = Alignment(horizontal="center", vertical="center")
-        c.font = Font(name=FONT, size=11, bold=True) if r_ == 8 else C_BODY
-LASTC = get_column_letter(32)
-mark_cf(ws, f"B8:{LASTC}8")
-ws.conditional_formatting.add(f"B7:{LASTC}7", FormulaRule(formula=['OR(B$7="土",B$7="日")'], fill=F_WKND))
-ws["A10"] = "凡例"; ws["A10"].font = C_SUB
-for i, (m, t) in enumerate([("○", "空室あり"), ("△", "残りわずか"), ("仮", "仮予約で調整中"), ("×", "満室")]):
-    c = ws.cell(row=11, column=2 + i * 4, value=m)
-    c.alignment = Alignment(horizontal="center"); c.font = Font(name=FONT, size=11, bold=True); c.border = BORDER
-    ws.cell(row=11, column=3 + i * 4, value=t).font = C_NOTE
-ws["A13"] = "・各日の欄は「その日の夜（宿泊）」の空き状況です。退所日の当日は、次の方がご利用いただけます。"
-ws["A14"] = "・空き状況は日々変動します。ご予約前に必ずお電話でご確認ください。"
-ws["A15"] = f'="・全"&{CAP}&"室。この用紙に利用者様のお名前は記載しておりません。"'
-for r_ in (13, 14, 15): ws[f"A{r_}"].font = C_NOTE
-ws["A17"] = "月内集計"; ws["A17"].font = C_SUB
-for i, (m, lbl) in enumerate([("○", "空室あり"), ("△", "残りわずか"), ("仮", "仮予約"), ("×", "満室")]):
-    col = 2 + i * 4
-    c = ws.cell(row=18, column=col, value=f'=COUNTIF($B$8:${LASTC}$8,"{m}")&"日"')
-    c.font = C_BODY; c.alignment = Alignment(horizontal="center")
-    ws.cell(row=18, column=col + 1, value=lbl).font = C_NOTE
-ws.print_area = f"A1:{LASTC}18"
-ws.page_setup.orientation = "landscape"
+ws.sheet_view.showGridLines = False
+FX_LAST = 44
+ws.column_dimensions["A"].width = 11
+for c in range(2, 9):
+    ws.column_dimensions[get_column_letter(c)].width = 10.4
+
+MED  = Side(style="medium", color="333333")
+THN  = Side(style="thin",   color="808080")
+DOT  = Side(style="hair",   color="AAAAAA")
+def box(r0, c0, r1, c1, outer=MED, inner=None):
+    for r in range(r0, r1 + 1):
+        for c in range(c0, c1 + 1):
+            cell = ws.cell(row=r, column=c)
+            cell.border = Border(
+                left=outer if c == c0 else (inner or Border().left),
+                right=outer if c == c1 else (inner or Border().right),
+                top=outer if r == r0 else (inner or Border().top),
+                bottom=outer if r == r1 else (inner or Border().bottom))
+def merge(r, c0, c1, value=None, font=None, align=None, fill=None, fmt=None):
+    if c1 > c0: ws.merge_cells(start_row=r, start_column=c0, end_row=r, end_column=c1)
+    cell = ws.cell(row=r, column=c0)
+    if value is not None: cell.value = value
+    if font: cell.font = font
+    if fill: cell.fill = fill
+    if fmt: cell.number_format = fmt
+    cell.alignment = align or Alignment(horizontal="left", vertical="center")
+    return cell
+
+F_TITLE = Font(name=FONT, size=16, bold=True, color="1F3B52")
+F_LBL   = Font(name=FONT, size=10, bold=True, color="FFFFFF")
+F_TXT   = Font(name=FONT, size=10)
+F_BIG   = Font(name=FONT, size=10.5)
+F_SMALL = Font(name=FONT, size=8.5, color="555555")
+F_SEC   = Font(name=FONT, size=11, bold=True, color="1F3B52")
+FILL_LBL = PatternFill("solid", fgColor="2F6690", bgColor="2F6690")
+FILL_BOX = PatternFill("solid", fgColor="F7F9FB", bgColor="F7F9FB")
+
+# ── 表題 ───────────────────────────────────────────────────
+merge(2, 1, 8, "Ｆ Ａ Ｘ　送　信　票", F_TITLE,
+      Alignment(horizontal="center", vertical="center"))
+ws.row_dimensions[2].height = 30
+merge(3, 1, 8, '=' + YM + '&"　短期入所（ショートステイ）空き状況のご案内"',
+      Font(name=FONT, size=11, bold=True),
+      Alignment(horizontal="center", vertical="center"))
+ws.row_dimensions[3].height = 20
+for c in range(1, 9):
+    ws.cell(row=3, column=c).border = Border(bottom=MED)
+
+# ── 送信先 ─────────────────────────────────────────────────
+merge(5, 1, 1, "送 信 先", F_LBL, Alignment(horizontal="center", vertical="center"), FILL_LBL)
+ws.merge_cells(start_row=5, start_column=1, end_row=8, end_column=1)
+RCP  = f"'M_FAX送付先'!$A$4:$A$24"
+RCP2 = f"'M_FAX送付先'!$B$4:$B$24"
+RCP3 = f"'M_FAX送付先'!$C$4:$C$24"
+IDX  = f'IFERROR(MATCH($B$5,{RCP},0),0)'
+merge(5, 2, 5, None, F_TXT, Alignment(horizontal="left", vertical="center"), F_INPUT)
+ws["B5"].comment = Comment("M_FAX送付先 に登録した事業所を選ぶと、御中・ご担当・FAX番号が自動で入ります。\n"
+                           "空欄のままにすると、手書き用の下線が印刷されます。", "設計メモ",
+                           height=90, width=340)
+merge(6, 2, 5, f'=IF($B$5="","＿＿＿＿＿＿＿＿＿＿＿＿＿＿＿　御中",$B$5&"　御中")',
+      Font(name=FONT, size=12, bold=True), Alignment(horizontal="left", vertical="center"))
+merge(7, 2, 5, (f'=IF($B$5="","ご担当　＿＿＿＿＿＿＿＿　様",'
+                f'IF(IFERROR(INDEX({RCP2},{IDX}),"")="","","ご担当　"&INDEX({RCP2},{IDX})&"　様"))'),
+      F_TXT, Alignment(horizontal="left", vertical="center"))
+merge(8, 2, 5, (f'=IF($B$5="","ＦＡＸ　＿＿＿＿＿＿＿＿＿＿",'
+                f'"ＦＡＸ　"&IFERROR(INDEX({RCP3},{IDX}),""))'),
+      F_TXT, Alignment(horizontal="left", vertical="center"))
+merge(5, 6, 6, "送信日", F_TXT, Alignment(horizontal="center", vertical="center"), FILL_BOX)
+merge(5, 7, 8, '=YEAR(TODAY())&"年"&MONTH(TODAY())&"月"&DAY(TODAY())&"日"', F_TXT,
+      Alignment(horizontal="center", vertical="center"))
+merge(6, 6, 6, "枚　数", F_TXT, Alignment(horizontal="center", vertical="center"), FILL_BOX)
+merge(6, 7, 8, "本票を含め　1 枚", F_TXT, Alignment(horizontal="center", vertical="center"))
+merge(7, 6, 8, '="全"&' + CAP + '&"室の施設です"', F_SMALL,
+      Alignment(horizontal="center", vertical="center"))
+merge(8, 6, 8, "利用者名は記載しておりません", F_SMALL,
+      Alignment(horizontal="center", vertical="center"))
+box(5, 1, 8, 8, MED, THN)
+for r in range(5, 9): ws.row_dimensions[r].height = 19
+
+# ── 送信元 ─────────────────────────────────────────────────
+merge(10, 1, 1, "送 信 元", F_LBL, Alignment(horizontal="center", vertical="center"), FILL_LBL)
+ws.merge_cells(start_row=10, start_column=1, end_row=13, end_column=1)
+merge(10, 2, 8, f'={MSET}!$B$4&"　"&{MSET}!$B$5',
+      Font(name=FONT, size=12, bold=True), Alignment(horizontal="left", vertical="center"))
+UL = "＿＿＿＿＿＿＿＿＿＿"
+merge(11, 2, 8, (f'=IF({MSET}!$B$11="","{UL}{UL}",'
+                 f'IF({MSET}!$B$10="","","〒"&{MSET}!$B$10&"　")&{MSET}!$B$11)'),
+      F_TXT, Alignment(horizontal="left", vertical="center"))
+merge(12, 2, 8, (f'="ＴＥＬ　"&IF({TEL}="","{UL}",{TEL})'
+                 f'&"　　ＦＡＸ　"&IF({FAXNO}="","{UL}",{FAXNO})'),
+      F_TXT, Alignment(horizontal="left", vertical="center"))
+merge(13, 2, 8, (f'="担当　"&IF({MSET}!$B$14="","{UL}",{MSET}!$B$14)'),
+      F_TXT, Alignment(horizontal="left", vertical="center"))
+box(10, 1, 13, 8, MED, THN)
+for r in range(10, 14): ws.row_dimensions[r].height = 19
+
+# ── 本文 ───────────────────────────────────────────────────
+merge(15, 1, 8, "平素より大変お世話になっております。", F_BIG,
+      Alignment(horizontal="left", vertical="center"))
+merge(16, 1, 8,
+      '=' + YM + '&"の短期入所の空き状況は下記のとおりです。'
+      'ご確認のほど、よろしくお願いいたします。"',
+      F_BIG, Alignment(horizontal="left", vertical="center"))
+for r in (15, 16): ws.row_dimensions[r].height = 18
+
+# ── 空き状況カレンダー ────────────────────────────────────────
+merge(18, 1, 8, '="■　"&' + YM + '&"　空き状況"', F_SEC,
+      Alignment(horizontal="left", vertical="center"))
+ws.row_dimensions[18].height = 20
+WDF = ["日", "月", "火", "水", "木", "金", "土"]
+for c in range(7):
+    L = get_column_letter(2 + c)
+    cell = ws[f"{L}19"]; cell.value = WDF[c]
+    cell.font = Font(name=FONT, size=10, bold=True,
+                     color="FFFFFF" if 0 < c < 6 else "FFFFFF")
+    cell.fill = PatternFill("solid",
+                            fgColor="A93226" if c == 0 else ("1F618D" if c == 6 else "2F6690"),
+                            bgColor="A93226" if c == 0 else ("1F618D" if c == 6 else "2F6690"))
+    cell.alignment = Alignment(horizontal="center", vertical="center")
+merge(19, 1, 1, "", None, Alignment(horizontal="center", vertical="center"), FILL_BOX)
+ws.row_dimensions[19].height = 19
+for w in range(6):
+    rd, rm = 20 + w * 2, 21 + w * 2
+    merge(rd, 1, 1, f"第{w+1}週", F_SMALL, Alignment(horizontal="center", vertical="center"), FILL_BOX)
+    ws.merge_cells(start_row=rd, start_column=1, end_row=rm, end_column=1)
+    for c in range(7):
+        L = get_column_letter(2 + c)
+        n = w * 7 + c
+        d = ws[f"{L}{rd}"]
+        d.value = (f'=IF(MONTH({M1}-WEEKDAY({M1})+1+{n})<>MONTH({M1}),"",'
+                   f'{M1}-WEEKDAY({M1})+1+{n})')
+        d.number_format = "d"
+        d.font = Font(name=FONT, size=9, bold=True,
+                      color="A93226" if c == 0 else ("1F618D" if c == 6 else "444444"))
+        d.alignment = Alignment(horizontal="right", vertical="center", indent=1)
+        m = ws[f"{L}{rm}"]
+        m.value = (f'=IF({L}{rd}="","",IFERROR(INDEX({MON}!${SYM_C}$7:${SYM_C}$37,'
+                   f'MATCH({L}{rd},{MON}!$A$7:$A$37,0)),""))')
+        m.font = Font(name=FONT, size=16, bold=True, color="222222")
+        m.alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[rd].height = 14
+    ws.row_dimensions[rm].height = 24
+box(19, 1, 31, 8, MED, THN)
+mark_cf(ws, "B21:H31")
+
+# ── 凡例・注意書き・集計 ──────────────────────────────────────
+LEG = [("○", "空室あり"), ("△", "残りわずか"), ("仮", "仮予約で調整中"), ("×", "満室")]
+merge(32, 1, 1, "凡　例", Font(name=FONT, size=9, bold=True),
+      Alignment(horizontal="center", vertical="center"), FILL_BOX)
+for i, (mk, tx) in enumerate(LEG):
+    c0 = 2 + i * 2
+    cm = merge(32, c0, c0, mk, Font(name=FONT, size=12, bold=True),
+               Alignment(horizontal="center", vertical="center"))
+    merge(32, c0 + 1, c0 + 1, tx, F_SMALL, Alignment(horizontal="left", vertical="center"))
+box(32, 1, 32, 8, THN, THN)
+ws.row_dimensions[32].height = 20
+NOTES = [
+    "・各日の欄は「その日の夜（宿泊）」の空き状況です。退所日の当日は、次の方がご利用いただけます。",
+    "・空き状況は日々変動いたします。ご予約の前に、必ずお電話でご確認くださいますようお願いいたします。",
+    '="・全"&' + CAP + '&'
+    '"室の施設です。本用紙に利用者様のお名前は記載しておりません。"',
+]
+for i, tx in enumerate(NOTES):
+    merge(33 + i, 1, 8, tx, F_SMALL, Alignment(horizontal="left", vertical="center"))
+    ws.row_dimensions[33 + i].height = 14
+merge(36, 1, 8,
+      '="【月内の集計】　空室あり "&COUNTIF($B$21:$H$31,"○")&" 日　／　残りわずか "'
+      '&COUNTIF($B$21:$H$31,"△")&" 日　／　仮予約 "&COUNTIF($B$21:$H$31,"仮")'
+      '&" 日　／　満室 "&COUNTIF($B$21:$H$31,"×")&" 日"',
+      Font(name=FONT, size=9.5, bold=True), Alignment(horizontal="left", vertical="center"))
+ws.row_dimensions[36].height = 18
+
+# ── 連絡事項（自由記入）──────────────────────────────────────
+merge(38, 1, 8, "■　連絡事項", F_SEC, Alignment(horizontal="left", vertical="center"))
+ws.row_dimensions[38].height = 20
+ws.merge_cells(start_row=39, start_column=1, end_row=42, end_column=8)
+cell = ws.cell(row=39, column=1)
+cell.fill = F_INPUT; cell.font = F_TXT
+cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+cell.comment = Comment("送付先へのひとこと（任意）。空欄のままでも印刷できます。",
+                       "設計メモ", height=60, width=300)
+box(39, 1, 42, 8, MED, None)
+for r in range(39, 43): ws.row_dimensions[r].height = 16
+merge(44, 1, 8,
+      "※ 本状が誤って届いた場合は、お手数ですが上記の連絡先までご一報のうえ、ご破棄くださいますようお願いいたします。",
+      F_SMALL, Alignment(horizontal="left", vertical="center"))
+
+dvf = DataValidation(type="list", formula1="=送付先一覧", allow_blank=True, showDropDown=False)
+dvf.promptTitle = "送信先"; dvf.prompt = "M_FAX送付先 から選びます。空欄なら手書き用の下線が出ます。"
+dvf.showInputMessage = True
+ws.add_data_validation(dvf); dvf.add("B5")
+
+ws.print_area = f"A1:H{FX_LAST}"
+ws.page_setup.orientation = "portrait"
+ws.page_setup.paperSize = ws.PAPERSIZE_A4
 ws.page_setup.fitToWidth = 1; ws.page_setup.fitToHeight = 1
 ws.sheet_properties.pageSetUpPr.fitToPage = True
+ws.page_margins.left = ws.page_margins.right = 0.5
+ws.page_margins.top = ws.page_margins.bottom = 0.5
+ws.print_options.horizontalCentered = True
+
+
 
 order = ["00_使い方", "01_予約入力", "02_カレンダー", "03_帯表", "04_月間表", "05_空室照会",
          "06_食数表", "07_月次集計", "08_支給量管理", "09_FAX空き表",
