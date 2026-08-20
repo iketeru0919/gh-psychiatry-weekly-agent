@@ -32,26 +32,30 @@ USER_ROWS = 30
 BAND_ROWS = 20         # 03_帯表 に出す利用者数
 CAT_ROWS = 10
 MONTH0 = datetime.date(2026, 4, 1)
+CAL_START = 9                 # 02_カレンダー のグリッド開始行
+CAL_STRIDE = 8                # 1週ぶんの行数（日付+部屋4+空き+食事+空行）
+ADJ_TOP, ADJ_END = 59, 78     # 02_カレンダー 下部「食事の個別調整」表の行範囲
 
-F_INPUT  = PatternFill("solid", fgColor="FFF7DD")
-F_AUTO   = PatternFill("solid", fgColor="F2F2F2")
-F_HEAD   = PatternFill("solid", fgColor="2F6690")
-F_SUB    = PatternFill("solid", fgColor="DCE6EF")
-F_WARN   = PatternFill("solid", fgColor="FBD3D3")
-F_WARN2  = PatternFill("solid", fgColor="FCE4C8")
-F_OK     = PatternFill("solid", fgColor="D9EDDC")
-F_TENT   = PatternFill("solid", fgColor="EDE3F5")
-F_WKND   = PatternFill("solid", fgColor="E8EEF4")
-F_WHITE  = PatternFill("solid", fgColor="FFFFFF")
-F_OUT    = PatternFill("solid", fgColor="FAFAFA")   # 月外の日
+F_INPUT  = PatternFill("solid", fgColor="FFF7DD", bgColor="FFF7DD")
+F_AUTO   = PatternFill("solid", fgColor="F2F2F2", bgColor="F2F2F2")
+F_HEAD   = PatternFill("solid", fgColor="2F6690", bgColor="2F6690")
+F_SUB    = PatternFill("solid", fgColor="DCE6EF", bgColor="DCE6EF")
+F_WARN   = PatternFill("solid", fgColor="FBD3D3", bgColor="FBD3D3")
+F_WARN2  = PatternFill("solid", fgColor="FCE4C8", bgColor="FCE4C8")
+F_OK     = PatternFill("solid", fgColor="D9EDDC", bgColor="D9EDDC")
+F_TENT   = PatternFill("solid", fgColor="EDE3F5", bgColor="EDE3F5")
+F_WKND   = PatternFill("solid", fgColor="E8EEF4", bgColor="E8EEF4")
+F_WHITE  = PatternFill("solid", fgColor="FFFFFF", bgColor="FFFFFF")
+F_OUT    = PatternFill("solid", fgColor="FAFAFA", bgColor="FAFAFA")   # 月外の日
 # 区分の色（M_区分 の1〜4行目に対応）。元アプリの配色に合わせる。
-CAT_FILLS = [PatternFill("solid", fgColor="D6E4F0"),   # SS   青
-             PatternFill("solid", fgColor="DCEEDF"),   # 無料 緑
-             PatternFill("solid", fgColor="EAE0F2"),   # 契約 紫
-             PatternFill("solid", fgColor="FBE7CE")]   # 予備 橙
-F_BAND   = PatternFill("solid", fgColor="3A6EA5")      # 帯表の確定バー
-F_BANDT  = PatternFill("solid", fgColor="D8D8E4")      # 帯表の仮バー
-F_TENT2  = PatternFill("solid", fgColor="EFEFEF")      # カレンダーの仮予約
+CAT_FILLS = [PatternFill("solid", fgColor="CFE0F3", bgColor="CFE0F3"),   # SS   青
+             PatternFill("solid", fgColor="D3EBD8", bgColor="D3EBD8"),   # 無料 緑
+             PatternFill("solid", fgColor="E5D8F0", bgColor="E5D8F0"),   # 契約 紫
+             PatternFill("solid", fgColor="FAE0C3", bgColor="FAE0C3")]   # 予備 橙
+CAT_FONTS = ["1B4F72", "1D6F42", "5B2C8D", "9C4A06"]   # 区分ごとの文字色（濃色）
+F_BAND   = PatternFill("solid", fgColor="9DC3E6", bgColor="9DC3E6")      # 帯表の確定バー
+F_BANDT  = PatternFill("solid", fgColor="E4E4EC", bgColor="E4E4EC")      # 帯表の仮バー
+F_TENT2  = PatternFill("solid", fgColor="EFEFEF", bgColor="EFEFEF")      # カレンダーの仮予約
 
 C_HEAD  = Font(name=FONT, size=10, bold=True, color="FFFFFF")
 C_SUB   = Font(name=FONT, size=10, bold=True, color="1F3B52")
@@ -169,7 +173,7 @@ rows = [
     ("04_月間表", "日付を縦に並べた一覧。空室数や食数の根拠を数字で確認したいときに使います。"
               "カレンダーと帯表はこのシートを引いているので、内容は必ず一致します。"),
     ("05_空室照会", "「この期間空いてますか」と電話で聞かれたとき用。日付を2つ入れるだけです。"),
-    ("06_食数表", "厨房へ渡す日別の朝・昼・夕の食数。"),
+    ("06_食数表", "厨房へ渡す日別の朝・昼・夕の食数。★個別の調整は 02_カレンダー の下部で日付ごとに入れます。"),
     ("07_月次集計", "上司報告・請求突合用。期間を入れると区分別・利用者別が出ます。"),
     ("08_支給量管理", "受給者証の月あたり上限に対する残日数。"),
     ("09_FAX空き表", "外部へFAXする空き状況。利用者名は載りません。"),
@@ -203,14 +207,26 @@ rows = [
     ("★ファイルは施設ごとに分ける", "このファイルを施設の数だけコピーして「施設A_管理台帳.xlsx」「施設B_管理台帳.xlsx」"
                         "のように分けてください。1つのファイルに複数施設を混ぜると、定員が施設ごとに違うため"
                         "空き判定が成立せず、全ての集計に施設の絞り込みが必要になって必ず崩れます。"),
+    ("SEC", "★ 食事をカレンダーで見る・直す", ""),
+    ("いつもは自動", "各週のいちばん下の「食事」行に、その日の 朝○ 昼○ 夕○ が自動で出ます。"
+               "既定は 日帰り=昼のみ／初日=夕／中日=朝昼夕／最終日=朝 です。"),
+    ("違う日だけ入れる", "02_カレンダー のカレンダーの下に「食事の個別調整」表があります。"
+                  "日付と、その日の実際の食数（朝・昼・夕）を入れてください。空欄の欄は自動のままです。"
+                  "0 を入れれば「その食事なし」になります。"),
+    ("入れたらどうなる", "カレンダーの食事行に「※調整」と付き、06_食数表 の食数もその値に変わります。"
+                  "厨房へ渡す数字も自動で合います。"),
+    ("★月をまたいでも安全", "調整は日付で結び付けているので、対象月を切り替えても他の月に影響しません。"
+                    "同じ日付を2回入れると「⚠日付が重複」と赤く出ます。"),
+    ("表示を消したいとき", "02_カレンダー の「食事を表示」を空欄にすると、食事行が非表示になります。"),
     ("SEC", "カレンダーの記号の読み方", ""),
     ("▶16:00 利用者A", "その日が入所日。数字は入室時刻です。ここから滞在が始まります。"),
     ("利用者A", "記号なしは連泊の中日。前の日から続いています。"),
     ("利用者A ◀09:00", "その日が退所日。数字は退室時刻です。朝に退所するので、★その日の夜はもう次の方が入れます。"),
     ("◆ 利用者A 10:00-16:00", "日帰り（体験利用）。宿泊しません。"),
     ("2人並ぶとき", "「利用者A ◀09:00　▶16:30 利用者B」のように、退所と入所が同じ日に重なると1つのマスに並びます。"),
-    ("空き ○ △ × 仮", "各週のいちばん下の行。○=空室あり／△=残りわずか／×=満室／仮=仮予約で調整中。"
-                  "これは「その日の夜」の空き状況です。"),
+    ("空き ○ △ × 仮", "○=空室あり／△=残りわずか／×=満室／仮=仮予約で調整中。これは「その日の夜」の空き状況です。"),
+    ("色分け", "名前のマスは区分ごとに色が付きます（M_区分 の上から4つ＝青・緑・紫・橙）。"
+             "仮予約・調整中はグレーの斜体になります。"),
     ("SEC", "数え方の定義（全シート共通のルール）", ""),
     ("利用日数", "入所日から退所日までの暦日数。両端を含みます（4/1入所・4/3退所 = 3日）。"),
     ("宿泊数", "退所日 − 入所日（4/1入所・4/3退所 = 2泊）。"),
@@ -470,7 +486,7 @@ for rng, name in [(f"B5:B{BK_LAST}", "氏名一覧"), (f"C5:C{BK_LAST}", "区分
 rng_all = f"A5:X{BK_LAST}"
 ws.conditional_formatting.add(rng_all, FormulaRule(formula=['$N5="キャンセル"'],
     font=Font(name=FONT, size=10, color="999999", strike=True),
-    fill=PatternFill("solid", fgColor="EFEFEF"), stopIfTrue=True))
+    fill=PatternFill("solid", fgColor="EFEFEF", bgColor="EFEFEF"), stopIfTrue=True))
 ws.conditional_formatting.add(rng_all, FormulaRule(formula=['$V5<>""'], fill=F_WARN, stopIfTrue=True))
 ws.conditional_formatting.add(rng_all, FormulaRule(formula=['$W5<>""'], fill=F_WARN2, stopIfTrue=True))
 ws.conditional_formatting.add(rng_all, FormulaRule(formula=['OR($N5="仮予約",$N5="調整中")'], fill=F_TENT))
@@ -499,6 +515,19 @@ SYM_C = get_column_letter(6 + MAX_ROOMS)     # J
 DAY_C = get_column_letter(7 + MAX_ROOMS)     # K
 IDX0  = 8 + MAX_ROOMS                        # L = 12（作業列の先頭）
 CATM0 = IDX0 + 3 * MAX_ROOMS                 # X = 24（区分ミラーの先頭）
+MEAL0 = CATM0 + MAX_ROOMS                    # AB = 28（食事の作業列の先頭）
+MB_A, MB_L, MB_D = (get_column_letter(MEAL0), get_column_letter(MEAL0 + 1),
+                    get_column_letter(MEAL0 + 2))          # 朝昼夕（自動）
+MB_X = get_column_letter(MEAL0 + 3)                        # 調整表の行番号
+MC_A, MC_L, MC_D = (get_column_letter(MEAL0 + 4), get_column_letter(MEAL0 + 5),
+                    get_column_letter(MEAL0 + 6))          # 朝昼夕（確定）
+MC_F = get_column_letter(MEAL0 + 7)                        # 表示用文字列
+MB_H = get_column_letter(MEAL0 + 8)                        # 実際に値が入った調整があるか
+# 02_カレンダー 下部の「食事の個別調整」表（日付・朝・昼・夕）
+ADJ_D  = f"{CAL}!$B${ADJ_TOP}:$B${ADJ_END}"
+ADJ_A  = f"{CAL}!$C${ADJ_TOP}:$C${ADJ_END}"
+ADJ_L  = f"{CAL}!$D${ADJ_TOP}:$D${ADJ_END}"
+ADJ_D2 = f"{CAL}!$E${ADJ_TOP}:$E${ADJ_END}"
 
 # 作業列の見出し
 for j in range(MAX_ROOMS):
@@ -507,6 +536,11 @@ for j in range(MAX_ROOMS):
         c.font = C_NOTE; c.fill = F_SUB; c.border = BORDER
         c.alignment = Alignment(horizontal="center")
     c = ws.cell(row=6, column=CATM0 + j, value=f"色{j+1}")
+    c.font = C_NOTE; c.fill = F_SUB; c.border = BORDER
+    c.alignment = Alignment(horizontal="center")
+for k, nm in enumerate(["朝自動", "昼自動", "夕自動", "調整行", "朝確定", "昼確定", "夕確定",
+                        "食事表示", "調整有無"]):
+    c = ws.cell(row=6, column=MEAL0 + k, value=nm)
     c.font = C_NOTE; c.fill = F_SUB; c.border = BORDER
     c.alignment = Alignment(horizontal="center")
 
@@ -554,7 +588,26 @@ for i in range(31):
     ws[f"{SYM_C}{d}"] = (f'=IF($A{d}="","",IF(${TEN_C}{d}>0,"仮",'
                          f'IF(${VAC_C}{d}<=0,"×",IF(${VAC_C}{d}<{CAP},"△","○"))))')
     ws[f"{DAY_C}{d}"] = f'=IF($A{d}="","",SUMPRODUCT({VALID}*({IN_}=$A{d})*({OUT_}=$A{d})))'
-    for col in range(1, CATM0 + MAX_ROOMS):
+    # ── 食事 ──────────────────────────────────────────────
+    # 既定: 日帰り=昼のみ／初日=夕／中日=朝昼夕／最終日=朝
+    ws[f"{MB_A}{d}"] = f'=IF($A{d}="",0,SUMPRODUCT({VALID}*({IN_}<$A{d})*({OUT_}>=$A{d})))'
+    ws[f"{MB_L}{d}"] = (f'=IF($A{d}="",0,SUMPRODUCT({VALID}*((({IN_}<$A{d})*({OUT_}>$A{d}))'
+                        f'+(({IN_}=$A{d})*({OUT_}=$A{d})))))')
+    ws[f"{MB_D}{d}"] = f'=IF($A{d}="",0,SUMPRODUCT({VALID}*({IN_}<=$A{d})*({OUT_}>$A{d})))'
+    # 調整表（02_カレンダー の下部）を日付で引く。無ければ既定のまま。
+    ws[f"{MB_X}{d}"] = f'=IF($A{d}="",0,IFERROR(MATCH($A{d},{ADJ_D},0),0))'
+    for k, (auto, conf) in enumerate([(MB_A, MC_A), (MB_L, MC_L), (MB_D, MC_D)]):
+        src = [ADJ_A, ADJ_L, ADJ_D2][k]
+        ws[f"{conf}{d}"] = (f'=IF($A{d}="",0,IF(${MB_X}{d}=0,${auto}{d},'
+                            f'IF(INDEX({src},${MB_X}{d})="",${auto}{d},INDEX({src},${MB_X}{d}))))')
+    # 日付だけ書いて値を入れていない行は「調整」とみなさない
+    ws[f"{MB_H}{d}"] = (f'=IF(OR($A{d}="",${MB_X}{d}=0),0,'
+                        f'IF(OR(INDEX({ADJ_A},${MB_X}{d})<>"",INDEX({ADJ_L},${MB_X}{d})<>"",'
+                        f'INDEX({ADJ_D2},${MB_X}{d})<>""),1,0))')
+    ws[f"{MC_F}{d}"] = (f'=IF($A{d}="","",IF(AND(${MC_A}{d}=0,${MC_L}{d}=0,${MC_D}{d}=0),"",'
+                        f'"朝"&${MC_A}{d}&" 昼"&${MC_L}{d}&" 夕"&${MC_D}{d}'
+                        f'&IF(${MB_H}{d}=0,"","　※調整")))')
+    for col in range(1, MEAL0 + 9):
         c = ws.cell(row=d, column=col)
         c.border = BORDER; c.font = C_AUTO; c.fill = F_AUTO
         c.alignment = Alignment(horizontal="center", vertical="center")
@@ -569,7 +622,7 @@ def mark_cf(worksheet, rng):
 
 mark_cf(ws, f"{SYM_C}7:{SYM_C}37")
 ws.conditional_formatting.add("A7:B37", FormulaRule(formula=['AND($A7<>"",WEEKDAY($A7,2)>=6)'], fill=F_WKND))
-for col in range(IDX0, CATM0 + MAX_ROOMS):
+for col in range(IDX0, MEAL0 + 9):
     ws.column_dimensions[get_column_letter(col)].hidden = True
     ws.column_dimensions[get_column_letter(col)].width = 8
 ws["A39"] = ("※ 「使用室数／空室数／空き記号」はその日の夜の宿泊で数えます。退所日の夜は空きです。"
@@ -588,43 +641,47 @@ ws.sheet_properties.pageSetUpPr.fitToPage = True
 #   条件付き書式は「8列右のミラー」を見て色を決める。
 # ══════════════════════════════════════════════════════════════════
 ws = sheet("02_カレンダー")
-title(ws, "カレンダー", "★対象月を変えると、03_帯表・04_月間表・06_食数表・09_FAX空き表 も同じ月になります。")
+title(ws, "カレンダー",
+      "★対象月を変えると、03_帯表・04_月間表・06_食数表・09_FAX空き表 も同じ月になります。")
 label_input(ws, 3, "対象月", MONTH0, "その月の日付ならどれでも可（1日でなくてもかまいません）", "yyyy/mm/dd")
 label_auto (ws, 4, "月初", '=DATE(YEAR($B$3),MONTH($B$3),1)', "自動", "yyyy/mm/dd")
-label_input(ws, 5, "時刻を表示", "○", "○で入室・退室時刻を表示。狭く感じるときは空欄にしてください")
+label_input(ws, 5, "時刻を表示", "○", "○で入室・退室時刻を表示。狭く感じるときは空欄に")
+label_input(ws, 6, "食事を表示", "○", "○で各週の下に朝・昼・夕の食数を表示。個別の調整はこのシートの下部で")
 NOROOM = f'SUMPRODUCT(({ROOM_}="")*({IN_}<>""))'
-ws["A6"] = "確認"; ws["A6"].font = C_SUB; ws["A6"].fill = F_SUB; ws["A6"].border = BORDER
-ws["B6"] = (f'=IF({NOROOM}=0,"",'
+ws["A7"] = "確認"; ws["A7"].font = C_SUB; ws["A7"].fill = F_SUB; ws["A7"].border = BORDER
+ws["B7"] = (f'=IF({NOROOM}=0,"✓ 部屋の指定もれはありません",'
             f'"⚠ 部屋が未選択の予約が "&{NOROOM}&" 件あります。'
             f'部屋の行には出ませんが「空き」の判定には数えています。01_予約入力 のV列（赤）をご確認ください。")')
-ws["B6"].font = Font(name=FONT, size=10, bold=True, color="B03A2E")
-ws["B6"].alignment = Alignment(horizontal="left", vertical="center")
-ws["A7"] = "記号の読み方"; ws["A7"].font = C_SUB
-ws["B7"] = ("▶ 入所日（時刻つき）　／　記号なし 連泊の中日　／　◀ 退所日（朝に退所。その夜は空きます）"
-            "　／　◆ 日帰り（体験利用）")
-ws["B7"].font = C_NOTE
-ws["B7"].alignment = Alignment(horizontal="left")
+ws["B7"].font = Font(name=FONT, size=10, bold=True, color="B03A2E")
+ws["B7"].alignment = Alignment(horizontal="left", vertical="center")
+ws["A8"] = "記号"; ws["A8"].font = C_SUB
+ws["B8"] = ("▶ 入所（時刻つき）　／　記号なし 連泊の中日　／　◀ 退所（朝に退所。その夜は空きます）"
+            "　／　◆ 日帰り　／　色は区分（M_区分）、グレー斜体は仮予約")
+ws["B8"].font = C_NOTE
+ws["B8"].alignment = Alignment(horizontal="left")
 
 WD = ["日", "月", "火", "水", "木", "金", "土"]
-ws.column_dimensions["A"].width = 12
+ws.column_dimensions["A"].width = 13
 for c in range(7):
     L = get_column_letter(2 + c)
-    ws.column_dimensions[L].width = 20
-    cell = ws[f"{L}8"]; cell.value = WD[c]
-    cell.font = C_SUN if c == 0 else (C_SAT if c == 6 else C_HEAD)
-    cell.fill = F_HEAD if 0 < c < 6 else PatternFill("solid", fgColor="EAF0F6")
+    ws.column_dimensions[L].width = 23
+    cell = ws[f"{L}{CAL_START-1}"]; cell.value = WD[c]
+    cell.font = Font(name=FONT, size=11, bold=True,
+                     color="FFFFFF" if 0 < c < 6 else ("FFE0E0" if c == 0 else "DDEBFF"))
+    cell.fill = PatternFill("solid", fgColor="2F6690", bgColor="2F6690") if 0 < c < 6 else \
+                PatternFill("solid", fgColor=("A93226" if c == 0 else "1F618D"),
+                            bgColor=("A93226" if c == 0 else "1F618D"))
     cell.border = BORDER
     cell.alignment = Alignment(horizontal="center", vertical="center")
-ws.row_dimensions[8].height = 22
+ws.row_dimensions[CAL_START - 1].height = 24
 
-BLOCK = 2 + MAX_ROOMS          # 日付行 + 部屋行 + 空き記号行
+BLOCK = 3 + MAX_ROOMS          # 日付 + 部屋 + 空き + 食事
 MIRROR0 = 10                   # J列。表示列 B(2) からのオフセットは +8
-CAL_START = 9
-CAL_LAST = CAL_START + 5 * 7 + BLOCK - 1
+CAL_LAST = CAL_START + 5 * CAL_STRIDE + BLOCK - 1
+THICK = Side(style="medium", color="2F6690")
 
 for w in range(6):
-    base = CAL_START + w * 7
-    # 行ラベル
+    base = CAL_START + w * CAL_STRIDE
     ws.cell(row=base, column=1, value=f"第{w+1}週").font = C_NOTE
     ws.cell(row=base, column=1).alignment = Alignment(horizontal="right", vertical="center")
     for j in range(MAX_ROOMS):
@@ -635,27 +692,32 @@ for w in range(6):
     c = ws.cell(row=base + 1 + MAX_ROOMS, column=1, value="空き")
     c.font = C_SUB; c.fill = F_SUB; c.border = BORDER
     c.alignment = Alignment(horizontal="center", vertical="center")
+    c = ws.cell(row=base + 2 + MAX_ROOMS, column=1, value="食事")
+    c.font = C_SUB; c.fill = PatternFill("solid", fgColor="EDE7DC", bgColor="EDE7DC"); c.border = BORDER
+    c.alignment = Alignment(horizontal="center", vertical="center")
 
     for cidx in range(7):
         L = get_column_letter(2 + cidx)
-        ML = get_column_letter(MIRROR0 + cidx)
         n = w * 7 + cidx
         # 日付行
         cell = ws[f"{L}{base}"]
         cell.value = (f'=IF(MONTH($B$4-WEEKDAY($B$4)+1+{n})<>MONTH($B$4),"",'
                       f'$B$4-WEEKDAY($B$4)+1+{n})')
         cell.number_format = "d"
-        cell.font = C_SUN if cidx == 0 else (C_SAT if cidx == 6 else C_DAY)
-        cell.fill = F_WHITE; cell.border = BORDER
-        cell.alignment = Alignment(horizontal="right", vertical="center")
+        cell.font = Font(name=FONT, size=14, bold=True,
+                         color="A93226" if cidx == 0 else ("1F618D" if cidx == 6 else "333333"))
+        cell.fill = PatternFill("solid", fgColor="F4F7FA", bgColor="F4F7FA")
+        cell.border = Border(left=THICK, right=THICK, top=THICK, bottom=THIN)
+        cell.alignment = Alignment(horizontal="right", vertical="center", indent=1)
         # 部屋レーン
         for j in range(MAX_ROOMS):
-            rc = get_column_letter(3 + j)               # 04_月間表 の部屋列
-            mc = get_column_letter(CATM0 + j)           # 04_月間表 の色ミラー列
+            rc = get_column_letter(3 + j)
+            mc = get_column_letter(CATM0 + j)
             cell = ws.cell(row=base + 1 + j, column=2 + cidx)
             cell.value = (f'=IF({L}{base}="","",IFERROR(INDEX({MON}!{rc}$7:{rc}$37,'
                           f'MATCH({L}{base},{MON}!$A$7:$A$37,0)),""))')
-            cell.font = C_LANE; cell.border = BORDER_L
+            cell.font = Font(name=FONT, size=10, bold=True, color="1F3B52")
+            cell.border = Border(left=THICK, right=THICK, top=HAIR, bottom=HAIR)
             cell.alignment = Alignment(horizontal="left", vertical="center", shrink_to_fit=True)
             m = ws.cell(row=base + 1 + j, column=MIRROR0 + cidx)
             m.value = (f'=IF({L}{base}="","",IFERROR(INDEX({MON}!{mc}$7:{mc}$37,'
@@ -664,39 +726,80 @@ for w in range(6):
         cell = ws.cell(row=base + 1 + MAX_ROOMS, column=2 + cidx)
         cell.value = (f'=IF({L}{base}="","",IFERROR(INDEX({MON}!${SYM_C}$7:${SYM_C}$37,'
                       f'MATCH({L}{base},{MON}!$A$7:$A$37,0)),""))')
-        cell.font = Font(name=FONT, size=11, bold=True)
-        cell.border = BORDER
+        cell.font = Font(name=FONT, size=14, bold=True)
+        cell.border = Border(left=THICK, right=THICK, top=THIN, bottom=THIN)
         cell.alignment = Alignment(horizontal="center", vertical="center")
-    ws.row_dimensions[base].height = 20
+        # 食事行
+        cell = ws.cell(row=base + 2 + MAX_ROOMS, column=2 + cidx)
+        cell.value = (f'=IF(OR({L}{base}="",$B$6<>"○"),"",IFERROR(INDEX({MON}!${MC_F}$7:${MC_F}$37,'
+                      f'MATCH({L}{base},{MON}!$A$7:$A$37,0)),""))')
+        cell.font = Font(name=FONT, size=9, color="6B5B3E")
+        cell.fill = PatternFill("solid", fgColor="FBF8F2", bgColor="FBF8F2")
+        cell.border = Border(left=THICK, right=THICK, top=THIN, bottom=THICK)
+        cell.alignment = Alignment(horizontal="center", vertical="center", shrink_to_fit=True)
+    ws.row_dimensions[base].height = 22
     for j in range(MAX_ROOMS):
-        ws.row_dimensions[base + 1 + j].height = 17
-    ws.row_dimensions[base + 1 + MAX_ROOMS].height = 19
+        ws.row_dimensions[base + 1 + j].height = 21
+    ws.row_dimensions[base + 1 + MAX_ROOMS].height = 22
+    ws.row_dimensions[base + 2 + MAX_ROOMS].height = 17
 
 # 色分け（ミラーは8列右）。仮予約を最優先、次に区分の色。
 GRID = f"B{CAL_START}:H{CAL_LAST}"
 ws.conditional_formatting.add(GRID, FormulaRule(
-    formula=[f'AND(B{CAL_START}<>"",J{CAL_START}="仮")'], fill=F_TENT2, font=C_TENTF, stopIfTrue=True))
+    formula=[f'AND(B{CAL_START}<>"",J{CAL_START}="仮")'],
+    fill=F_TENT2, font=Font(name=FONT, size=10, italic=True, color="6E6E6E"), stopIfTrue=True))
 for i in range(4):
     ws.conditional_formatting.add(GRID, FormulaRule(
         formula=[f'AND(B{CAL_START}<>"",{MCAT}!$A${4+i}<>"",J{CAL_START}={MCAT}!$A${4+i})'],
-        fill=CAT_FILLS[i], stopIfTrue=True))
+        fill=CAT_FILLS[i], font=Font(name=FONT, size=10, bold=True, color=CAT_FONTS[i]),
+        stopIfTrue=True))
 for w in range(6):
-    r_ = CAL_START + w * 7 + 1 + MAX_ROOMS
+    r_ = CAL_START + w * CAL_STRIDE + 1 + MAX_ROOMS
     mark_cf(ws, f"B{r_}:H{r_}")
 
 for c in range(MIRROR0, MIRROR0 + 7):
     ws.column_dimensions[get_column_letter(c)].hidden = True
-ws[f"A{CAL_LAST+2}"] = ("※ 1〜2室の施設では、使わない部屋の行（部屋名が空欄の行）を6週ぶんまとめて選択し、"
-                        "右クリック→非表示 にしてください。数式を消す必要はありません。")
-ws[f"A{CAL_LAST+3}"] = ("※ J〜P列は色分け用の隠し列です。表示しても構いませんが、編集しないでください。")
-ws[f"A{CAL_LAST+4}"] = ("※ 退所日に名前が出ていても、その日の夜は空いています（「空き」行の記号が正です）。")
-for k in (2, 3, 4):
-    ws[f"A{CAL_LAST+k}"].font = C_NOTE
+
+# ── 食事の個別調整（日付で結び付けるので、月を切り替えてもずれない）──
+hr = ADJ_TOP - 2
+ws[f"A{hr}"] = "■ 食事の個別調整（既定と違う日だけ入れてください）"
+ws[f"A{hr}"].font = C_SUB
+ws[f"A{hr+1}"] = "使い方"
+ws[f"A{hr+1}"].font = C_NOTE
+ws[f"B{hr+1}"] = ("日付を入れ、朝・昼・夕に「その日の実際の食数」を入れます。空欄の欄は自動計算のままです。"
+                  "0を入れれば「その食事なし」になります。既定は 日帰り=昼のみ／初日=夕／中日=朝昼夕／最終日=朝。")
+ws[f"B{hr+1}"].font = C_NOTE
+ws[f"B{hr+1}"].alignment = Alignment(horizontal="left")
+for i, (lbl, wdt) in enumerate([("日付", 14), ("朝", 8), ("昼", 8), ("夕", 8), ("メモ", 40)]):
+    c = ws.cell(row=ADJ_TOP - 1, column=2 + i, value=lbl)
+    c.font = C_HEAD; c.fill = F_HEAD; c.border = BORDER
+    c.alignment = Alignment(horizontal="center", vertical="center")
+for r_ in range(ADJ_TOP, ADJ_END + 1):
+    for i in range(5):
+        c = ws.cell(row=r_, column=2 + i)
+        c.fill = F_INPUT; c.font = C_BODY; c.border = BORDER
+        c.alignment = Alignment(horizontal="center" if i else "left", vertical="center")
+    ws.cell(row=r_, column=2).number_format = "yyyy/mm/dd"
+    ws.cell(row=r_, column=6).alignment = Alignment(horizontal="left", vertical="center")
+    ws.cell(row=r_, column=1, value=(f'=IF($B{r_}="","",IF(MONTH($B{r_})<>MONTH($B$4),"（他の月）",'
+                                     f'IF(COUNTIF($B${ADJ_TOP}:$B${ADJ_END},$B{r_})>1,"⚠日付が重複","✓")))'))
+    ws.cell(row=r_, column=1).font = C_AUTO
+    ws.cell(row=r_, column=1).alignment = Alignment(horizontal="center", vertical="center")
+ws.conditional_formatting.add(f"A{ADJ_TOP}:F{ADJ_END}", FormulaRule(
+    formula=[f'$A{ADJ_TOP}="⚠日付が重複"'], fill=F_WARN))
+
+ws[f"A{ADJ_END+2}"] = ("※ 使わない部屋の行（部屋名が空欄の行）は、6週ぶんまとめて選んで 右クリック→非表示 にしてください。")
+ws[f"A{ADJ_END+3}"] = ("※ J〜P列は色分け用の隠し列です。編集しないでください。")
+ws[f"A{ADJ_END+4}"] = ("※ 退所日に名前が出ていても、その日の夜は空いています（「空き」行の記号が正です）。")
+ws[f"A{ADJ_END+5}"] = ("※ 食事の調整は日付で結び付けているので、対象月を切り替えても他の月に影響しません。")
+for k in range(2, 6):
+    ws[f"A{ADJ_END+k}"].font = C_NOTE
 ws.print_area = f"A1:H{CAL_LAST}"
 ws.page_setup.orientation = "landscape"
 ws.page_setup.fitToWidth = 1; ws.page_setup.fitToHeight = 1
 ws.sheet_properties.pageSetUpPr.fitToPage = True
 ws.freeze_panes = f"B{CAL_START}"
+
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -707,7 +810,17 @@ ws.freeze_panes = f"B{CAL_START}"
 ws = sheet("03_帯表")
 title(ws, "帯表（だれが・いつから・いつまで）",
       "1人1行、横軸が1〜31日。▶入所　■連泊　◀退所　◆日帰り。白抜き（▷□◁◇）は仮予約・調整中です。")
-label_auto(ws, 3, "対象月", f"={M1}", "02_カレンダー の対象月に連動します", "yyyy/mm/dd")
+# 対象月は列幅3.4の列だと "#" になるので、B3:F3 を結合して表示する
+ws["A3"] = "対象月"; ws["A3"].font = C_SUB; ws["A3"].fill = F_SUB; ws["A3"].border = BORDER
+ws["A3"].alignment = Alignment(horizontal="center", vertical="center")
+ws.merge_cells("B3:F3")
+ws["B3"] = f"={M1}"; ws["B3"].number_format = "yyyy/mm/dd"
+ws["B3"].font = C_AUTO; ws["B3"].fill = F_AUTO
+ws["B3"].alignment = Alignment(horizontal="center", vertical="center")
+for cc in range(2, 7): ws.cell(row=3, column=cc).border = BORDER
+ws.merge_cells("G3:T3")
+ws["G3"] = "02_カレンダー の対象月に連動します"; ws["G3"].font = C_NOTE
+ws["G3"].alignment = Alignment(horizontal="left", vertical="center")
 ws.column_dimensions["A"].width = 18
 BAND_LAST = 6 + BAND_ROWS
 MIRROR_B = 42                   # AP列。表示列 B(2) からのオフセットは +40
@@ -718,7 +831,7 @@ for r_ in (4, 5, 6):
     ws[f"A{r_}"].alignment = Alignment(horizontal="center", vertical="center")
 for i in range(31):
     L = get_column_letter(2 + i)
-    ws.column_dimensions[L].width = 3.1
+    ws.column_dimensions[L].width = 3.4
     ws[f"{L}4"] = f'=IF(MONTH({M1}+{i})<>MONTH({M1}),"",{M1}+{i})'
     ws[f"{L}5"] = f'=IF({L}4="","",DAY({L}4))'
     ws[f"{L}6"] = f'=IF({L}4="","",MID("日月火水木金土",WEEKDAY({L}4),1))'
@@ -731,7 +844,9 @@ ws.row_dimensions[4].hidden = True
 for i in range(BAND_ROWS):
     r_ = 7 + i
     ws[f"A{r_}"] = f'=IF(COUNTA({UROW})>={i+1},INDEX({UROW},{i+1}),"")'
-    ws[f"A{r_}"].font = C_BODY; ws[f"A{r_}"].fill = F_AUTO; ws[f"A{r_}"].border = BORDER
+    ws[f"A{r_}"].font = Font(name=FONT, size=10, bold=True, color="1F3B52")
+    ws[f"A{r_}"].fill = F_AUTO; ws[f"A{r_}"].border = BORDER
+    ws.row_dimensions[r_].height = 19
     ws[f"A{r_}"].alignment = Alignment(horizontal="left", vertical="center")
     for i2 in range(31):
         L = get_column_letter(2 + i2)
@@ -748,7 +863,7 @@ for i in range(BAND_ROWS):
             f'IF(MOD({m},8)=5,IF({m}>=8,"◁","◀"),'
             f'IF({m}>=8,"□","■")))))')
         c = ws[f"{L}{r_}"]; c.border = BORDER_L
-        c.font = Font(name=FONT, size=9)
+        c.font = Font(name=FONT, size=11, bold=True, color="12395B")
         c.alignment = Alignment(horizontal="center", vertical="center")
     MB0 = get_column_letter(MIRROR_B); MB1 = get_column_letter(MIRROR_B + 30)
     ws[f"AG{r_}"] = f'=IF($A{r_}="","",COUNTIF(${MB0}{r_}:${MB1}{r_},">0"))'
@@ -763,10 +878,10 @@ ws.column_dimensions["AG"].width = 10
 BGRID = f"B7:AF{BAND_LAST}"
 ws.conditional_formatting.add(BGRID, FormulaRule(
     formula=['AND(B7<>"",AP7>=8)'], fill=F_BANDT,
-    font=Font(name=FONT, size=9, color="606070"), stopIfTrue=True))
+    font=Font(name=FONT, size=11, bold=True, color="6B6B7B"), stopIfTrue=True))
 ws.conditional_formatting.add(BGRID, FormulaRule(
     formula=['AND(B7<>"",AP7>0)'], fill=F_BAND,
-    font=Font(name=FONT, size=9, color="FFFFFF", bold=True), stopIfTrue=True))
+    font=Font(name=FONT, size=11, bold=True, color="12395B"), stopIfTrue=True))
 ws.conditional_formatting.add(BGRID, FormulaRule(
     formula=['OR(B$6="土",B$6="日")'], fill=F_WKND))
 ws.conditional_formatting.add(f"B5:AF6", FormulaRule(
@@ -877,44 +992,46 @@ for r_ in (13, 14, 15): ws[f"A{r_}"].font = C_NOTE
 # ══════════════════════════════════════════════════════════════════
 ws = sheet("06_食数表")
 title(ws, "食数表（厨房用）",
-      "既定は 日帰り=昼のみ／初日=夕／中日=朝昼夕／最終日=朝。例外だけ「調整」列に実数を入れると、そちらが優先されます。")
+      "既定は 日帰り=昼のみ／初日=夕／中日=朝昼夕／最終日=朝。"
+      "★個別の調整は 02_カレンダー の下部「食事の個別調整」で日付ごとに入れてください。")
 label_auto(ws, 3, "対象月", f"={M1}", "★月の変更は 02_カレンダー で行ってください", "yyyy/mm/dd")
-hdr = ["日付", "曜日", "朝(自動)", "昼(自動)", "夕(自動)", "朝 調整", "昼 調整", "夕 調整",
-       "朝 確定", "昼 確定", "夕 確定"] + [f"部屋{i}" for i in range(1, MAX_ROOMS + 1)]
-head_row(ws, 5, hdr, [12, 6, 9, 9, 9, 9, 9, 9, 9, 9, 9] + [22] * MAX_ROOMS)
+hdr = ["日付", "曜日", "朝食", "昼食", "夕食", "調整"] + [f"部屋{i}" for i in range(1, MAX_ROOMS + 1)]
+head_row(ws, 5, hdr, [12, 6, 10, 10, 10, 8] + [24] * MAX_ROOMS)
 for i in range(MAX_ROOMS):
-    ws[f"{get_column_letter(12+i)}5"] = f'={MON}!{get_column_letter(3+i)}$6'
+    ws[f"{get_column_letter(7+i)}5"] = f'={MON}!{get_column_letter(3+i)}$6'
 for i in range(31):
     d = 6 + i
     src = 7 + i
     ws[f"A{d}"] = f'=IF({MON}!$A{src}="","",{MON}!$A{src})'
     ws[f"B{d}"] = f'=IF($A{d}="","",MID("日月火水木金土",WEEKDAY($A{d}),1))'
-    ws[f"C{d}"] = f'=IF($A{d}="","",SUMPRODUCT({VALID}*({IN_}<$A{d})*({OUT_}>=$A{d})))'
-    ws[f"D{d}"] = (f'=IF($A{d}="","",SUMPRODUCT({VALID}*((({IN_}<$A{d})*({OUT_}>$A{d}))'
-                   f'+(({IN_}=$A{d})*({OUT_}=$A{d})))))')
-    ws[f"E{d}"] = f'=IF($A{d}="","",SUMPRODUCT({VALID}*({IN_}<=$A{d})*({OUT_}>$A{d})))'
-    for k, (auto, adj) in enumerate([("C", "F"), ("D", "G"), ("E", "H")]):
-        conf = get_column_letter(9 + k)
-        ws[f"{conf}{d}"] = f'=IF($A{d}="","",IF(${adj}{d}="",${auto}{d},${adj}{d}))'
+    for k, col in enumerate(("C", "D", "E")):
+        srccol = [MC_A, MC_L, MC_D][k]
+        ws[f"{col}{d}"] = f'=IF($A{d}="","",{MON}!${srccol}{src})'
+    ws[f"F{d}"] = f'=IF($A{d}="","",IF({MON}!${MB_H}{src}=0,"","※"))'
     for j in range(MAX_ROOMS):
-        ws[f"{get_column_letter(12+j)}{d}"] = f'=IF($A{d}="","",{MON}!{get_column_letter(3+j)}{src})'
-    for col in range(1, 12 + MAX_ROOMS):
+        ws[f"{get_column_letter(7+j)}{d}"] = f'=IF($A{d}="","",{MON}!{get_column_letter(3+j)}{src})'
+    for col in range(1, 7 + MAX_ROOMS):
         c = ws.cell(row=d, column=col); c.border = BORDER
         c.alignment = Alignment(horizontal="center", vertical="center")
-        if get_column_letter(col) in ("F", "G", "H"): c.font, c.fill = C_BODY, F_INPUT
-        else: c.font, c.fill = C_AUTO, F_AUTO
+        c.font, c.fill = C_AUTO, F_AUTO
+    for col in ("C", "D", "E"):
+        ws[f"{col}{d}"].font = Font(name=FONT, size=11, bold=True, color="1F3B52")
+    ws[f"F{d}"].font = Font(name=FONT, size=10, bold=True, color="B03A2E")
     ws[f"A{d}"].number_format = "yyyy/mm/dd"
     for j in range(MAX_ROOMS):
-        ws.cell(row=d, column=12 + j).alignment = Alignment(horizontal="left", vertical="center",
+        ws.cell(row=d, column=7 + j).alignment = Alignment(horizontal="left", vertical="center",
                                                             shrink_to_fit=True)
 ws["A38"] = "月合計"; ws["A38"].font = C_SUB; ws["A38"].fill = F_SUB; ws["A38"].border = BORDER
-for col in ("I", "J", "K"):
+for col in ("C", "D", "E"):
     c = ws[f"{col}38"]; c.value = f"=SUM({col}6:{col}36)"
-    c.font = C_BOLD; c.fill = F_SUB; c.border = BORDER
+    c.font = Font(name=FONT, size=11, bold=True); c.fill = F_SUB; c.border = BORDER
     c.alignment = Alignment(horizontal="center")
-ws["L38"] = "厨房へはこの「確定」列（I〜K）を渡してください"; ws["L38"].font = C_NOTE
+ws["G38"] = "「調整」に ※ が付いた日は、02_カレンダー で個別に指定した食数です"
+ws["G38"].font = C_NOTE
 ws.conditional_formatting.add("A6:B36", FormulaRule(formula=['AND($A6<>"",WEEKDAY($A6,2)>=6)'], fill=F_WKND))
-ws.print_area = "A1:K38"
+ws.conditional_formatting.add(f"A6:{get_column_letter(6+MAX_ROOMS)}36",
+    FormulaRule(formula=['$F6="※"'], fill=PatternFill("solid", fgColor="FBF3E4", bgColor="FBF3E4")))
+ws.print_area = "A1:F38"
 ws.page_setup.fitToWidth = 1; ws.page_setup.fitToHeight = 1
 ws.sheet_properties.pageSetUpPr.fitToPage = True
 
