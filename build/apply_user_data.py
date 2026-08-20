@@ -17,17 +17,18 @@ USERS  = [("◎◎様", 7), ("木村様", 5), ("伊藤メイ様", None), ("小�
 MONTH  = datetime.date(2026, 8, 1)
 
 # (氏名, 区分, 部屋, 入所日, 入所時, 退所日, 退所時, 状態, 送迎, 送迎方法, 場所, 備考)
+# 食事は全件「標準」（空欄）のまま。必要になったら L/M/N 列で ○/× を選ぶ。
 # 時刻は「時」の数字だけ。分が必要なものは "16:30" のように文字で残す。
 BOOKINGS = [
     ("◎◎様",    "SS", "１Ｆ", datetime.date(2026,8,1),  16, datetime.date(2026,8,2),  9, "確定", "あり", "施設車", "自宅前 16:00", ""),
     ("木村様",    "SS", "１Ｆ", datetime.date(2026,8,5),  "16:30", datetime.date(2026,8,7),  9, "確定", "なし", "", "", ""),
     ("◎◎様",    "SS", "１Ｆ", datetime.date(2026,8,8),  10, datetime.date(2026,8,8),  16, "確定", "あり", "家族送迎", "", "日帰り（体験利用）"),
     ("小澤様",    "SS", "１Ｆ", datetime.date(2026,8,14), 16, datetime.date(2026,8,16), 9, "確定", "調整中", "", "", ""),
-    ("木村様",    "SS", "１Ｆ", datetime.date(2026,8,19), "",      datetime.date(2026,8,21), "",      "", "", "", "", ""),
-    ("伊藤メイ様", "SS", "１Ｆ", datetime.date(2026,8,21), "",      datetime.date(2026,8,22), "",      "", "", "", "", ""),
-    ("小澤様",    "SS", "１Ｆ", datetime.date(2026,8,22), "",      datetime.date(2026,8,23), "",      "", "", "", "", ""),
-    ("小林様",    "SS", "",     datetime.date(2026,8,29), "",      datetime.date(2026,8,30), "",      "", "", "", "", ""),
-    ("木村様",    "SS", "",     datetime.date(2026,8,31), "",      datetime.date(2026,9,1),  "",      "", "", "", "", ""),
+    ("木村様",    "SS", "１Ｆ", datetime.date(2026,8,19), 15, datetime.date(2026,8,21), "", "", "", "", "", ""),
+    ("伊藤メイ様", "SS", "１Ｆ", datetime.date(2026,8,21), 15, datetime.date(2026,8,22), "", "", "", "", "", ""),
+    ("小澤様",    "SS", "１Ｆ", datetime.date(2026,8,22), 15, datetime.date(2026,8,23), "", "", "", "", "", ""),
+    ("小林様",    "SS", "１Ｆ", datetime.date(2026,8,29), 15, datetime.date(2026,8,30), "", "", "", "", "", ""),
+    ("木村様",    "SS", "１Ｆ", datetime.date(2026,8,31), 15, datetime.date(2026,9,1),  "", "", "", "", "", ""),
 ]
 
 wb = openpyxl.load_workbook(SRC)
@@ -50,7 +51,7 @@ for i, (nm, alw) in enumerate(USERS):
 
 # ── 01_予約入力 ───────────────────────────────────────────
 ws = wb["01_予約入力"]
-INPUT_COLS = ["B","C","D","E","F","H","I","K","N","O","P","Q","R","S","T","U"]
+INPUT_COLS = ["B","C","D","E","F","H","I","K","L","M","N","Q","R","S","T","U","V","W","X"]
 for r in range(5, 205):
     for c in INPUT_COLS: ws[f"{c}{r}"].value = None
 
@@ -64,13 +65,13 @@ for i, bk in enumerate(BOOKINGS):
         ws[f"E{r}"] = MONTH
     ws[f"F{r}"] = din.day            # 入所は日にちだけ
     ws[f"I{r}"] = dout.day           # 退所も日にちだけ（翌月は自動判定）
-    if tin:  ws[f"H{r}"] = tin
-    if tout: ws[f"K{r}"] = tout
-    if st:   ws[f"N{r}"] = st
-    if pk:   ws[f"O{r}"] = pk
-    if pkm:  ws[f"P{r}"] = pkm
-    if pkl:  ws[f"Q{r}"] = pkl
-    if note: ws[f"S{r}"] = note
+    if tin != "":  ws[f"H{r}"] = tin
+    if tout != "": ws[f"K{r}"] = tout
+    if st:   ws[f"Q{r}"] = st
+    if pk:   ws[f"R{r}"] = pk
+    if pkm:  ws[f"S{r}"] = pkm
+    if pkl:  ws[f"T{r}"] = pkl
+    if note: ws[f"V{r}"] = note
 
 # ── 各シートの対象月・期間をお客様の月に合わせる ─────────────
 wb["02_カレンダー"]["B3"] = MONTH

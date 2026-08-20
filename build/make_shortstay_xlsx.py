@@ -131,12 +131,13 @@ R = lambda col: f"{BK}!${col}$5:${col}${BK_LAST}"
 # 01_予約入力 の列（入力：B〜F,H,I,K,N〜U ／ 自動：A,G,J,L,M,V,W,X ／ 作業:Y〜AB）
 NAME_, CAT_, ROOM_ = R("B"), R("C"), R("D")
 IN_, OUT_          = R("G"), R("J")      # 自動計算された入所日・退所予定日
-ST_                = R("N")              # 予約状態
-NOTE_              = R("S")              # 備考
-ALW_               = R("X")              # 支給量対象日数
-SORTK_             = R("Z")              # 当月の並び順キー（帯表の明細用）
-INN_, OUTN_        = R("AC"), R("AD")    # 日付の数値版（空欄は0）。四則演算はこちらを使う
-TIN_, TOUT_        = R("AA"), R("AB")    # 時刻の表示用文字列
+BF_, LF_, DF_      = R("L"), R("M"), R("N")   # 食事の指定（空欄=標準 / ○=全日 / ×=なし）
+ST_                = R("Q")              # 予約状態
+NOTE_              = R("V")              # 備考
+ALW_               = R("AA")             # 支給量対象日数
+SORTK_             = R("AC")             # 当月の並び順キー（帯表の明細用）
+TIN_, TOUT_        = R("AD"), R("AE")    # 時刻の表示用文字列
+INN_, OUTN_        = R("AF"), R("AG")    # 日付の数値版（空欄は0）。四則演算はこちらを使う
 VALID = f'({IN_}<>"")*({ST_}<>"キャンセル")'
 TENT  = f'(({ST_}="仮予約")+({ST_}="調整中"))'
 ROWID = f'(ROW({IN_})-4)'
@@ -211,9 +212,18 @@ rows = [
     ("★ファイルは施設ごとに分ける", "このファイルを施設の数だけコピーして「施設A_管理台帳.xlsx」「施設B_管理台帳.xlsx」"
                         "のように分けてください。1つのファイルに複数施設を混ぜると、定員が施設ごとに違うため"
                         "空き判定が成立せず、全ての集計に施設の絞り込みが必要になって必ず崩れます。"),
+    ("SEC", "★ 食事の決め方（3段階）", ""),
+    ("① 標準（何もしない）", "日帰り=昼のみ ／ 初日=夕 ／ 中日=朝昼夕 ／ 最終日=朝。"
+                     "ほとんどの予約はこれで足ります。"),
+    ("② 予約ごとに決める", "01_予約入力 の「朝食」「昼食」「夕食」列で選びます。"
+                    "空欄=標準、○=その滞在の全ての利用日で出す、×=その滞在では出さない。"
+                    "「この方は毎日昼食もつける」「この方は朝食なし」といった決め方に使います。"),
+    ("③ 特定の日だけ直す", "02_カレンダー 下部の「食事の個別調整」に日付と食数を入れます。"
+                    "★①②より優先されます。「この日だけ来客で1食多い」といった例外に使います。"),
+    ("反映先", "どれで決めても、02_カレンダー の食事行と 06_食数表 に自動で反映されます。"),
     ("SEC", "★ 食事をカレンダーで見る・直す", ""),
     ("いつもは自動", "各週のいちばん下の「食事」行に、その日の 朝○ 昼○ 夕○ が自動で出ます。"
-               "既定は 日帰り=昼のみ／初日=夕／中日=朝昼夕／最終日=朝 です。"),
+               "予約ごとの指定（01_予約入力 の朝食・昼食・夕食）もここに反映されます。"),
     ("違う日だけ入れる", "02_カレンダー のカレンダーの下に「食事の個別調整」表があります。"
                   "日付と、その日の実際の食数（朝・昼・夕）を入れてください。空欄の欄は自動のままです。"
                   "0 を入れれば「その食事なし」になります。"),
@@ -246,8 +256,9 @@ rows = [
     ("うすい灰色（斜体）", "自動計算です。上書きすると壊れます。触らないでください。"),
     ("赤・オレンジ", "警告です。ダブルブッキング（⚠重複）・支給量オーバー・未登録の部屋を知らせます。"),
     ("SEC", "毎日の使い方", ""),
-    ("予約が入ったら", "01_予約入力 の空いている行に、1滞在=1行で入れます。日にちは数字だけでかまいません。"
-                  "V列・W列が赤くならないことだけ確認してください。"),
+    ("予約が入ったら", "01_予約入力 の空いている行に、1滞在=1行で入れます。日にちも時刻も数字だけ。"
+                  "食事が標準と違うときだけ 朝食・昼食・夕食 列で ○/× を選びます。"
+                  "Y列・Z列が赤くならないことだけ確認してください。"),
     ("★部屋は必ず選ぶ", "部屋が空欄のままだと、その予約はカレンダーの部屋の行に出ません"
                   "（「空き」の判定には数えるので×にはなります）。V列に「⚠部屋が未選択」と赤で出るので直してください。"),
     ("入れたあと確認", "02_カレンダー を見て、意図した期間に帯が出ているかを目で確かめます。"),
@@ -370,96 +381,98 @@ defname("状態一覧", "'M_状態'!$A$4:$A$8")
 ws = sheet("01_予約入力")
 title(ws, "予約入力（1滞在 = 1行）",
       "★日付は「年月」を最初の行に一度だけ入れれば、あとは日にちの数字だけ。"
-      "時刻も「時」の数字だけ（16 → 16:00）で入力できます。"
-      "黄色の列だけ入力します。灰色は自動計算。V列・W列が赤くなったら、その行を直してください。")
+      "時刻も「時」の数字だけ（16 → 16:00）。食事は空欄なら標準どおりです。"
+      "黄色の列だけ入力します。Y列・Z列が赤くなったら、その行を直してください。")
 headers = ["予約ID", "氏名", "区分", "部屋",
            "年月\n(最初の行だけ)", "入所\n(日)", "入所日\n(自動)", "入所\n(時)",
            "退所\n(日)", "退所予定日\n(自動)", "退所\n(時)",
+           "朝食", "昼食", "夕食",
            "利用日数", "宿泊数", "予約状態", "送迎", "送迎方法", "送迎場所・時間帯",
            "外部サービス", "備考", "更新日", "更新者",
            "⚠重複・部屋チェック", "⚠支給量チェック", "支給量対象日数",
            "作業:実効年月", "作業:並び順", "作業:入所時刻", "作業:退所時刻",
            "作業:入所日数値", "作業:退所日数値"]
-widths  = [10, 16, 8, 10, 12, 8, 12, 10, 8, 12, 10, 9, 8, 11, 9, 16, 20, 16, 30, 12, 12, 17, 15, 13, 12, 12, 10, 10, 12, 12]
+widths  = [10, 16, 8, 10, 12, 8, 12, 8, 8, 12, 8, 7, 7, 7,
+           9, 8, 11, 9, 16, 20, 16, 30, 12, 12, 17, 15, 13, 12, 12, 10, 10, 12, 12]
 head_row(ws, 4, headers, widths)
 ws.row_dimensions[4].height = 40
 ws.freeze_panes = "B5"
-ws.auto_filter.ref = f"A4:X{BK_LAST}"
-AUTO_COLS = {"A", "G", "J", "L", "M", "V", "W", "X", "Y", "Z", "AA", "AB", "AC", "AD"}
-WORK_COLS = {"Y", "Z", "AA", "AB", "AC", "AD"}
+ws.auto_filter.ref = f"A4:AA{BK_LAST}"
+AUTO_COLS = {"A", "G", "J", "O", "P", "Y", "Z", "AA",
+             "AB", "AC", "AD", "AE", "AF", "AG"}
+WORK_COLS = {"AB", "AC", "AD", "AE", "AF", "AG"}
+MEAL_COLS = {"L", "M", "N"}
 
 for d in range(5, BK_LAST + 1):
     prev = d - 1
     ws[f"A{d}"] = f'=IF($G{d}="","","SS-"&TEXT(ROW()-4,"0000"))'
-    # 実効年月: この行に年月が入っていればそれ、無ければ上の行から引き継ぐ
-    ws[f"Y{d}"] = (f'=IF($E{d}<>"",$E{d},"")' if d == 5
-                   else f'=IF($E{d}<>"",$E{d},$Y{prev})')
-    # 入所日: 1〜31なら「実効年月＋その日」、32以上なら日付そのものとして扱う
+    ws[f"AB{d}"] = (f'=IF($E{d}<>"",$E{d},"")' if d == 5
+                    else f'=IF($E{d}<>"",$E{d},$AB{prev})')
     ws[f"G{d}"] = (f'=IF($F{d}="","",IF($F{d}>31,$F{d},'
-                   f'IF($Y{d}="","",DATE(YEAR($Y{d}),MONTH($Y{d}),$F{d}))))')
-    # 退所日: 入所日と同月のその日。入所日より前になるなら翌月とみなす（月またぎ対応）
+                   f'IF($AB{d}="","",DATE(YEAR($AB{d}),MONTH($AB{d}),$F{d}))))')
     ws[f"J{d}"] = (f'=IF($I{d}="","",IF($I{d}>31,$I{d},IF($G{d}="","",'
                    f'IF(DATE(YEAR($G{d}),MONTH($G{d}),$I{d})>=$G{d},'
                    f'DATE(YEAR($G{d}),MONTH($G{d}),$I{d}),'
                    f'DATE(YEAR($G{d}),MONTH($G{d})+1,$I{d})))))')
-    ws[f"L{d}"] = f'=IF(OR($G{d}="",$J{d}=""),"",$J{d}-$G{d}+1)'
-    ws[f"M{d}"] = f'=IF(OR($G{d}="",$J{d}=""),"",$J{d}-$G{d})'
-    # 時刻の表示用文字列（時刻値で入れても文字で入れても "16:00" に揃える）
+    ws[f"O{d}"] = f'=IF(OR($G{d}="",$J{d}=""),"",$J{d}-$G{d}+1)'
+    ws[f"P{d}"] = f'=IF(OR($G{d}="",$J{d}=""),"",$J{d}-$G{d})'
     # 時刻の表示用文字列。0〜24 の整数は「時」とみなして 16 → "16:00" に直す。
     # 16:30 のように入れた場合は時刻値（1未満）になるのでそのまま分まで出す。
-    for src, dst in (("H", "AA"), ("K", "AB")):
+    for src, dst in (("H", "AD"), ("K", "AE")):
         ws[f"{dst}{d}"] = (f'=IF(${src}{d}="","",IF(ISNUMBER(${src}{d}),'
                            f'IF(AND(${src}{d}=INT(${src}{d}),${src}{d}>=0,${src}{d}<=24),'
                            f'TEXT(INT(${src}{d}),"00")&":00",'
                            f'TEXT(${src}{d},"hh:mm")),${src}{d}))')
-    # 空欄を "" ではなく 0 にした日付。SUMPRODUCT の中で引き算に使う。
-    ws[f"AC{d}"] = f'=IF($G{d}="",0,$G{d})'
-    ws[f"AD{d}"] = f'=IF($J{d}="",0,$J{d})'
-    # 当月の並び順キー（03_帯表 の予約明細で使う）
-    ws[f"Z{d}"] = (f'=IF(OR($G{d}="",$J{d}=""),"",'
-                   f'IF(AND($G{d}<=EOMONTH({M1},0),$J{d}>={M1}),$G{d}*10000+ROW(),""))')
-    ws[f"V{d}"] = (
+    ws[f"AF{d}"] = f'=IF($G{d}="",0,$G{d})'
+    ws[f"AG{d}"] = f'=IF($J{d}="",0,$J{d})'
+    ws[f"AC{d}"] = (f'=IF(OR($G{d}="",$J{d}=""),"",'
+                    f'IF(AND($G{d}<=EOMONTH({M1},0),$J{d}>={M1}),$G{d}*10000+ROW(),""))')
+    ws[f"Y{d}"] = (
         f'=IF($G{d}="","",'
         f'IF($D{d}="","⚠部屋が未選択",'
         f'IF(COUNTIF({RROW},$D{d})=0,"⚠部屋が未登録",'
-        f'IF(OR($J{d}="",$N{d}="キャンセル"),"",'
+        f'IF(OR($J{d}="",$Q{d}="キャンセル"),"",'
         f'IF(SUMPRODUCT(($D$5:$D${BK_LAST}=$D{d})*($G$5:$G${BK_LAST}<>"")*($J$5:$J${BK_LAST}<>"")'
-        f'*($N$5:$N${BK_LAST}<>"キャンセル")*($G$5:$G${BK_LAST}<$J{d})*($J$5:$J${BK_LAST}>$G{d}))>1,'
+        f'*($Q$5:$Q${BK_LAST}<>"キャンセル")*($G$5:$G${BK_LAST}<$J{d})*($J$5:$J${BK_LAST}>$G{d}))>1,'
         f'"⚠重複","")))))')
-    ws[f"X{d}"] = (
-        f'=IF(OR($G{d}="",$J{d}="",$N{d}="キャンセル"),0,'
+    ws[f"AA{d}"] = (
+        f'=IF(OR($G{d}="",$J{d}="",$Q{d}="キャンセル"),0,'
         f'IF(IFERROR(INDEX({CCNT},MATCH($C{d},{CROW},0)),"○")="○",$J{d}-$G{d}+1,0))')
-    ws[f"W{d}"] = (
+    ws[f"Z{d}"] = (
         f'=IF(OR($B{d}="",$G{d}=""),"",'
         f'IF(SUMPRODUCT(({UROW}=$B{d})*({UALW}<>""))=0,"",'
-        f'IF(SUMIFS($X$5:$X${BK_LAST},$B$5:$B${BK_LAST},$B{d},'
+        f'IF(SUMIFS($AA$5:$AA${BK_LAST},$B$5:$B${BK_LAST},$B{d},'
         f'$G$5:$G${BK_LAST},">="&DATE(YEAR($G{d}),MONTH($G{d}),1),'
         f'$G$5:$G${BK_LAST},"<="&EOMONTH($G{d},0))'
         f'>SUMIFS({UALW},{UROW},$B{d}),"⚠支給量超過","")))')
-    for col in range(1, 31):
+    for col in range(1, 34):
         L = get_column_letter(col); c = ws[f"{L}{d}"]
         c.border = BORDER
         c.font, c.fill = (C_AUTO, F_AUTO) if L in AUTO_COLS else (C_BODY, F_INPUT)
-        if L in ("G", "J", "T"): c.number_format = "yyyy/mm/dd"
+        if L in MEAL_COLS:
+            c.fill = PatternFill("solid", fgColor="FBF3E4", bgColor="FBF3E4")
+            c.alignment = Alignment(horizontal="center", vertical="center")
+            c.font = Font(name=FONT, size=11, bold=True, color="8A6D3B")
+        if L in ("G", "J", "W"): c.number_format = "yyyy/mm/dd"
         if L == "E": c.number_format = "yyyy/mm"
         if L in ("F", "I"): c.number_format = "0"
         if L in ("H", "K"): c.number_format = "General"
-        c.alignment = Alignment(vertical="center")
+        if L not in MEAL_COLS: c.alignment = Alignment(vertical="center")
 
 samples = [
-    # (氏名, 区分, 部屋, 年月, 入所日, 入所時刻, 退所日, 退所時刻, 状態, 送迎, 送迎方法, 場所, 外部, 備考)
-    ("利用者A", "SS",  "部屋1", datetime.date(2026, 4, 1), 6,  16, 8,  9, "確定",
+    # (氏名, 区分, 部屋, 年月, 入所日, 入所時, 退所日, 退所時, 朝, 昼, 夕, 状態, 送迎, 送迎方法, 場所, 外部, 備考)
+    ("利用者A", "SS",  "部屋1", datetime.date(2026, 4, 1), 6, 16, 8, 9, "", "", "", "確定",
      "あり", "施設車", "自宅前 16:00", "", "サンプル行です。削除してお使いください"),
-    ("利用者B", "契約", "部屋2", None, 6, "16:30", 7, 9, "確定", "なし", "", "", "",
-     "分まで入れたいときは 16:30 のように入力します"),
-    ("利用者C", "無料", "部屋1", None, 11, 10, 11, 16, "確定", "あり", "家族送迎", "", "",
-     "日帰り（体験利用）の例：入所と退所が同じ日"),
-    ("利用者A", "SS",  "部屋1", None, 20, 16, 24, 9, "仮予約", "調整中", "", "", "",
-     "仮予約の例。年月は空欄でも上の行から引き継がれます"),
+    ("利用者B", "契約", "部屋2", None, 6, "16:30", 7, 9, "", "○", "", "確定", "なし", "", "", "",
+     "昼食を全日つける例（既定では中日だけ）"),
+    ("利用者C", "無料", "部屋1", None, 11, 10, 11, 16, "", "", "○", "確定", "あり", "家族送迎", "", "",
+     "日帰りだが夕食もつける例"),
+    ("利用者A", "SS",  "部屋1", None, 20, 16, 24, 9, "×", "", "", "仮予約", "調整中", "", "", "",
+     "朝食を出さない例。仮予約の例でもあります"),
 ]
 for i, s in enumerate(samples):
     d = 5 + i
-    for col, val in zip(["B","C","D","E","F","H","I","K","N","O","P","Q","R","S"], s):
+    for col, val in zip(["B","C","D","E","F","H","I","K","L","M","N","Q","R","S","T","U","V"], s):
         if val not in (None, ""):
             ws[f"{col}{d}"] = val
 
@@ -470,7 +483,7 @@ ws["E4"].comment = Comment("その月の日付（例: 2026/8）を最初の行�
                            "設計メモ", height=130, width=350)
 ws["F4"].comment = Comment("日にちの数字だけ入れてください（1〜31）。\n"
                            "年月と組み合わせて G列に日付が自動で入ります。\n"
-                           "別の月を直接入れたいときは、日付そのもの（2026/9/3 など）を入れても構いません。",
+                           "別の月を直接入れたいときは、日付そのもの（2026/9/3 など）でも構いません。",
                            "設計メモ", height=110, width=350)
 ws["H4"].comment = Comment("時の数字だけ入れてください（例: 16 → 16:00）。\n"
                            "9時なら 9 だけでかまいません（09:00 と表示されます）。\n"
@@ -485,32 +498,50 @@ ws["I4"].comment = Comment("日にちの数字だけ入れてください（1〜
                            "（例: 入所31 → 退所1 なら翌月1日）\n"
                            "1か月を超える滞在のときは、日付そのものを入れてください。",
                            "設計メモ", height=120, width=350)
-ws["V4"].comment = Comment("部屋が空欄だと「⚠部屋が未選択」。この予約はカレンダーに表示されません。\n"
+MEAL_HELP = ("空欄 … 標準どおり\n"
+             "　 日帰り=昼のみ ／ 初日=夕 ／ 中日=朝昼夕 ／ 最終日=朝\n"
+             "○ … この滞在の全ての利用日（入所日〜退所日）で出す\n"
+             "× … この滞在では出さない\n\n"
+             "ここで決めた内容は 02_カレンダー の食事行と 06_食数表 に反映されます。\n"
+             "特定の1日だけ変えたいときは 02_カレンダー 下部の「食事の個別調整」を使ってください"
+             "（そちらが優先されます）。")
+for cc in ("L4", "M4", "N4"):
+    ws[cc].comment = Comment(MEAL_HELP, "設計メモ", height=170, width=380)
+ws["Y4"].comment = Comment("部屋が空欄だと「⚠部屋が未選択」。この予約はカレンダーに表示されません。\n"
                            "M_部屋 に無い部屋名なら「⚠部屋が未登録」。\n"
                            "同じ部屋・同じ夜に2件以上あれば「⚠重複」。\n"
                            "退所日の夜は空き扱いなので、前の方の退所日＝次の方の入所日は重複になりません。",
                            "設計メモ", height=140, width=350)
-ws["W4"].comment = Comment("利用者マスタ に支給量が入っている方だけ判定します。\n"
+ws["Z4"].comment = Comment("利用者マスタ に支給量が入っている方だけ判定します。\n"
                            "入所日の属する月で合計し、M_区分 で「○」の区分だけを数えます。",
                            "設計メモ", height=100, width=350)
 
 for rng, name in [(f"B5:B{BK_LAST}", "氏名一覧"), (f"C5:C{BK_LAST}", "区分一覧"),
-                  (f"D5:D{BK_LAST}", "部屋一覧"), (f"N5:N{BK_LAST}", "状態一覧"),
-                  (f"O5:O{BK_LAST}", "送迎一覧")]:
+                  (f"D5:D{BK_LAST}", "部屋一覧"), (f"Q5:Q{BK_LAST}", "状態一覧"),
+                  (f"R5:R{BK_LAST}", "送迎一覧")]:
     dv = DataValidation(type="list", formula1=f"={name}", allow_blank=True, showDropDown=False)
     dv.error = "一覧にない値です。マスタに登録してから選んでください。"
     dv.errorTitle = "入力できません"
     ws.add_data_validation(dv); dv.add(rng)
+dvm = DataValidation(type="list", formula1='"○,×"', allow_blank=True, showDropDown=False)
+dvm.error = "○（全日出す）か ×（出さない）を選んでください。標準どおりでよければ空欄のままにします。"
+dvm.errorTitle = "入力できません"
+dvm.promptTitle = "食事"
+dvm.prompt = "空欄=標準 ／ ○=全ての利用日で出す ／ ×=出さない"
+dvm.showInputMessage = True
+ws.add_data_validation(dvm)
+dvm.add(f"L5:N{BK_LAST}")
 
-rng_all = f"A5:X{BK_LAST}"
-ws.conditional_formatting.add(rng_all, FormulaRule(formula=['$N5="キャンセル"'],
+rng_all = f"A5:AA{BK_LAST}"
+ws.conditional_formatting.add(rng_all, FormulaRule(formula=['$Q5="キャンセル"'],
     font=Font(name=FONT, size=10, color="999999", strike=True),
     fill=PatternFill("solid", fgColor="EFEFEF", bgColor="EFEFEF"), stopIfTrue=True))
-ws.conditional_formatting.add(rng_all, FormulaRule(formula=['$V5<>""'], fill=F_WARN, stopIfTrue=True))
-ws.conditional_formatting.add(rng_all, FormulaRule(formula=['$W5<>""'], fill=F_WARN2, stopIfTrue=True))
-ws.conditional_formatting.add(rng_all, FormulaRule(formula=['OR($N5="仮予約",$N5="調整中")'], fill=F_TENT))
+ws.conditional_formatting.add(rng_all, FormulaRule(formula=['$Y5<>""'], fill=F_WARN, stopIfTrue=True))
+ws.conditional_formatting.add(rng_all, FormulaRule(formula=['$Z5<>""'], fill=F_WARN2, stopIfTrue=True))
+ws.conditional_formatting.add(rng_all, FormulaRule(formula=['OR($Q5="仮予約",$Q5="調整中")'], fill=F_TENT))
 for L in WORK_COLS:
     ws.column_dimensions[L].hidden = True
+
 
 
 
@@ -609,10 +640,15 @@ for i in range(31):
     ws[f"{DAY_C}{d}"] = f'=IF($A{d}="","",SUMPRODUCT({VALID}*({IN_}=$A{d})*({OUT_}=$A{d})))'
     # ── 食事 ──────────────────────────────────────────────
     # 既定: 日帰り=昼のみ／初日=夕／中日=朝昼夕／最終日=朝
-    ws[f"{MB_A}{d}"] = f'=IF($A{d}="",0,SUMPRODUCT({VALID}*({IN_}<$A{d})*({OUT_}>=$A{d})))'
-    ws[f"{MB_L}{d}"] = (f'=IF($A{d}="",0,SUMPRODUCT({VALID}*((({IN_}<$A{d})*({OUT_}>$A{d}))'
-                        f'+(({IN_}=$A{d})*({OUT_}=$A{d})))))')
-    ws[f"{MB_D}{d}"] = f'=IF($A{d}="",0,SUMPRODUCT({VALID}*({IN_}<=$A{d})*({OUT_}>$A{d})))'
+    # 予約ごとの指定: ○=利用日すべて / ×=出さない / 空欄=標準
+    USE = f'({IN_}<=$A{d})*({OUT_}>=$A{d})'
+    ws[f"{MB_A}{d}"] = (f'=IF($A{d}="",0,SUMPRODUCT({VALID}*(({BF_}="○")*{USE}'
+                        f'+({BF_}="")*({IN_}<$A{d})*({OUT_}>=$A{d}))))')
+    ws[f"{MB_L}{d}"] = (f'=IF($A{d}="",0,SUMPRODUCT({VALID}*(({LF_}="○")*{USE}'
+                        f'+({LF_}="")*((({IN_}<$A{d})*({OUT_}>$A{d}))'
+                        f'+(({IN_}=$A{d})*({OUT_}=$A{d}))))))')
+    ws[f"{MB_D}{d}"] = (f'=IF($A{d}="",0,SUMPRODUCT({VALID}*(({DF_}="○")*{USE}'
+                        f'+({DF_}="")*({IN_}<=$A{d})*({OUT_}>$A{d}))))')
     # 調整表（02_カレンダー の下部）を日付で引く。無ければ既定のまま。
     ws[f"{MB_X}{d}"] = f'=IF($A{d}="",0,IFERROR(MATCH($A{d},{ADJ_D},0),0))'
     for k, (auto, conf) in enumerate([(MB_A, MC_A), (MB_L, MC_L), (MB_D, MC_D)]):
@@ -918,8 +954,9 @@ for k in (2, 3, 4):
 # 帯の列幅は3.1しかないので、セルを結合して読める幅にする。
 DET_H = BAND_LAST + 6          # 見出し行
 DET_ROWS = 40
-DET = [("氏名", 1, 1), ("部屋", 2, 5), ("区分", 6, 8), ("入所", 9, 15),
-       ("退所", 16, 22), ("泊数", 23, 25), ("状態", 26, 28), ("備考", 29, 32)]
+DET = [("氏名", 1, 1), ("部屋", 2, 5), ("区分", 6, 8), ("入所", 9, 14),
+       ("退所", 15, 20), ("泊数", 21, 23), ("食事", 24, 27), ("状態", 28, 30),
+       ("備考", 31, 33)]
 ws[f"A{DET_H-1}"] = "■ 当月の予約明細（入所日順・01_予約入力 から自動）"
 ws[f"A{DET_H-1}"].font = C_SUB
 for lbl, c0, c1 in DET:
@@ -937,28 +974,31 @@ for i in range(DET_ROWS):
     ws[f"AP{r_}"] = f'=IFERROR(SMALL({SORTK_},{i+1}),"")'
     ws[f"AQ{r_}"] = f'=IF({K}="",0,IFERROR(MATCH({K},{SORTK_},0),0))'
     din = f'INDEX({IN_},{X})'; dout = f'INDEX({OUT_},{X})'
+    bf, lf, df = f'INDEX({BF_},{X})', f'INDEX({LF_},{X})', f'INDEX({DF_},{X})'
     vals = {
         1:  f'=IF({X}=0,"",INDEX({NAME_},{X}))',
         2:  f'=IF({X}=0,"",IF(INDEX({ROOM_},{X})="","⚠未選択",INDEX({ROOM_},{X})))',
         6:  f'=IF({X}=0,"",INDEX({CAT_},{X}))',
         9:  (f'=IF({X}=0,"",{MD(din)}&" "&INDEX({TIN_},{X}))'),
-        16: (f'=IF({X}=0,"",{MD(dout)}&" "&INDEX({TOUT_},{X}))'),
-        23: f'=IF({X}=0,"",IF({dout}={din},"日帰り",{dout}-{din}&"泊"))',
-        26: f'=IF({X}=0,"",IF(INDEX({ST_},{X})="","確定",INDEX({ST_},{X})))',
-        29: f'=IF({X}=0,"",INDEX({NOTE_},{X}))',
+        15: (f'=IF({X}=0,"",{MD(dout)}&" "&INDEX({TOUT_},{X}))'),
+        21: f'=IF({X}=0,"",IF({dout}={din},"日帰り",{dout}-{din}&"泊"))',
+        24: (f'=IF({X}=0,"",IF(AND({bf}="",{lf}="",{df}=""),"標準",'
+             f'"朝"&IF({bf}="","−",{bf})&" 昼"&IF({lf}="","−",{lf})&" 夕"&IF({df}="","−",{df})))'),
+        28: f'=IF({X}=0,"",IF(INDEX({ST_},{X})="","確定",INDEX({ST_},{X})))',
+        31: f'=IF({X}=0,"",INDEX({NOTE_},{X}))',
     }
     for lbl, c0, c1 in DET:
         if c1 > c0: ws.merge_cells(start_row=r_, start_column=c0, end_row=r_, end_column=c1)
         cell = ws.cell(row=r_, column=c0, value=vals[c0])
         cell.font = C_AUTO; cell.fill = F_AUTO
-        cell.alignment = Alignment(horizontal="center" if c0 in (2, 6, 23, 26) else "left",
+        cell.alignment = Alignment(horizontal="center" if c0 in (2, 6, 21, 24, 28) else "left",
                                    vertical="center", shrink_to_fit=True)
         for cc in range(c0, c1 + 1): ws.cell(row=r_, column=cc).border = BORDER
 DET_LAST = DET_H + DET_ROWS
 ws.conditional_formatting.add(f"A{DET_H+1}:AF{DET_LAST}", FormulaRule(
     formula=[f'$B{DET_H+1}="⚠未選択"'], fill=F_WARN))
 ws.conditional_formatting.add(f"A{DET_H+1}:AF{DET_LAST}", FormulaRule(
-    formula=[f'OR($Z{DET_H+1}="仮予約",$Z{DET_H+1}="調整中")'], fill=F_TENT))
+    formula=[f'OR($AB{DET_H+1}="仮予約",$AB{DET_H+1}="調整中")'], fill=F_TENT))
 ws[f"A{DET_LAST+2}"] = ("※ この一覧は 01_予約入力 をそのまま入所日順に並べたものです。"
                         "対象月にかかる予約だけが出ます（月をまたぐ滞在も含みます）。")
 ws[f"A{DET_LAST+3}"] = "※ 部屋が「⚠未選択」の行は、カレンダーの部屋の行に表示されません。01_予約入力 で部屋を選んでください。"
