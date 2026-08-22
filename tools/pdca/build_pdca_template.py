@@ -260,19 +260,29 @@ def sheet_settings(wb: Workbook, fac_last: int) -> None:
         c.border = BOX
         r += 1
 
-    title_cell(ws, "B15", "週の基準日（自動計算）", 12)
-    header_row(ws, 16, ["週", "基準日", "入力締切（翌営業日想定）"], start_col=2)
+    title_cell(ws, "B15", "週の定義（自動計算）", 12)
+    ws["B16"] = "※ 集計期間は旧シートの『7日／14日／21日／28日時点』と同じ、月内日付での区切りです。"
+    ws["B16"].font = Font(size=9, color="808080")
+    header_row(ws, 17, ["週", "集計開始日", "集計終了日", "PDCA会議日", "入力締切"], start_col=2)
     for i, w in enumerate(WEEKS):
-        row = 17 + i
+        row = 18 + i
         ws.cell(row=row, column=2, value=w)
+        ws.cell(
+            row=row, column=3,
+            value=f'=IF(DAY(EOMONTH(DATE($B$7,$B$9,1),0))<{i * 7 + 1},"",DATE($B$7,$B$9,{i * 7 + 1}))',
+        )
+        ws.cell(
+            row=row, column=4,
+            value=f'=IF($C{row}="","",MIN(EOMONTH(DATE($B$7,$B$9,1),0),DATE($B$7,$B$9,{(i + 1) * 7})))',
+        )
         if i == 0:
-            ws.cell(row=row, column=3, value="=IF($B$11=\"\",\"\",$B$11)")
+            ws.cell(row=row, column=5, value='=IF($B$11="","",$B$11)')
         else:
-            ws.cell(row=row, column=3, value=f'=IF($C{row - 1}="","",$C{row - 1}+7)')
-        ws.cell(row=row, column=4, value=f'=IF($C{row}="","",$C{row}+1)')
-        ws.cell(row=row, column=3).number_format = "yyyy/mm/dd"
-        ws.cell(row=row, column=4).number_format = "yyyy/mm/dd"
-    box_range(ws, 16, 21, 2, 4)
+            ws.cell(row=row, column=5, value=f'=IF($E{row - 1}="","",$E{row - 1}+7)')
+        ws.cell(row=row, column=6, value=f'=IF($E{row}="","",$E{row}-1)')
+        for col in (3, 4, 5, 6):
+            ws.cell(row=row, column=col).number_format = "yyyy/mm/dd"
+    box_range(ws, 17, 22, 2, 6)
 
 
 def sheet_issues(wb: Workbook, fac_last: int) -> int:
@@ -360,11 +370,58 @@ def sheet_issues(wb: Workbook, fac_last: int) -> int:
     return last
 
 
+
+# 週次KPIログの「実績」を、月次入力シート（10〜14）から自動集計するための対応表
+PIPE_LAST = 61  # 14_案件管理台帳のデータ最終行
+
+
+def _week_start(row: int) -> str:
+    return f"INDEX('03_設定'!$C$18:$C$22,MATCH($E{row},'03_設定'!$B$18:$B$22,0))"
+
+
+def _week_end(row: int) -> str:
+    return f"INDEX('03_設定'!$D$18:$D$22,MATCH($E{row},'03_設定'!$B$18:$B$22,0))"
+
+
+def _pipeline_count(col: str, row: int, extra: str = "") -> str:
+    """14_案件管理台帳の日付列が、その週の期間に入る件数を数える。"""
+    rng = f"'14_案件管理台帳'!${col}$2:${col}${PIPE_LAST}"
+    return (
+        f'COUNTIFS({rng},">="&{_week_start(row)},{rng},"<="&{_week_end(row)}{extra})'
+    )
+
+
+def _lookup_week(sheet: str, value_range: str, label_range: str, row: int) -> str:
+    return (
+        f"IFERROR(INDEX('{sheet}'!{value_range},"
+        f"MATCH($E{row},'{sheet}'!{label_range},0)),\"\")"
+    )
+
+
+def _auto_source(kpi: str, row: int) -> str:
+    if kpi == "GH稼働率":
+        return _lookup_week("10_月次_GH稼働", "$AQ$4:$AQ$8", "$AN$4:$AN$8", row)
+    if kpi == "SS稼働率":
+        return _lookup_week("11_月次_SS稼働", "$AQ$4:$AQ$8", "$AN$4:$AN$8", row)
+    if kpi == "営業接点件数":
+        return _lookup_week("12_月次_営業行動", "$AO$4:$AO$8", "$AN$4:$AN$8", row)
+    if kpi == "夜勤加配 取得率":
+        return _lookup_week("13_月次_加算要件", "$AQ$5:$AQ$9", "$AN$5:$AN$9", row)
+    if kpi == "見学・体験件数":
+        return f"{_pipeline_count('H', row)}+{_pipeline_count('I', row)}"
+    if kpi == "入居契約件数":
+        return _pipeline_count("L", row)
+    if kpi == "SS案件発掘件数":
+        return _pipeline_count("G", row, ",'14_案件管理台帳'!$D$2:$D$%d,\"SS\"" % PIPE_LAST)
+    return ""
+
+
 def sheet_kpi_log(wb: Workbook) -> int:
     ws = wb.create_sheet("05_週次KPIログ")
     headers = [
         "記録日", "対象施設", "年", "月", "週", "カテゴリ", "指標名", "単位",
         "週次目標", "実績", "達成率", "差異", "担当者", "未達要因（Check）", "次週アクション（Act）",
+        "実績（手入力上書き）",
     ]
     header_row(ws, 1, headers)
     ws.row_dimensions[1].height = 32
@@ -379,6 +436,11 @@ def sheet_kpi_log(wb: Workbook) -> int:
             ws.cell(row=row, column=6, value=cat)
             ws.cell(row=row, column=7, value=kpi)
             ws.cell(row=row, column=8, value=unit)
+            auto = _auto_source(kpi, row)
+            if auto:
+                ws.cell(row=row, column=10, value=f'=IF($P{row}<>"",$P{row},{auto})')
+            else:
+                ws.cell(row=row, column=10, value=f'=IF($P{row}<>"",$P{row},"")')
             ws.cell(row=row, column=11, value=f'=IFERROR(IF($I{row}=0,"",$J{row}/$I{row}),"")')
             ws.cell(row=row, column=11).number_format = "0.0%"
             ws.cell(row=row, column=12, value=f'=IF(OR($I{row}="",$J{row}=""),"",$J{row}-$I{row})')
@@ -391,14 +453,19 @@ def sheet_kpi_log(wb: Workbook) -> int:
     set_widths(
         ws,
         {"A": 12, "B": 26, "C": 7, "D": 7, "E": 9, "F": 14, "G": 20, "H": 7,
-         "I": 11, "J": 11, "K": 10, "L": 9, "M": 16, "N": 34, "O": 34},
+         "I": 11, "J": 11, "K": 10, "L": 9, "M": 16, "N": 34, "O": 34, "P": 14},
     )
-    box_range(ws, 2, last, 1, 15)
+    box_range(ws, 2, last, 1, 16)
     ws.freeze_panes = "C2"
-    ws.auto_filter.ref = f"A1:O{last}"
-    for col in ["A", "I", "J", "M", "N", "O"]:
+    ws.auto_filter.ref = f"A1:P{last}"
+    for col in ["A", "I", "M", "N", "O", "P"]:
         for r in range(2, last + 1):
             ws[f"{col}{r}"].fill = PatternFill("solid", fgColor=YELLOW)
+    ws.cell(row=1, column=16).comment = None
+    ws.cell(row=last + 2, column=1, value=(
+        "※ J列『実績』は 10〜14 の入力シートから自動集計されます。"
+        "自動値を使わない場合のみ P列に数値を入れると、そちらが優先されます。"
+    )).font = Font(size=9, color="808080")
     dv_own = DataValidation(type="list", formula1="担当者リスト", allow_blank=True)
     ws.add_data_validation(dv_own)
     dv_own.add(f"M2:M{last}")
@@ -569,6 +636,18 @@ def sheet_proposals(wb: Workbook) -> None:
          "施設名がキーなのに正式名称と社内呼称が混在すると、集計時に名寄せできない。",
          "施設IDを主キーにし、名称は表示用の属性として持つ。",
          "01_施設マスタに施設ID（F001〜F040）を付与。名称変更はマスタ1か所で吸収。", "中"),
+        ("構造", "月シート（4月〜26年9月の22枚）が、利用者ごとの日別稼働カレンダー・SS予約・営業行動・案件管理・加算要件の入力面を兼ねている。週間PDCAの文章は BF16 等の長大な文字列連結式で自動生成されている。",
+         "入力面（原簿）と管理面（PDCA）が同じシートに同居し、月が変わるたびシートを増やす必要がある。連結式で作った文章は、あとから数値として再利用できない。",
+         "原簿は月次入力シートとして分離し、集計値だけをPDCA側へ渡す。",
+         "10〜13の月次入力シートに分離。週別集計値は05_週次KPIログが自動で参照する。", "高"),
+        ("構造", "案件管理が『kintone名×日別セルに進捗記号』のマトリクス（55〜78行）。相談元・区分・希望種別が別セルに散る。",
+         "同じ案件の履歴が月シートをまたいで分断され、発掘→見学→体験→契約のリードタイムが測れない。",
+         "案件は1件1行の台帳にし、各フェーズの日付を列で持つ。",
+         "14_案件管理台帳。日付列から見学・体験・入居件数を週次で自動集計し、停滞14日超は赤表示。", "高"),
+        ("運用", "重度障害者支援体制・福祉専門職員配置等加算の要件確認が、月シートの隅にチェック欄として置かれている（BR88 常勤比率0.368→✕ 等）。",
+         "算定可否の根拠が月シートを開かないと見えず、要件を割った時に誰がいつ気づくかが運用任せ。",
+         "要件判定を独立させ、割り込み時に『要対応』として表示する。",
+         "13_月次_加算要件に集約。夜勤加配は日別実績から取得率を自動計算、体制加算は✕が1つでもあれば『要対応』。", "中"),
         ("拡張", "40施設分のファイルが個別に存在し、AMは自分の担当分だけを見る運用。",
          "エリア長・本部が全体傾向（未達KPI・遅延課題の偏り）を把握するのに手作業の集約が必要。",
          "縦持ちログを束ねてピボット集計できる形にする。",
@@ -638,6 +717,354 @@ def sheet_lists(wb: Workbook) -> None:
     ws.sheet_state = "hidden"
 
 
+# ------------------------------------------------------------ 月次入力（原簿）
+
+DAY_COL0 = 5  # E列から日付が始まる
+DAYS = 31
+MARKS_GH = '"●,入,外"'  # ●=在籍稼働 / 入=入院 / 外=外泊
+
+
+def _day_header(ws, row: int, first_col: int = DAY_COL0) -> None:
+    """1〜31日の日付ヘッダと、その下に週区分行を敷く。"""
+    for d in range(1, DAYS + 1):
+        col = first_col + d - 1
+        c = ws.cell(
+            row=row,
+            column=col,
+            value=f'=IF(DAY(EOMONTH(DATE(設定対象年,設定対象月,1),0))<{d},"",DATE(設定対象年,設定対象月,{d}))',
+        )
+        c.number_format = "d"
+        c.font = Font(bold=True, size=9)
+        c.alignment = Alignment(horizontal="center")
+        c.fill = PatternFill("solid", fgColor=LIGHT)
+        c.border = BOX
+        w = ws.cell(row=row + 1, column=col, value=f'=IF({get_column_letter(col)}{row}="","","第"&ROUNDUP({d}/7,0)&"週")')
+        w.font = Font(size=8, color="808080")
+        w.alignment = Alignment(horizontal="center")
+        w.border = BOX
+        ws.column_dimensions[get_column_letter(col)].width = 4.2
+    ws.cell(row=row, column=first_col - 1, value="日").font = Font(bold=True, size=9)
+    ws.cell(row=row + 1, column=first_col - 1, value="週").font = Font(size=8, color="808080")
+
+
+def _week_block(ws, top: int, headers: list[str], col: int = 40) -> int:
+    """右側に第1〜第5週の集計ブロックを置き、先頭行番号を返す。"""
+    header_row(ws, top, ["週"] + headers, start_col=col)
+    for i, w in enumerate(WEEKS):
+        ws.cell(row=top + 1 + i, column=col, value=w)
+    box_range(ws, top, top + len(WEEKS), col, col + len(headers))
+    for i in range(len(headers) + 1):
+        ws.column_dimensions[get_column_letter(col + i)].width = 13
+    return top + 1
+
+
+def sheet_gh_occupancy(wb: Workbook) -> None:
+    ws = wb.create_sheet("10_月次_GH稼働")
+    title_cell(ws, "A1", "共同生活援助 稼働実績（●=稼働 / 入=入院 / 外=外泊。入院・外泊は未算定日）", 12)
+    header_row(ws, 3, ["No.", "利用者ID", "利用者名（任意）", "区分"])
+    _day_header(ws, 3)
+    last_day_col = DAY_COL0 + DAYS - 1
+    dl = get_column_letter(last_day_col)
+    first = 5
+    rows = 30
+    for i in range(rows):
+        r = first + i
+        ws.cell(row=r, column=1, value=i + 1)
+        ws.cell(row=r, column=DAY_COL0 + DAYS + 1, value=f'=COUNTIF($E{r}:${dl}{r},"●")')
+        ws.cell(row=r, column=DAY_COL0 + DAYS + 2, value=f'=COUNTIF($E{r}:${dl}{r},"入")')
+        ws.cell(row=r, column=DAY_COL0 + DAYS + 3, value=f'=COUNTIF($E{r}:${dl}{r},"外")')
+    last = first + rows - 1
+    header_row(ws, 4, ["稼働日数", "入院", "外泊"], start_col=DAY_COL0 + DAYS + 1)
+    for c in range(DAY_COL0 + DAYS + 1, DAY_COL0 + DAYS + 4):
+        ws.column_dimensions[get_column_letter(c)].width = 9
+    set_widths(ws, {"A": 5, "B": 11, "C": 20, "D": 6})
+    box_range(ws, 3, last, 1, DAY_COL0 + DAYS + 3)
+    ws.freeze_panes = "E5"
+    dv = DataValidation(type="list", formula1=MARKS_GH, allow_blank=True)
+    ws.add_data_validation(dv)
+    dv.add(f"E{first}:{dl}{last}")
+    for r in range(first, last + 1):
+        for c in range(2, DAY_COL0 + DAYS):
+            ws.cell(row=r, column=c).fill = PatternFill("solid", fgColor=YELLOW)
+
+    # 日別合計行（週別集計はこの行を参照する：配列の形を1行に揃えるため）
+    tot = {}
+    for k, (label, mark) in enumerate({"稼働": "●", "入院": "入", "外泊": "外"}.items()):
+        rr = last + 1 + k
+        tot[label] = rr
+        ws.cell(row=rr, column=2, value=f"日別{label}数").font = Font(bold=True, size=9)
+        for d in range(DAYS):
+            cl = get_column_letter(DAY_COL0 + d)
+            ws.cell(row=rr, column=DAY_COL0 + d, value=f'=COUNTIF({cl}${first}:{cl}${last},"{mark}")')
+        box_range(ws, rr, rr, 2, DAY_COL0 + DAYS - 1)
+
+    cap_row = last + 5
+    ws.cell(row=cap_row, column=1, value="定員").font = Font(bold=True)
+    cap = ws.cell(row=cap_row, column=4, value=20)
+    cap.fill = PatternFill("solid", fgColor=YELLOW)
+    cap.border = BOX
+    ws.cell(row=cap_row + 1, column=1, value="※ 定員を入力すると週別稼働率が自動計算されます").font = Font(size=9, color="808080")
+
+    top = _week_block(ws, 3, ["日数", "稼働回数", "稼働率", "入院", "外泊"])
+    for i, w in enumerate(WEEKS):
+        r = top + i
+        ws.cell(row=r, column=41, value=f'=COUNTIF($E$4:${dl}$4,$AN{r})')
+        ws.cell(row=r, column=42, value=f'=SUMPRODUCT(($E$4:${dl}$4=$AN{r})*$E${tot["稼働"]}:${dl}${tot["稼働"]})')
+        ws.cell(row=r, column=43, value=f'=IFERROR($AP{r}/($AO{r}*$D${cap_row}),"")')
+        ws.cell(row=r, column=43).number_format = "0.0%"
+        ws.cell(row=r, column=44, value=f'=SUMPRODUCT(($E$4:${dl}$4=$AN{r})*$E${tot["入院"]}:${dl}${tot["入院"]})')
+        ws.cell(row=r, column=45, value=f'=SUMPRODUCT(($E$4:${dl}$4=$AN{r})*$E${tot["外泊"]}:${dl}${tot["外泊"]})')
+
+
+def sheet_ss_occupancy(wb: Workbook) -> None:
+    ws = wb.create_sheet("11_月次_SS稼働")
+    title_cell(ws, "A1", "短期入所 稼働実績（●=利用 / 予=予約 / ×=キャンセル）", 12)
+    header_row(ws, 3, ["No.", "利用者ID", "利用者名（任意）", "区分"])
+    _day_header(ws, 3)
+    dl = get_column_letter(DAY_COL0 + DAYS - 1)
+    first, rows = 5, 15
+    for i in range(rows):
+        r = first + i
+        ws.cell(row=r, column=1, value=i + 1)
+        ws.cell(row=r, column=DAY_COL0 + DAYS + 1, value=f'=COUNTIF($E{r}:${dl}{r},"●")')
+        ws.cell(row=r, column=DAY_COL0 + DAYS + 2, value=f'=COUNTIF($E{r}:${dl}{r},"×")')
+    last = first + rows - 1
+    header_row(ws, 4, ["利用回数", "キャンセル"], start_col=DAY_COL0 + DAYS + 1)
+    for c in range(DAY_COL0 + DAYS + 1, DAY_COL0 + DAYS + 3):
+        ws.column_dimensions[get_column_letter(c)].width = 10
+    set_widths(ws, {"A": 5, "B": 11, "C": 20, "D": 6})
+    box_range(ws, 3, last, 1, DAY_COL0 + DAYS + 2)
+    ws.freeze_panes = "E5"
+    dv = DataValidation(type="list", formula1='"●,予,×"', allow_blank=True)
+    ws.add_data_validation(dv)
+    dv.add(f"E{first}:{dl}{last}")
+    for r in range(first, last + 1):
+        for c in range(2, DAY_COL0 + DAYS):
+            ws.cell(row=r, column=c).fill = PatternFill("solid", fgColor=YELLOW)
+
+    tot_use, tot_cxl = last + 1, last + 2
+    for rr, label, mark in ((tot_use, "利用", "●"), (tot_cxl, "キャンセル", "×")):
+        ws.cell(row=rr, column=2, value=f"日別{label}数").font = Font(bold=True, size=9)
+        for d in range(DAYS):
+            cl = get_column_letter(DAY_COL0 + d)
+            ws.cell(row=rr, column=DAY_COL0 + d, value=f'=COUNTIF({cl}${first}:{cl}${last},"{mark}")')
+        box_range(ws, rr, rr, 2, DAY_COL0 + DAYS - 1)
+
+    bed_row = last + 4
+    ws.cell(row=bed_row, column=1, value="申請床数").font = Font(bold=True)
+    bed = ws.cell(row=bed_row, column=4, value=2)
+    bed.fill = PatternFill("solid", fgColor=YELLOW)
+    bed.border = BOX
+
+    ws.cell(row=2, column=47, value="▼作業列（週別 利用有無）").font = Font(size=8, color="808080")
+    top = _week_block(ws, 3, ["日数", "稼働回数", "稼働率", "キャンセル", "利用人数"])
+    for i, w in enumerate(WEEKS):
+        r = top + i
+        ws.cell(row=r, column=41, value=f'=COUNTIF($E$4:${dl}$4,$AN{r})')
+        ws.cell(row=r, column=42, value=f'=SUMPRODUCT(($E$4:${dl}$4=$AN{r})*$E${tot_use}:${dl}${tot_use})')
+        ws.cell(row=r, column=43, value=f'=IFERROR($AP{r}/($AO{r}*$D${bed_row}),"")')
+        ws.cell(row=r, column=43).number_format = "0.0%"
+        ws.cell(row=r, column=44, value=f'=SUMPRODUCT(($E$4:${dl}$4=$AN{r})*$E${tot_cxl}:${dl}${tot_cxl})')
+        # 利用人数＝その週に1回でも●がある利用者数（AU:AY の作業列で判定）
+        helper = get_column_letter(47 + i)
+        ws.cell(row=r, column=45, value=f"=SUM(${helper}${first}:${helper}${last})")
+        hc = ws.cell(row=3, column=47 + i, value=w)
+        hc.font = Font(size=8, color="808080")
+        ws.column_dimensions[helper].width = 7
+        for rr in range(first, last + 1):
+            ws.cell(
+                row=rr,
+                column=47 + i,
+                value=f'=IF(SUMPRODUCT(($E$4:${dl}$4=$AN{r})*($E{rr}:${dl}{rr}="●"))>0,1,0)',
+            )
+
+
+def sheet_sales_actions(wb: Workbook) -> None:
+    ws = wb.create_sheet("12_月次_営業行動")
+    title_cell(ws, "A1", "営業行動（訪問・郵送・FAX等の接点件数を日別に入力）", 12)
+    header_row(ws, 3, ["No.", "営業チャネル", "月間目標", "備考"])
+    _day_header(ws, 3)
+    dl = get_column_letter(DAY_COL0 + DAYS - 1)
+    channels = [
+        "相談支援事業所",
+        "基幹相談支援事業所",
+        "障がい福祉課、生活保護課",
+        "病棟のある病院",
+        "就労支援、生活介護、宿泊訓練",
+    ]
+    first = 5
+    for i, ch in enumerate(channels):
+        r = first + i
+        ws.cell(row=r, column=1, value=i + 1)
+        ws.cell(row=r, column=2, value=ch)
+        ws.cell(row=r, column=DAY_COL0 + DAYS + 1, value=f"=SUM($E{r}:${dl}{r})")
+    last = first + len(channels) - 1
+    total = last + 1
+    ws.cell(row=total, column=2, value="合計").font = Font(bold=True)
+    ws.cell(row=total, column=3, value=f"=SUM($C{first}:$C{last})")
+    for d in range(DAYS):
+        col = get_column_letter(DAY_COL0 + d)
+        ws.cell(row=total, column=DAY_COL0 + d, value=f"=SUM({col}{first}:{col}{last})")
+    ws.cell(row=total, column=DAY_COL0 + DAYS + 1, value=f"=SUM($E{total}:${dl}{total})")
+    header_row(ws, 4, ["月間合計"], start_col=DAY_COL0 + DAYS + 1)
+    ws.column_dimensions[get_column_letter(DAY_COL0 + DAYS + 1)].width = 11
+    set_widths(ws, {"A": 5, "B": 26, "C": 10, "D": 14})
+    box_range(ws, 3, total, 1, DAY_COL0 + DAYS + 1)
+    ws.freeze_panes = "E5"
+    for r in range(first, last + 1):
+        for c in list(range(3, 5)) + list(range(DAY_COL0, DAY_COL0 + DAYS)):
+            ws.cell(row=r, column=c).fill = PatternFill("solid", fgColor=YELLOW)
+
+    top = _week_block(ws, 3, ["接点件数"])
+    for i, w in enumerate(WEEKS):
+        r = top + i
+        ws.cell(row=r, column=41, value=f'=SUMPRODUCT(($E$4:${dl}$4=$AN{r})*($E${total}:${dl}${total}))')
+
+
+def sheet_addition_requirements(wb: Workbook) -> None:
+    ws = wb.create_sheet("13_月次_加算要件")
+    title_cell(ws, "A1", "加算要件の実績管理（夜勤職員加配・重度障害者支援体制・福祉専門職員配置）", 12)
+
+    ws["A3"] = "■夜勤職員加配加算（●=加配配置日）"
+    ws["A3"].font = Font(bold=True, color=NAVY)
+    header_row(ws, 4, ["No.", "配置単位", "対象", "備考"])
+    _day_header(ws, 4)
+    dl = get_column_letter(DAY_COL0 + DAYS - 1)
+    first = 6
+    units = ["1階部", "2階部"]
+    for i, u in enumerate(units):
+        r = first + i
+        ws.cell(row=r, column=1, value=i + 1)
+        ws.cell(row=r, column=2, value=u)
+        ws.cell(row=r, column=3, value="対象")
+        ws.cell(row=r, column=DAY_COL0 + DAYS + 1, value=f'=COUNTIF($E{r}:${dl}{r},"●")')
+    last = first + len(units) - 1
+    header_row(ws, 5, ["算定日数"], start_col=DAY_COL0 + DAYS + 1)
+    dv = DataValidation(type="list", formula1='"●,✕"', allow_blank=True)
+    ws.add_data_validation(dv)
+    dv.add(f"E{first}:{dl}{last}")
+    for r in range(first, last + 1):
+        for c in list(range(3, 5)) + list(range(DAY_COL0, DAY_COL0 + DAYS)):
+            ws.cell(row=r, column=c).fill = PatternFill("solid", fgColor=YELLOW)
+    box_range(ws, 4, last, 1, DAY_COL0 + DAYS + 1)
+
+    tot_row = last + 1
+    ws.cell(row=tot_row, column=2, value="日別算定数").font = Font(bold=True, size=9)
+    for d in range(DAYS):
+        cl = get_column_letter(DAY_COL0 + d)
+        ws.cell(row=tot_row, column=DAY_COL0 + d, value=f'=COUNTIF({cl}${first}:{cl}${last},"●")')
+    box_range(ws, tot_row, tot_row, 2, DAY_COL0 + DAYS - 1)
+
+    top = _week_block(ws, 4, ["日数", "算定日数", "取得率"])
+    for i, w in enumerate(WEEKS):
+        r = top + i
+        ws.cell(row=r, column=41, value=f'=COUNTIF($E$5:${dl}$5,$AN{r})')
+        ws.cell(row=r, column=42, value=f'=SUMPRODUCT(($E$5:${dl}$5=$AN{r})*$E${tot_row}:${dl}${tot_row})')
+        ws.cell(row=r, column=43, value=f'=IFERROR($AP{r}/($AO{r}*COUNTA($B${first}:$B${last})),"")')
+        ws.cell(row=r, column=43).number_format = "0.0%"
+
+    r0 = tot_row + 3
+    ws.cell(row=r0, column=1, value="■重度障害者支援体制加算（対象者ごとの計画・記録）").font = Font(bold=True, color=NAVY)
+    header_row(ws, r0 + 1, ["No.", "利用者ID", "利用者名（任意）", "計画作成", "記録作成", "確認日", "確認者", "備考"])
+    for i in range(10):
+        rr = r0 + 2 + i
+        ws.cell(row=rr, column=1, value=i + 1)
+        for c in range(2, 9):
+            ws.cell(row=rr, column=c).fill = PatternFill("solid", fgColor=YELLOW)
+        ws.cell(row=rr, column=6).number_format = "yyyy/mm/dd"
+    dv2 = DataValidation(type="list", formula1='"〇,✕,対象外"', allow_blank=True)
+    ws.add_data_validation(dv2)
+    dv2.add(f"D{r0 + 2}:E{r0 + 11}")
+    box_range(ws, r0 + 1, r0 + 11, 1, 8)
+    ws.cell(row=r0 + 13, column=1, value="判定：計画・記録がすべて〇なら算定可").font = Font(size=9, color="808080")
+    ws.cell(row=r0 + 13, column=4, value=f'=IF(COUNTIF($D{r0 + 2}:$E{r0 + 11},"✕")>0,"要対応","問題なし")')
+
+    r1 = r0 + 15
+    ws.cell(row=r1, column=1, value="■福祉専門職員配置等加算").font = Font(bold=True, color=NAVY)
+    header_row(ws, r1 + 1, ["No.", "職員名", "常勤/非常勤", "社福", "介福", "精保", "公認心理師", "勤続3年以上"])
+    for i in range(20):
+        rr = r1 + 2 + i
+        ws.cell(row=rr, column=1, value=i + 1)
+        for c in range(2, 9):
+            ws.cell(row=rr, column=c).fill = PatternFill("solid", fgColor=YELLOW)
+    box_range(ws, r1 + 1, r1 + 21, 1, 8)
+    dv3 = DataValidation(type="list", formula1='"常勤,非常勤"', allow_blank=True)
+    dv4 = DataValidation(type="list", formula1='"〇"', allow_blank=True)
+    ws.add_data_validation(dv3)
+    ws.add_data_validation(dv4)
+    dv3.add(f"C{r1 + 2}:C{r1 + 21}")
+    dv4.add(f"D{r1 + 2}:H{r1 + 21}")
+    rj = r1 + 23
+    ws.cell(row=rj, column=1, value="常勤数").font = Font(bold=True)
+    ws.cell(row=rj, column=2, value=f'=COUNTIF($C{r1 + 2}:$C{r1 + 21},"常勤")')
+    ws.cell(row=rj + 1, column=1, value="常勤比率").font = Font(bold=True)
+    ws.cell(row=rj + 1, column=2, value=f'=IFERROR($B{rj}/COUNTA($B{r1 + 2}:$B{r1 + 21}),"")')
+    ws.cell(row=rj + 1, column=2).number_format = "0.0%"
+    # 有資格判定は作業列 I（1人1行）で持ち、比率はその合計で出す
+    ws.cell(row=r1 + 1, column=9, value="有資格").font = Font(bold=True, size=9)
+    for i in range(20):
+        rr = r1 + 2 + i
+        ws.cell(row=rr, column=9, value=f'=IF($B{rr}="","",IF(COUNTIF($D{rr}:$G{rr},"〇")>0,1,0))')
+    ws.cell(row=rj + 2, column=1, value="有資格者比率（Ⅰ要件35%）").font = Font(bold=True)
+    ws.cell(
+        row=rj + 2, column=2,
+        value=f'=IFERROR(SUM($I{r1 + 2}:$I{r1 + 21})/COUNTA($B{r1 + 2}:$B{r1 + 21}),"")',
+    )
+    ws.cell(row=rj + 2, column=2).number_format = "0.0%"
+    set_widths(ws, {"A": 5, "B": 18, "C": 12, "D": 10, "E": 8, "F": 8, "G": 12, "H": 12})
+
+
+def sheet_pipeline(wb: Workbook) -> int:
+    ws = wb.create_sheet("14_案件管理台帳")
+    headers = [
+        "案件ID", "対象施設", "kintone名/イニシャル", "希望種別", "区分", "相談元",
+        "発掘日", "見学日", "体験日", "実調日", "契約日", "入居/利用開始日",
+        "ステータス", "次回追客日", "担当者", "停滞日数", "メモ",
+    ]
+    header_row(ws, 1, headers)
+    ws.row_dimensions[1].height = 32
+    rows = 60
+    for i in range(2, rows + 2):
+        ws.cell(row=i, column=1, value=f'=IF($C{i}="","","C"&TEXT(ROW()-1,"000"))')
+        ws.cell(row=i, column=2, value=f'=IF($C{i}="","",設定対象施設)')
+        for c in range(7, 13):
+            ws.cell(row=i, column=c).number_format = "yyyy/mm/dd"
+        ws.cell(row=i, column=14).number_format = "yyyy/mm/dd"
+        ws.cell(
+            row=i, column=16,
+            value=f'=IF($C{i}="","",IF($M{i}="入居","—",TODAY()-MAX($G{i}:$L{i})))',
+        )
+    last = rows + 1
+    set_widths(
+        ws,
+        {"A": 9, "B": 24, "C": 20, "D": 10, "E": 6, "F": 14, "G": 11, "H": 11, "I": 11,
+         "J": 11, "K": 11, "L": 14, "M": 12, "N": 12, "O": 16, "P": 10, "Q": 28},
+    )
+    box_range(ws, 2, last, 1, 17)
+    ws.freeze_panes = "C2"
+    ws.auto_filter.ref = f"A1:Q{last}"
+    for col in list("CDEF") + list("GHIJKL") + ["M", "N", "O", "Q"]:
+        for r in range(2, last + 1):
+            ws[f"{col}{r}"].fill = PatternFill("solid", fgColor=YELLOW)
+    dvs = [
+        (DataValidation(type="list", formula1='"SS,入居,将来参考,入居待機"', allow_blank=True), f"D2:D{last}"),
+        (DataValidation(type="list", formula1='"相談支援,基幹相談,病院,行政,家族,本人,他事業所"', allow_blank=True), f"F2:F{last}"),
+        (DataValidation(type="list", formula1='"発掘,追客,見学,体験,実調,契約,入居,見送り"', allow_blank=True), f"M2:M{last}"),
+        (DataValidation(type="list", formula1="担当者リスト", allow_blank=True), f"O2:O{last}"),
+    ]
+    for dv, ref in dvs:
+        ws.add_data_validation(dv)
+        dv.add(ref)
+    ws.conditional_formatting.add(
+        f"P2:P{last}",
+        CellIsRule(operator="greaterThan", formula=["14"], fill=PatternFill("solid", fgColor=RED)),
+    )
+    ws.cell(row=last + 2, column=1, value="※ 停滞日数が14日を超えた案件は赤表示。週次で追客日を再設定してください。").font = Font(
+        size=9, color="808080"
+    )
+    return last
+
+
 def build(facility_master: Path, out: Path) -> None:
     facilities = read_facilities(facility_master)
     wb = Workbook()
@@ -649,11 +1076,17 @@ def build(facility_master: Path, out: Path) -> None:
     sheet_settings(wb, fac_last)
     issue_last = sheet_issues(wb, fac_last)
     kpi_last = sheet_kpi_log(wb)
+    sheet_gh_occupancy(wb)
+    sheet_ss_occupancy(wb)
+    sheet_sales_actions(wb)
+    sheet_addition_requirements(wb)
+    sheet_pipeline(wb)
     sheet_dashboard(wb, kpi_last, issue_last, owner_last)
     sheet_proposals(wb)
     sheet_rules(wb)
     sheet_lists(wb)
     add_defined_names(wb, fac_last, owner_last)
+    wb._sheets.sort(key=lambda w: w.title)
 
     wb["03_設定"]["B5"] = facilities[0]["施設名"]
     out.parent.mkdir(parents=True, exist_ok=True)
