@@ -144,6 +144,8 @@ def sheet_readme(wb: Workbook) -> None:
         ("施設・担当者の選択", "プルダウンは 01_施設マスタ / 02_担当者マスタ を参照しています。施設異動や担当変更はマスタ側だけを直せば全シートに反映されます。"),
         ("週の定義", "03_設定 の「第1週の基準日」を入れると第2〜第5週は自動採番されます（旧シートの『+365日』方式は廃止）。"),
         ("横展開", "05_週次KPIログ は施設名を持つ縦持ちデータなので、40施設分を1ファイルに束ねてもピボットで集計できます。"),
+        ("継続運用", "月ごとにシートを増やしません。月末に締め処理を行うと、当月ブックが実績として保管され、週次KPIは 15_KPI累積ログ に値で積み上がり、日別入力欄が空の翌月ブックが作られます。"),
+        ("過去の参照", "月をまたいだ推移は 16_年間推移 で見ます。個別の日別実績は、締めのときに保管された『〇〇_実績.xlsx』を開いてください。"),
         ("改善の根拠", "07_改善提案一覧 に、旧シートで検出した具体的な不具合と改善内容を記載しています。"),
     ]
     r = 5
@@ -608,6 +610,10 @@ def sheet_proposals(wb: Workbook) -> None:
          "行の挿入・削除でブロックがずれる。第5週がある月に対応できない。印刷・レビューがしづらい。",
          "縦持ちのテーブルに変更し、週は行方向へ増やす。",
          "04_課題管理表・05_週次KPIログはいずれも縦持ちテーブル。第5週まで標準対応。", "高"),
+        ("構造", "継続運用の方法が『月シートを1枚ずつ増やす』こと。実ファイルでは22枚まで増え、命名も不統一になっている。",
+         "シートが増えるほどブックが重くなり、集計式（12か月固定のHLOOKUP表）が追従できない。年度をまたぐと参照が壊れ、過去の修正が現在の集計に波及する。",
+         "月ごとにシートを増やさず、月末に締めて『実績ブックの保管＋累積ログへの追記＋翌月ブックの生成』に分ける。",
+         "15_KPI累積ログ（値で保管）＋16_年間推移＋tools/pdca/close_month.py（締め処理）。ブックの枚数は月に関係なく一定。", "高"),
         ("運用", "対応方針・所感が1セルに改行で詰め込まれた長文（【営業行動】…▶2/25 追客 等）。",
          "目標値と実績が数式で取り出せず、達成／未達の自動判定ができない。読む人によって解釈が変わる。",
          "『数値で置く欄』と『文章で残す欄』を分離する。",
@@ -679,6 +685,8 @@ def sheet_rules(wb: Workbook) -> None:
         ("週次（火）", "担当AM＋管理者", "04_課題管理表でPlan/Doを更新し、期限を再設定", "遅延判定が『遅延』の課題はその場で期限を引き直す"),
         ("週次（火）", "担当AM", "Check（未達要因）とAct（次週アクション）を1行で記載", "要因は事実、アクションは動詞で書く"),
         ("月次（月初）", "エリア長", "40施設分のログを連結し担当AM別に確認", "遅延件数が2件以上のAMはヒアリング対象"),
+        ("月次（月末）", "担当AM", "Excelで保存後、月締め処理を実行して翌月ブックを作成", "締める前に必ずExcelで保存する（数式の値が確定するため）"),
+        ("月次（翌月初）", "担当AM", "16_年間推移で前月までの推移を確認", "2か月連続で未達のKPIは対応方針を作り直す"),
         ("随時", "本部", "01_施設マスタの担当変更・新規開設を反映", "マスタ更新は本部のみ。現場は編集しない"),
     ]
     for i, r in enumerate(rows, start=5):
@@ -1065,6 +1073,88 @@ def sheet_pipeline(wb: Workbook) -> int:
     return last
 
 
+# ------------------------------------------------------- 累積ログ／年間推移
+
+ARCHIVE_LAST = 2000  # 15_KPI累積ログの想定最終行（約4年分）
+
+ARCHIVE_HEADERS = [
+    "記録日", "対象施設", "年", "月", "週", "カテゴリ", "指標名", "単位",
+    "週次目標", "実績", "達成率", "差異", "担当者", "未達要因（Check）",
+    "次週アクション（Act）", "締め処理日",
+]
+
+
+def sheet_archive(wb: Workbook) -> None:
+    ws = wb.create_sheet("15_KPI累積ログ")
+    header_row(ws, 1, ARCHIVE_HEADERS)
+    ws.row_dimensions[1].height = 32
+    set_widths(
+        ws,
+        {"A": 12, "B": 26, "C": 7, "D": 7, "E": 9, "F": 14, "G": 20, "H": 7,
+         "I": 11, "J": 11, "K": 10, "L": 9, "M": 16, "N": 30, "O": 30, "P": 12},
+    )
+    ws.freeze_panes = "C2"
+    ws.auto_filter.ref = f"A1:P{ARCHIVE_LAST}"
+    ws.cell(row=3, column=18, value=(
+        "このシートは月締め処理（tools/pdca/close_month.py）で自動追記される保管庫です。"
+    )).font = Font(bold=True, color=NAVY)
+    ws.cell(row=4, column=18, value=(
+        "・数式ではなく『値』が入ります。対象月を切り替えても過去の実績が消えません。"
+    )).font = Font(size=9, color="808080")
+    ws.cell(row=5, column=18, value=(
+        "・手で編集しないでください。修正が必要な場合は該当行を直し、締め日を入れ直します。"
+    )).font = Font(size=9, color="808080")
+    ws.cell(row=6, column=18, value=(
+        "・40施設分をこのシートに縦に積めば、そのままピボットで全社集計できます。"
+    )).font = Font(size=9, color="808080")
+
+
+def sheet_yearly_trend(wb: Workbook) -> None:
+    ws = wb.create_sheet("16_年間推移")
+    title_cell(ws, "B2", "年間推移（15_KPI累積ログの集計）", 14)
+    ws["B3"] = '=設定対象年&"年度／"&設定対象施設'
+    ws["B3"].font = Font(bold=True, color=BLUE, size=12)
+    ws["B4"] = "※ 月締めが済んだ月だけ数値が入ります。率は週平均、件数は月合計です。"
+    ws["B4"].font = Font(size=9, color="808080")
+
+    months = [4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3]
+    header_row(ws, 6, ["指標名", "単位"] + [f"{m}月" for m in months] + ["年度計/平均"], start_col=2)
+    rng_val = f"'15_KPI累積ログ'!$J$2:$J${ARCHIVE_LAST}"
+    rng_kpi = f"'15_KPI累積ログ'!$G$2:$G${ARCHIVE_LAST}"
+    rng_year = f"'15_KPI累積ログ'!$C$2:$C${ARCHIVE_LAST}"
+    rng_month = f"'15_KPI累積ログ'!$D$2:$D${ARCHIVE_LAST}"
+
+    r = 7
+    for cat, kpi, unit in STANDARD_KPIS:
+        ws.cell(row=r, column=2, value=kpi)
+        ws.cell(row=r, column=3, value=unit)
+        agg = "AVERAGEIFS" if unit == "%" else "SUMIFS"
+        for i, m in enumerate(months):
+            col = 4 + i
+            year = "設定対象年" if m >= 4 else "設定対象年+1"
+            ws.cell(
+                row=r, column=col,
+                value=(
+                    f'=IFERROR({agg}({rng_val},{rng_kpi},$B{r},'
+                    f'{rng_year},{year},{rng_month},{m}),"")'
+                ),
+            )
+            if unit == "%":
+                ws.cell(row=r, column=col).number_format = "0.0%"
+        first_c, last_c = get_column_letter(4), get_column_letter(15)
+        fn = "AVERAGE" if unit == "%" else "SUM"
+        ws.cell(row=r, column=16, value=f'=IFERROR({fn}(${first_c}{r}:${last_c}{r}),"")')
+        if unit == "%":
+            ws.cell(row=r, column=16).number_format = "0.0%"
+        r += 1
+    last = r - 1
+    box_range(ws, 6, last, 2, 16)
+    set_widths(ws, {"A": 3, "B": 20, "C": 6, "P": 13})
+    for i in range(12):
+        ws.column_dimensions[get_column_letter(4 + i)].width = 9
+    ws.freeze_panes = "D7"
+
+
 def build(facility_master: Path, out: Path) -> None:
     facilities = read_facilities(facility_master)
     wb = Workbook()
@@ -1081,6 +1171,8 @@ def build(facility_master: Path, out: Path) -> None:
     sheet_sales_actions(wb)
     sheet_addition_requirements(wb)
     sheet_pipeline(wb)
+    sheet_archive(wb)
+    sheet_yearly_trend(wb)
     sheet_dashboard(wb, kpi_last, issue_last, owner_last)
     sheet_proposals(wb)
     sheet_rules(wb)
